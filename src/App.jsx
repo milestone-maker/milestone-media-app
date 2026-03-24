@@ -2,6 +2,19 @@ import { useState, useEffect } from "react";
 
 const NAV = ["Showcase", "Book", "My Media", "Analytics"];
 
+const RELA_PHOTOS = {
+  "2410prosperitydr": [
+    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-001_248.jpg",
+    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-002_276.jpg",
+    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-003_221.jpg",
+    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-004_311.jpg",
+    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-005_249.jpg",
+    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-006_822.jpg",
+    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-007_231.jpg",
+    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-008_237.jpg",
+  ],
+};
+
 const LISTINGS = [
   {
     id: 1,
@@ -11,7 +24,8 @@ const LISTINGS = [
     beds: 4, baths: 3.5, sqft: "3,840",
     package: "Luxury",
     status: "Live",
-    img: "https://images.unsplash.com/photo-1613490493576-7fde63acd811?w=800&q=80",
+    img: RELA_PHOTOS["2410prosperitydr"][0],
+    gallery: RELA_PHOTOS["2410prosperitydr"],
     views: 1482, shares: 64, leads: 12,
     media: ["Photos", "Drone", "3D Tour", "Film", "Floor Plan", "Microsite"],
     relaSite: "https://sites.listvt.com/2410prosperitydr",
@@ -25,6 +39,7 @@ const LISTINGS = [
     package: "Signature",
     status: "In Production",
     img: "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&q=80",
+    gallery: null,
     views: 741, shares: 28, leads: 5,
     media: ["Photos", "Drone", "3D Tour", "Floor Plan"],
     relaSite: null,
@@ -38,6 +53,7 @@ const LISTINGS = [
     package: "Luxury",
     status: "Live",
     img: "https://images.unsplash.com/photo-1600585154526-990dced4db0d?w=800&q=80",
+    gallery: null,
     views: 2941, shares: 118, leads: 23,
     media: ["Photos", "Drone", "3D Tour", "Film", "Floor Plan", "Microsite", "Twilight"],
     relaSite: null,
@@ -113,14 +129,16 @@ function PackageBadge({ pkg }) {
 
 function ShowcaseView({ onBook }) {
   const [active, setActive] = useState(0);
+  const [heroPhoto, setHeroPhoto] = useState(0);
   const listing = LISTINGS[active];
   const [mediaHover, setMediaHover] = useState(null);
+  const photos = listing.gallery || [listing.img];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
       {/* Hero Listing */}
       <div style={{ position: "relative", borderRadius: 16, overflow: "hidden", height: 420 }}>
-        <img src={listing.img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <img src={photos[heroPhoto] || listing.img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", transition: "opacity 0.3s" }} />
         <div style={{
           position: "absolute", inset: 0,
           background: "linear-gradient(to top, rgba(8,18,40,0.95) 0%, rgba(8,18,40,0.4) 60%, transparent 100%)",
@@ -130,6 +148,30 @@ function ShowcaseView({ onBook }) {
           <PackageBadge pkg={listing.package} />
           <StatusBadge status={listing.status} />
         </div>
+        {/* Photo nav arrows */}
+        {photos.length > 1 && (
+          <>
+            <div onClick={() => setHeroPhoto(p => p > 0 ? p - 1 : photos.length - 1)} style={{
+              position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)",
+              width: 36, height: 36, borderRadius: "50%", background: "rgba(0,0,0,0.5)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#fff", fontSize: 18, cursor: "pointer", backdropFilter: "blur(4px)",
+            }}>‹</div>
+            <div onClick={() => setHeroPhoto(p => p < photos.length - 1 ? p + 1 : 0)} style={{
+              position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
+              width: 36, height: 36, borderRadius: "50%", background: "rgba(0,0,0,0.5)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: "#fff", fontSize: 18, cursor: "pointer", backdropFilter: "blur(4px)",
+            }}>›</div>
+            {/* Photo counter */}
+            <div style={{
+              position: "absolute", top: 20, left: "50%", transform: "translateX(-50%)",
+              background: "rgba(0,0,0,0.5)", borderRadius: 20, padding: "4px 12px",
+              fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.7)",
+              backdropFilter: "blur(4px)", letterSpacing: "0.05em",
+            }}>{heroPhoto + 1} / {photos.length}</div>
+          </>
+        )}
         {/* Bottom info */}
         <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "28px 28px 24px" }}>
           <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, color: "#fff", fontWeight: 600, lineHeight: 1.1, marginBottom: 6 }}>
@@ -145,18 +187,30 @@ function ShowcaseView({ onBook }) {
             </span>
           </div>
         </div>
-        {/* Thumbnail selector */}
-        <div style={{ position: "absolute", right: 20, top: "50%", transform: "translateY(-50%)", display: "flex", flexDirection: "column", gap: 8 }}>
-          {LISTINGS.map((l, i) => (
-            <div key={l.id} onClick={() => setActive(i)} style={{
-              width: 52, height: 40, borderRadius: 6, overflow: "hidden", cursor: "pointer",
-              border: i === active ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.2)",
-              transition: "border-color 0.2s",
-            }}>
-              <img src={l.img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            </div>
-          ))}
-        </div>
+        {/* Thumbnail strip */}
+        {photos.length > 1 && (
+          <div style={{
+            position: "absolute", bottom: 110, left: 20, right: 20,
+            display: "flex", gap: 6, justifyContent: "center",
+          }}>
+            {photos.slice(0, 6).map((p, i) => (
+              <div key={i} onClick={() => setHeroPhoto(i)} style={{
+                width: 44, height: 32, borderRadius: 4, overflow: "hidden", cursor: "pointer",
+                border: i === heroPhoto ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.25)",
+                opacity: i === heroPhoto ? 1 : 0.7, transition: "all 0.2s",
+              }}>
+                <img src={p} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </div>
+            ))}
+            {photos.length > 6 && (
+              <div style={{
+                width: 44, height: 32, borderRadius: 4, background: "rgba(0,0,0,0.6)",
+                border: "2px solid rgba(255,255,255,0.25)", display: "flex", alignItems: "center", justifyContent: "center",
+                fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.6)",
+              }}>+{photos.length - 6}</div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Media types */}
