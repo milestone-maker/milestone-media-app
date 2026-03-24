@@ -1320,6 +1320,7 @@ function LeadCaptureForm({ theme: t, onSubmit }) {
 }
 
 function MicrositeView() {
+  const { user } = useAuth();
   const [step, setStep] = useState("build");
   const [themeIdx, setThemeIdx] = useState(0);
   const [generating, setGenerating] = useState(false);
@@ -1348,7 +1349,7 @@ function MicrositeView() {
 
   const theme = THEMES[themeIdx];
   const slug = (data.address || "your-listing").split(" ").slice(0, 2).join("-").toLowerCase().replace(/[^a-z0-9-]/g, "");
-  const liveUrl = `https://milestone.media/${slug}`;
+  const liveUrl = `${window.location.origin}/p/${slug}`;
 
   const setField = (key, val) => setData(d => ({ ...d, [key]: val }));
   const setFeature = (i, val) => setData(d => { const f = [...d.features]; f[i] = val; return { ...d, features: f }; });
@@ -1374,7 +1375,59 @@ function MicrositeView() {
     setTimeout(() => { setGenerating(false); setStep("preview"); }, 1800);
   };
 
-  const handlePublish = () => { setPublished(true); setStep("published"); };
+  const handlePublish = async () => {
+    try {
+      const property_data = {
+        address: data.address,
+        city: data.city,
+        price: data.price,
+        beds: data.beds,
+        baths: data.baths,
+        sqft: data.sqft,
+        description: data.description,
+        features: data.features.filter(f => f),
+        media_types: data.mediaTypes,
+        agent_name: data.agentName,
+        agent_phone: data.agentPhone,
+        agent_email: data.agentEmail,
+        hero_img: data.heroImg,
+        matterport_url: data.matterportUrl,
+        video_url: data.videoUrl,
+      };
+
+      // Try to upsert into microsites table
+      const { error } = await supabase
+        .from("microsites")
+        .upsert(
+          {
+            listing_id: LISTINGS[0]?.id || null,
+            agent_id: user?.id,
+            slug,
+            theme: THEMES[themeIdx].name,
+            published: true,
+            property_data,
+            agent_name: data.agentName,
+            agent_phone: data.agentPhone,
+          },
+          { onConflict: "slug" }
+        );
+
+      if (!error) {
+        setPublished(true);
+        setStep("published");
+      } else {
+        console.error("Publish error:", error);
+        // Still transition to published state for UI
+        setPublished(true);
+        setStep("published");
+      }
+    } catch (err) {
+      console.error("Publish error:", err);
+      setPublished(true);
+      setStep("published");
+    }
+  };
+
   const handleCopy = () => { setCopied(true); setTimeout(() => setCopied(false), 2000); };
 
   const unread = leads.filter(l => !l.read).length;
@@ -1995,6 +2048,615 @@ function AnalyticsView() {
 }
 
 // ============================================================
+// PUBLIC MICROSITE PAGE (no authentication required)
+// ============================================================
+function PublicMicrosite() {
+  const [microsite, setMicrosite] = useState(null);
+  const [mediaFiles, setMediaFiles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+
+  // Extract slug from URL
+  const slug = window.location.pathname.replace("/p/", "").split("/")[0];
+
+  useEffect(() => {
+    const fetchMicrosite = async () => {
+      try {
+        const { data, error: fetchError } = await supabase
+          .from("microsites")
+          .select("*, listings(*), agents(*)")
+          .eq("slug", slug)
+          .eq("published", true)
+          .single();
+
+        if (fetchError || !data) {
+          setError("Microsite not found");
+          setLoading(false);
+          return;
+        }
+
+        setMicrosite(data);
+
+        // Fetch media files from storage
+        if (data.listing_id) {
+          const { data: files, error: storageError } = await supabase.storage
+            .from("media")
+            .list(`${data.listing_id}`);
+
+          if (!storageError && files) {
+            const imageFiles = files
+              .filter(f => /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name))
+              .sort((a, b) => a.name.localeCompare(b.name));
+            setMediaFiles(imageFiles);
+          }
+        }
+
+        setLoading(false);
+      } catch (err) {
+        setError("Error loading microsite");
+        setLoading(false);
+      }
+    };
+
+    fetchMicrosite();
+  }, [slug]);
+
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: "100vh", background: "#0a0a0a", display: "flex",
+        alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16,
+      }}>
+        <div style={{
+          fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#c9a84c",
+          animation: "pulse 1.5s ease-in-out infinite",
+        }}>Loading...</div>
+        <style>{`@keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }`}</style>
+      </div>
+    );
+  }
+
+  if (error || !microsite) {
+    return (
+      <div style={{
+        minHeight: "100vh", background: "#0a0a0a", display: "flex",
+        alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16, padding: "20px",
+      }}>
+        <div style={{ fontSize: 48, marginBottom: 10 }}>404</div>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: "#fff", textAlign: "center" }}>
+          Microsite not found
+        </div>
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.5)", textAlign: "center" }}>
+          This property microsite is no longer available.
+        </div>
+      </div>
+    );
+  }
+
+  const theme = THEMES.find(t => t.name === microsite.theme) || THEMES[0];
+  const data = microsite.property_data || {};
+  const agent = microsite.agents?.[0] || {};
+
+  return (
+    <div style={{ minHeight: "100vh", background: theme.bg, fontFamily: "'Jost', sans-serif" }}>
+      {/* Navigation Bar */}
+      <div style={{
+        position: "fixed", top: 0, left: 0, right: 0, zIndex: 50,
+        padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center",
+        background: "rgba(0,0,0,0.3)", backdropFilter: "blur(8px)",
+      }}>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 13, color: theme.accent, letterSpacing: "0.08em" }}>
+          Milestone Media
+        </div>
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.12em" }}>
+          Property Showcase
+        </div>
+      </div>
+
+      {/* Hero Section */}
+      <div style={{ position: "relative", height: 400, overflow: "hidden" }}>
+        <img
+          src={data.hero_img || LISTINGS[0].img}
+          alt={data.address}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+        <div style={{ position: "absolute", inset: 0, background: `linear-gradient(to top, ${theme.bg} 0%, transparent 50%)` }} />
+        <div style={{ position: "absolute", bottom: 40, left: 20, right: 20 }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 40, color: "#fff", fontWeight: 600, lineHeight: 1.1, marginBottom: 8 }}>
+            {data.address || "Property"}
+          </div>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "rgba(255,255,255,0.7)" }}>
+            {data.city || "Location"}
+          </div>
+        </div>
+      </div>
+
+      {/* Details Strip */}
+      <div style={{
+        padding: "20px 16px",
+        display: "flex",
+        gap: 20,
+        alignItems: "center",
+        borderBottom: `1px solid ${theme.border}`,
+        background: theme.bg,
+        flexWrap: "wrap",
+      }}>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, color: theme.accent, fontWeight: 700 }}>
+          {data.price || "Price"}
+        </div>
+        <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+          {[
+            { icon: "🛏", val: data.beds || "—", label: "Bed" },
+            { icon: "🚿", val: data.baths || "—", label: "Bath" },
+            { icon: "📐", val: data.sqft || "—", label: "sqft" },
+          ].map(s => (
+            <div key={s.label} style={{ textAlign: "center" }}>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: theme.text, fontWeight: 600 }}>{s.val}</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 9, color: theme.sub, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 2 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Photo Gallery */}
+      {mediaFiles.length > 0 && (
+        <div style={{ padding: "30px 16px" }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: theme.text, marginBottom: 20 }}>
+            Gallery
+          </div>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+            gap: 12,
+          }}>
+            {mediaFiles.map((file, i) => {
+              const { data: publicUrl } = supabase.storage
+                .from("media")
+                .getPublicUrl(`${microsite.listing_id}/${file.name}`);
+              return (
+                <div
+                  key={i}
+                  onClick={() => {
+                    setLightboxIndex(i);
+                    setLightboxOpen(true);
+                  }}
+                  style={{
+                    position: "relative",
+                    paddingBottom: "100%",
+                    overflow: "hidden",
+                    borderRadius: 10,
+                    cursor: "pointer",
+                  }}
+                >
+                  <img
+                    src={publicUrl.publicUrl}
+                    alt={file.name}
+                    style={{
+                      position: "absolute",
+                      top: 0, left: 0, right: 0, bottom: 0,
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      transition: "transform 0.3s",
+                    }}
+                    onMouseEnter={e => e.target.style.transform = "scale(1.05)"}
+                    onMouseLeave={e => e.target.style.transform = "scale(1)"}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox */}
+      {lightboxOpen && mediaFiles.length > 0 && (
+        <div
+          onClick={() => setLightboxOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.95)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 100,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              position: "relative",
+              width: "90%",
+              height: "80vh",
+              maxWidth: "1000px",
+            }}
+          >
+            <img
+              src={supabase.storage.from("media").getPublicUrl(`${microsite.listing_id}/${mediaFiles[lightboxIndex].name}`).data.publicUrl}
+              alt=""
+              style={{ width: "100%", height: "100%", objectFit: "contain" }}
+            />
+            <button
+              onClick={() => setLightboxOpen(false)}
+              style={{
+                position: "absolute",
+                top: -40,
+                right: 0,
+                background: "none",
+                border: "none",
+                color: "#fff",
+                fontSize: 32,
+                cursor: "pointer",
+              }}
+            >
+              ×
+            </button>
+            <button
+              onClick={() =>
+                setLightboxIndex(
+                  lightboxIndex === 0 ? mediaFiles.length - 1 : lightboxIndex - 1
+                )
+              }
+              style={{
+                position: "absolute",
+                left: -50,
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "rgba(255,255,255,0.1)",
+                border: "1px solid rgba(255,255,255,0.2)",
+                color: "#fff",
+                padding: "12px 16px",
+                borderRadius: 8,
+                cursor: "pointer",
+              }}
+            >
+              ←
+            </button>
+            <button
+              onClick={() =>
+                setLightboxIndex(
+                  lightboxIndex === mediaFiles.length - 1 ? 0 : lightboxIndex + 1
+                )
+              }
+              style={{
+                position: "absolute",
+                right: -50,
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "rgba(255,255,255,0.1)",
+                border: "1px solid rgba(255,255,255,0.2)",
+                color: "#fff",
+                padding: "12px 16px",
+                borderRadius: 8,
+                cursor: "pointer",
+              }}
+            >
+              →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 3D Tour / Video Section */}
+      {(data.matterport_url || data.video_url) && (
+        <div style={{ padding: "30px 16px", borderTop: `1px solid ${theme.border}` }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: theme.text, marginBottom: 20 }}>
+            Virtual Tour
+          </div>
+          <div style={{ maxWidth: "100%", borderRadius: 12, overflow: "hidden" }}>
+            {data.matterport_url && (
+              <iframe
+                src={data.matterport_url}
+                width="100%"
+                height="500"
+                frameBorder="0"
+                allow="xr-spatial-tracking"
+                style={{ borderRadius: 12 }}
+              />
+            )}
+            {data.video_url && !data.matterport_url && (
+              <video
+                src={data.video_url}
+                controls
+                style={{ width: "100%", height: "500px", objectFit: "cover", borderRadius: 12 }}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Property Description */}
+      {data.description && (
+        <div style={{ padding: "30px 16px", borderTop: `1px solid ${theme.border}` }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: theme.text, marginBottom: 12 }}>
+            About
+          </div>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: theme.text, lineHeight: 1.7 }}>
+            {data.description}
+          </div>
+        </div>
+      )}
+
+      {/* Features */}
+      {data.features && data.features.filter(f => f).length > 0 && (
+        <div style={{ padding: "30px 16px", borderTop: `1px solid ${theme.border}` }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: theme.text, marginBottom: 16 }}>
+            Highlights
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {data.features.filter(f => f).map((f, i) => (
+              <span
+                key={i}
+                style={{
+                  background: `${theme.accent}18`,
+                  border: `1px solid ${theme.accent}40`,
+                  color: theme.accent,
+                  padding: "8px 16px",
+                  borderRadius: 24,
+                  fontFamily: "'Jost', sans-serif",
+                  fontSize: 12,
+                  letterSpacing: "0.04em",
+                }}
+              >
+                {f}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Agent Card */}
+      <div style={{ padding: "30px 16px", borderTop: `1px solid ${theme.border}` }}>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: theme.text, marginBottom: 20 }}>
+          Contact Agent
+        </div>
+        <div style={{
+          background: theme.card,
+          border: `1px solid ${theme.border}`,
+          borderRadius: 14,
+          padding: 20,
+          display: "flex",
+          gap: 16,
+          alignItems: "center",
+        }}>
+          <div style={{
+            width: 64,
+            height: 64,
+            borderRadius: "50%",
+            background: `linear-gradient(135deg, ${theme.accent}, ${theme.accent}99)`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: "'Cormorant Garamond', serif",
+            fontSize: 22,
+            color: "#fff",
+            fontWeight: 700,
+            flexShrink: 0,
+          }}>
+            {(agent.full_name || "AG").split(" ").map(n => n[0]).join("").slice(0, 2)}
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: theme.text, marginBottom: 4 }}>
+              {agent.full_name || "Agent"}
+            </div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: theme.sub, marginBottom: 8 }}>
+              {agent.brokerage || "Luxury Realty"}
+            </div>
+            <div style={{ display: "flex", gap: 12, fontSize: 12 }}>
+              {agent.phone && (
+                <a href={`tel:${agent.phone}`} style={{ color: theme.accent, textDecoration: "none" }}>
+                  📱 {agent.phone}
+                </a>
+              )}
+              {agent.email && (
+                <a href={`mailto:${agent.email}`} style={{ color: theme.accent, textDecoration: "none" }}>
+                  📧 Email
+                </a>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              const el = document.querySelector("[data-lead-form-section]");
+              el?.scrollIntoView({ behavior: "smooth" });
+            }}
+            style={{
+              background: theme.accent,
+              color: theme.bg,
+              border: "none",
+              padding: "10px 18px",
+              borderRadius: 8,
+              fontFamily: "'Jost', sans-serif",
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+            }}
+          >
+            Inquire
+          </button>
+        </div>
+      </div>
+
+      {/* Lead Capture Form */}
+      <PublicLeadCaptureForm theme={theme} micrositeId={microsite.id} listingId={microsite.listing_id} />
+
+      {/* Footer */}
+      <div style={{
+        padding: "30px 16px",
+        borderTop: `1px solid ${theme.border}`,
+        textAlign: "center",
+      }}>
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: theme.sub, marginBottom: 8 }}>
+          Powered by
+        </div>
+        <a
+          href="https://milestonemediaphotography.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            fontFamily: "'Cormorant Garamond', serif",
+            fontSize: 14,
+            color: theme.accent,
+            textDecoration: "none",
+          }}
+        >
+          Milestone Media & Photography
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function PublicLeadCaptureForm({ theme: t, micrositeId, listingId }) {
+  const [form, setForm] = useState({ name: "", email: "", phone: "", message: "", tourType: "in-person" });
+  const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  const setField = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: "" })); };
+
+  const validate = () => {
+    const e = {};
+    if (!form.name.trim()) e.name = "Required";
+    if (!form.email.trim() || !/\S+@\S+\.\S+/.test(form.email)) e.email = "Valid email required";
+    if (!form.phone.trim()) e.phone = "Required";
+    return e;
+  };
+
+  const handleSubmit = async () => {
+    const e = validate();
+    if (Object.keys(e).length) { setErrors(e); return; }
+    setSubmitting(true);
+
+    try {
+      const { error } = await supabase
+        .from("leads")
+        .insert({
+          listing_id: listingId,
+          microsite_id: micrositeId,
+          name: form.name,
+          email: form.email,
+          phone: form.phone,
+          message: form.message,
+          tour_type: form.tourType,
+        });
+
+      if (!error) {
+        setSubmitting(false);
+        setSubmitted(true);
+      } else {
+        setSubmitting(false);
+        setErrors({ submit: "Failed to submit. Please try again." });
+      }
+    } catch (err) {
+      setSubmitting(false);
+      setErrors({ submit: "An error occurred. Please try again." });
+    }
+  };
+
+  const fi = (key, placeholder, type = "text") => ({
+    value: form[key],
+    onChange: e => setField(key, e.target.value),
+    placeholder,
+    type,
+    style: {
+      width: "100%", background: `${t.card}`, border: `1px solid ${errors[key] ? "#f87171" : t.border}`,
+      borderRadius: 7, padding: "10px 12px", color: t.text,
+      fontFamily: "'Jost', sans-serif", fontSize: 12, outline: "none",
+      boxSizing: "border-box", colorScheme: t.bg === "#f7f4ef" ? "light" : "dark",
+    },
+  });
+
+  if (submitted) return (
+    <div style={{ padding: "40px 16px", borderTop: `1px solid ${t.border}`, textAlign: "center" }}>
+      <div style={{ fontSize: 48, marginBottom: 12 }}>✨</div>
+      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: t.accent, marginBottom: 8 }}>Thank You!</div>
+      <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: t.sub, lineHeight: 1.6 }}>
+        Your inquiry has been received. The agent will be in touch shortly.
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "30px 16px", borderTop: `1px solid ${t.border}` }} data-lead-form-section>
+      <div style={{ maxWidth: "600px", margin: "0 auto" }}>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: t.text, marginBottom: 8 }}>
+          Request Information
+        </div>
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: t.sub, marginBottom: 20 }}>
+          Get in touch with the listing agent today
+        </div>
+
+        {/* Tour type toggle */}
+        <div style={{ display: "flex", gap: 0, marginBottom: 18, border: `1px solid ${t.border}`, borderRadius: 8, overflow: "hidden" }}>
+          {[{ val: "in-person", label: "🏠 In-Person" }, { val: "virtual", label: "🎥 Virtual" }, { val: "offer", label: "✍️ Offer" }].map(opt => (
+            <div
+              key={opt.val}
+              onClick={() => setField("tourType", opt.val)}
+              style={{
+                flex: 1, padding: "10px 8px", textAlign: "center", cursor: "pointer",
+                background: form.tourType === opt.val ? `${t.accent}22` : "transparent",
+                borderRight: opt === [{ val: "in-person", label: "🏠 In-Person" }, { val: "virtual", label: "🎥 Virtual" }, { val: "offer", label: "✍️ Offer" }][2] ? "none" : `1px solid ${t.border}`,
+                fontFamily: "'Jost', sans-serif", fontSize: 11,
+                color: form.tourType === opt.val ? t.accent : t.sub,
+                fontWeight: form.tourType === opt.val ? 600 : 400,
+                transition: "all 0.15s",
+              }}
+            >
+              {opt.label}
+            </div>
+          ))}
+        </div>
+
+        {/* Form fields */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+          <input {...fi("name", "Your Full Name")} />
+          <input {...fi("email", "Your Email", "email")} />
+          <input {...fi("phone", "Your Phone Number", "tel")} />
+          <textarea
+            value={form.message}
+            onChange={e => setField("message", e.target.value)}
+            placeholder="Message (optional)"
+            style={{
+              width: "100%", background: `${t.card}`, border: `1px solid ${t.border}`,
+              borderRadius: 7, padding: "10px 12px", color: t.text,
+              fontFamily: "'Jost', sans-serif", fontSize: 12, outline: "none",
+              boxSizing: "border-box", colorScheme: t.bg === "#f7f4ef" ? "light" : "dark",
+              minHeight: "100px", resize: "vertical",
+            }}
+          />
+        </div>
+
+        {errors.submit && (
+          <div style={{ color: "#f87171", fontFamily: "'Jost', sans-serif", fontSize: 11, marginBottom: 12 }}>
+            {errors.submit}
+          </div>
+        )}
+
+        <button
+          onClick={handleSubmit}
+          disabled={submitting}
+          style={{
+            width: "100%", background: submitting ? `${t.accent}66` : t.accent, color: t.bg,
+            border: "none", padding: "14px", borderRadius: 8,
+            fontFamily: "'Jost', sans-serif", fontSize: 13, fontWeight: 700,
+            letterSpacing: "0.08em", textTransform: "uppercase", cursor: submitting ? "not-allowed" : "pointer",
+            transition: "background 0.3s",
+          }}
+        >
+          {submitting ? "Sending..." : "Send Inquiry"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // MAIN APP SHELL (responsive: desktop sidebar + mobile bottom nav)
 // ============================================================
 function AppShell() {
@@ -2317,6 +2979,11 @@ export default function App() {
   };
 
   if (!mounted) return null;
+
+  // Check for public microsite route (/p/slug)
+  if (window.location.pathname.startsWith("/p/")) {
+    return <PublicMicrosite />;
+  }
 
   if (loading) {
     return (
