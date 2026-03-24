@@ -148,12 +148,7 @@ create policy "Users can update own profile"
 
 create policy "Admins can view all profiles"
   on public.agents for select
-  using (
-    exists (
-      select 1 from public.agents
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- LISTINGS: agents see their own; admins see all
 create policy "Agents can view own listings"
@@ -174,21 +169,11 @@ create policy "Agents can delete own listings"
 
 create policy "Admins can view all listings"
   on public.listings for select
-  using (
-    exists (
-      select 1 from public.agents
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 create policy "Admins can manage all listings"
   on public.listings for all
-  using (
-    exists (
-      select 1 from public.agents
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- MEDIA: follows listing access
 create policy "Agents can view own media"
@@ -209,12 +194,7 @@ create policy "Agents can manage own media"
 
 create policy "Admins can manage all media"
   on public.media for all
-  using (
-    exists (
-      select 1 from public.agents
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- BOOKINGS: agents see their own; admins see all
 create policy "Agents can view own bookings"
@@ -231,12 +211,7 @@ create policy "Agents can update own bookings"
 
 create policy "Admins can manage all bookings"
   on public.bookings for all
-  using (
-    exists (
-      select 1 from public.agents
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- MICROSITES: follows listing ownership
 create policy "Agents can view own microsites"
@@ -257,12 +232,7 @@ create policy "Agents can manage own microsites"
 
 create policy "Admins can manage all microsites"
   on public.microsites for all
-  using (
-    exists (
-      select 1 from public.agents
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- LEADS: follows listing ownership; also publicly insertable (from microsite visitors)
 create policy "Agents can view own leads"
@@ -287,12 +257,7 @@ create policy "Anyone can submit leads"
 
 create policy "Admins can manage all leads"
   on public.leads for all
-  using (
-    exists (
-      select 1 from public.agents
-      where id = auth.uid() and role = 'admin'
-    )
-  );
+  using (public.is_admin());
 
 -- ANALYTICS: follows listing ownership; publicly incrementable
 create policy "Agents can view own analytics"
@@ -305,12 +270,18 @@ create policy "Agents can view own analytics"
 
 create policy "Admins can view all analytics"
   on public.analytics for all
-  using (
-    exists (
-      select 1 from public.agents
-      where id = auth.uid() and role = 'admin'
-    )
+  using (public.is_admin());
+
+-- ============================================================
+-- FUNCTION: Safe admin check (avoids infinite recursion in RLS)
+-- ============================================================
+create or replace function public.is_admin()
+returns boolean as $$
+  select exists (
+    select 1 from public.agents
+    where id = auth.uid() and role = 'admin'
   );
+$$ language sql security definer stable;
 
 -- ============================================================
 -- FUNCTION: Auto-create agent profile on signup
