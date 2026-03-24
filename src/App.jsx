@@ -172,25 +172,10 @@ function ShowcaseView({ onBook }) {
             }}>{heroPhoto + 1} / {photos.length}</div>
           </>
         )}
-        {/* Bottom info */}
-        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "28px 28px 24px" }}>
-          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, color: "#fff", fontWeight: 600, lineHeight: 1.1, marginBottom: 6 }}>
-            {listing.address}
-          </div>
-          <div style={{ fontFamily: "'Jost', sans-serif", color: "rgba(255,255,255,0.6)", fontSize: 13, marginBottom: 16 }}>
-            {listing.city}
-          </div>
-          <div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#c9a84c", fontWeight: 700 }}>{listing.price}</span>
-            <span style={{ fontFamily: "'Jost', sans-serif", color: "rgba(255,255,255,0.5)", fontSize: 13 }}>
-              {listing.beds} bd · {listing.baths} ba · {listing.sqft} sqft
-            </span>
-          </div>
-        </div>
-        {/* Thumbnail strip */}
+        {/* Thumbnail strip — inside hero, above the gradient */}
         {photos.length > 1 && (
           <div style={{
-            position: "absolute", bottom: 110, left: 20, right: 20,
+            position: "absolute", bottom: 16, left: 20, right: 20,
             display: "flex", gap: 6, justifyContent: "center",
           }}>
             {photos.slice(0, 6).map((p, i) => (
@@ -211,6 +196,22 @@ function ShowcaseView({ onBook }) {
             )}
           </div>
         )}
+      </div>
+
+      {/* Address & details — moved below the hero image */}
+      <div>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, color: "#fff", fontWeight: 600, lineHeight: 1.1, marginBottom: 6 }}>
+          {listing.address}
+        </div>
+        <div style={{ fontFamily: "'Jost', sans-serif", color: "rgba(255,255,255,0.6)", fontSize: 13, marginBottom: 16 }}>
+          {listing.city}
+        </div>
+        <div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#c9a84c", fontWeight: 700 }}>{listing.price}</span>
+          <span style={{ fontFamily: "'Jost', sans-serif", color: "rgba(255,255,255,0.5)", fontSize: 13 }}>
+            {listing.beds} bd · {listing.baths} ba · {listing.sqft} sqft
+          </span>
+        </div>
       </div>
 
       {/* Media types */}
