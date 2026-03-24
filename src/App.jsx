@@ -5,8 +5,8 @@ const NAV = ["Showcase", "Book", "My Media", "Analytics"];
 const LISTINGS = [
   {
     id: 1,
-    address: "4821 Lakewood Blvd",
-    city: "Dallas, TX 75206",
+    address: "2410 Prosperity Dr",
+    city: "Dallas, TX",
     price: "$1,250,000",
     beds: 4, baths: 3.5, sqft: "3,840",
     package: "Luxury",
@@ -14,6 +14,7 @@ const LISTINGS = [
     img: "https://images.unsplash.com/photo-1613490493576-7fde63acd811?w=800&q=80",
     views: 1482, shares: 64, leads: 12,
     media: ["Photos", "Drone", "3D Tour", "Film", "Floor Plan", "Microsite"],
+    relaSite: "https://sites.listvt.com/2410prosperitydr",
   },
   {
     id: 2,
@@ -26,6 +27,7 @@ const LISTINGS = [
     img: "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&q=80",
     views: 741, shares: 28, leads: 5,
     media: ["Photos", "Drone", "3D Tour", "Floor Plan"],
+    relaSite: null,
   },
   {
     id: 3,
@@ -38,6 +40,7 @@ const LISTINGS = [
     img: "https://images.unsplash.com/photo-1600585154526-990dced4db0d?w=800&q=80",
     views: 2941, shares: 118, leads: 23,
     media: ["Photos", "Drone", "3D Tour", "Film", "Floor Plan", "Microsite", "Twilight"],
+    relaSite: null,
   },
 ];
 
@@ -371,7 +374,65 @@ function BookView() {
 
 function MediaView() {
   const [active, setActive] = useState(0);
+  const [showRelaSite, setShowRelaSite] = useState(false);
   const listing = LISTINGS[active];
+
+  if (showRelaSite && listing.relaSite) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {/* Back button */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button onClick={() => setShowRelaSite(false)} style={{
+            background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer",
+            fontFamily: "'Jost', sans-serif", fontSize: 12, padding: 0, letterSpacing: "0.06em",
+          }}>← Back to Media</button>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#fff", flex: 1 }}>
+            {listing.address}
+          </div>
+        </div>
+
+        {/* Status badge */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <StatusBadge status={listing.status} />
+          <PackageBadge pkg={listing.package} />
+        </div>
+
+        {/* Embedded Rela property website */}
+        <div style={{
+          borderRadius: 14, overflow: "hidden",
+          border: "1px solid rgba(201,168,76,0.25)",
+          background: "#000",
+        }}>
+          <iframe
+            src={listing.relaSite}
+            title={`${listing.address} - Property Media`}
+            style={{
+              width: "100%", height: 600, border: "none",
+              borderRadius: 14,
+            }}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope"
+            allowFullScreen
+          />
+        </div>
+
+        {/* Action buttons */}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={() => window.open(listing.relaSite, "_blank")} style={{
+            flex: 1, background: "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
+            border: "none", borderRadius: 8, padding: "14px",
+            fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 12,
+            letterSpacing: "0.1em", textTransform: "uppercase", color: "#0a1628", cursor: "pointer",
+          }}>Open Full Site ↗</button>
+          <button onClick={() => { navigator.clipboard.writeText(listing.relaSite); }} style={{
+            flex: 1, background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "14px",
+            fontFamily: "'Jost', sans-serif", fontSize: 12,
+            letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.6)", cursor: "pointer",
+          }}>Copy Link</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
@@ -379,7 +440,7 @@ function MediaView() {
       {/* Listing selector */}
       <div style={{ display: "flex", gap: 10 }}>
         {LISTINGS.map((l, i) => (
-          <div key={l.id} onClick={() => setActive(i)} style={{
+          <div key={l.id} onClick={() => { setActive(i); setShowRelaSite(false); }} style={{
             flex: 1, borderRadius: 10, overflow: "hidden", cursor: "pointer", position: "relative", height: 80,
             border: active === i ? "2px solid #c9a84c" : "2px solid transparent", transition: "all 0.2s",
           }}>
@@ -391,6 +452,32 @@ function MediaView() {
           </div>
         ))}
       </div>
+
+      {/* View Property Site CTA — shown when listing has a Rela site */}
+      {listing.relaSite && (
+        <div onClick={() => setShowRelaSite(true)} style={{
+          background: "linear-gradient(135deg, rgba(201,168,76,0.12) 0%, rgba(201,168,76,0.04) 100%)",
+          border: "1px solid rgba(201,168,76,0.3)", borderRadius: 14, padding: "18px 20px",
+          display: "flex", alignItems: "center", gap: 14, cursor: "pointer",
+          transition: "all 0.2s",
+        }}
+          onMouseEnter={e => e.currentTarget.style.borderColor = "rgba(201,168,76,0.6)"}
+          onMouseLeave={e => e.currentTarget.style.borderColor = "rgba(201,168,76,0.3)"}>
+          <div style={{
+            width: 48, height: 48, borderRadius: 10, background: "rgba(201,168,76,0.15)",
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, flexShrink: 0,
+          }}>🏠</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: "#c9a84c", marginBottom: 2 }}>
+              View Property Website
+            </div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)" }}>
+              Photos, drone, 3D tour & more — all in one place
+            </div>
+          </div>
+          <span style={{ color: "#c9a84c", fontSize: 18 }}>→</span>
+        </div>
+      )}
 
       {/* Media grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
@@ -1405,12 +1492,10 @@ export default function App() {
               Media & Photography
             </div>
           </div>
-          <div style={{
-            width: 36, height: 36, borderRadius: "50%",
-            background: "linear-gradient(135deg, #c9a84c, #e5c97e)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontFamily: "'Cormorant Garamond', serif", fontSize: 16, color: "#0a1628", fontWeight: 700,
-          }}>JD</div>
+          <img src="/icons/icon-192.png" alt="Milestone Media" style={{
+            width: 36, height: 36, borderRadius: "50%", objectFit: "cover",
+            border: "1px solid rgba(201,168,76,0.3)",
+          }} />
         </div>
 
         {/* Content */}
