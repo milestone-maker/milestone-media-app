@@ -1396,35 +1396,30 @@ function MicrositeView() {
       };
 
       // Try to upsert into microsites table
+      const micrositeData = {
+        agent_id: user?.id,
+        slug,
+        theme: THEMES[themeIdx].name,
+        published: true,
+        property_data,
+        agent_name: data.agentName,
+        agent_phone: data.agentPhone,
+      };
+
       const { error } = await supabase
         .from("microsites")
-        .upsert(
-          {
-            listing_id: LISTINGS[0]?.id || null,
-            agent_id: user?.id,
-            slug,
-            theme: THEMES[themeIdx].name,
-            published: true,
-            property_data,
-            agent_name: data.agentName,
-            agent_phone: data.agentPhone,
-          },
-          { onConflict: "slug" }
-        );
+        .upsert(micrositeData, { onConflict: "slug" });
 
-      if (!error) {
-        setPublished(true);
-        setStep("published");
-      } else {
+      if (error) {
         console.error("Publish error:", error);
-        // Still transition to published state for UI
+        alert("Failed to publish: " + error.message);
+      } else {
         setPublished(true);
         setStep("published");
       }
     } catch (err) {
       console.error("Publish error:", err);
-      setPublished(true);
-      setStep("published");
+      alert("Failed to publish. Please try again.");
     }
   };
 
@@ -2066,7 +2061,7 @@ function PublicMicrosite() {
       try {
         const { data, error: fetchError } = await supabase
           .from("microsites")
-          .select("*, listings(*), agents(*)")
+          .select("*")
           .eq("slug", slug)
           .eq("published", true)
           .single();
