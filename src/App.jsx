@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, createContext, useContext } from "react";
+import { supabase } from "./supabaseClient";
 
 const NAV = ["Showcase", "Book", "My Media", "Analytics"];
 
@@ -96,6 +97,247 @@ const MEDIA_ICONS = {
   Photos: "📷", Drone: "🚁", "3D Tour": "🔮", Film: "🎬",
   "Floor Plan": "📐", Microsite: "🌐", Twilight: "🌅",
 };
+
+// ============================================================
+// AUTH CONTEXT
+// ============================================================
+const AuthContext = createContext(null);
+
+function useAuth() {
+  return useContext(AuthContext);
+}
+
+// ============================================================
+// AUTH VIEW — Login / Sign Up
+// ============================================================
+function AuthView() {
+  const [mode, setMode] = useState("login"); // login | signup | forgot
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const inputStyle = {
+    width: "100%", padding: "14px 16px", borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.05)",
+    color: "#fff", fontFamily: "'Jost', sans-serif", fontSize: 14,
+    outline: "none", boxSizing: "border-box", transition: "border-color 0.2s",
+  };
+
+  const labelStyle = {
+    fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.5)",
+    letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6, display: "block",
+  };
+
+  const handleEmailAuth = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    setMessage("");
+
+    if (mode === "signup") {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { full_name: fullName } },
+      });
+      if (error) setError(error.message);
+      else setMessage("Check your email for a confirmation link!");
+    } else if (mode === "login") {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) setError(error.message);
+    } else if (mode === "forgot") {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      });
+      if (error) setError(error.message);
+      else setMessage("Password reset link sent to your email!");
+    }
+    setLoading(false);
+  };
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    setError("");
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) setError(error.message);
+    setLoading(false);
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: "#080c16", display: "flex",
+      flexDirection: "column", alignItems: "center", justifyContent: "center",
+      fontFamily: "'Jost', sans-serif", padding: "40px 24px",
+    }}>
+      {/* Background */}
+      <div style={{
+        position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0,
+        background: "radial-gradient(ellipse at 20% 20%, rgba(201,168,76,0.06) 0%, transparent 60%), radial-gradient(ellipse at 80% 80%, rgba(10,22,40,0.8) 0%, transparent 60%)",
+      }} />
+
+      <div style={{ position: "relative", zIndex: 1, width: "100%", maxWidth: 400 }}>
+        {/* Logo */}
+        <div style={{ textAlign: "center", marginBottom: 40 }}>
+          <img src="/icons/icon-192.png" alt="Milestone Media" style={{
+            width: 72, height: 72, borderRadius: "50%",
+            border: "2px solid rgba(201,168,76,0.3)", marginBottom: 16,
+          }} />
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#c9a84c", letterSpacing: "0.04em" }}>
+            Milestone
+          </div>
+          <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", letterSpacing: "0.2em", textTransform: "uppercase", marginTop: 4 }}>
+            Media & Photography
+          </div>
+        </div>
+
+        {/* Auth Card */}
+        <div style={{
+          background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: 16, padding: 28,
+        }}>
+          <div style={{
+            fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: "#fff",
+            textAlign: "center", marginBottom: 24,
+          }}>
+            {mode === "login" ? "Welcome Back" : mode === "signup" ? "Create Account" : "Reset Password"}
+          </div>
+
+          {/* Google Sign-in */}
+          {mode !== "forgot" && (
+            <>
+              <button onClick={handleGoogleSignIn} disabled={loading} style={{
+                width: "100%", padding: "12px 16px", borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)",
+                color: "#fff", fontFamily: "'Jost', sans-serif", fontSize: 14,
+                cursor: "pointer", display: "flex", alignItems: "center",
+                justifyContent: "center", gap: 10, transition: "all 0.2s",
+                opacity: loading ? 0.6 : 1,
+              }}>
+                <svg width="18" height="18" viewBox="0 0 24 24">
+                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                </svg>
+                Continue with Google
+              </button>
+
+              <div style={{
+                display: "flex", alignItems: "center", gap: 12, margin: "20px 0",
+              }}>
+                <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.1)" }} />
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", letterSpacing: "0.08em" }}>OR</span>
+                <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.1)" }} />
+              </div>
+            </>
+          )}
+
+          {/* Email Form */}
+          <form onSubmit={handleEmailAuth} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {mode === "signup" && (
+              <div>
+                <label style={labelStyle}>Full Name</label>
+                <input
+                  type="text" value={fullName} onChange={e => setFullName(e.target.value)}
+                  placeholder="Tyshawn Miles" style={inputStyle} required
+                />
+              </div>
+            )}
+
+            <div>
+              <label style={labelStyle}>Email</label>
+              <input
+                type="email" value={email} onChange={e => setEmail(e.target.value)}
+                placeholder="agent@example.com" style={inputStyle} required
+              />
+            </div>
+
+            {mode !== "forgot" && (
+              <div>
+                <label style={labelStyle}>Password</label>
+                <input
+                  type="password" value={password} onChange={e => setPassword(e.target.value)}
+                  placeholder="••••••••" style={inputStyle} required minLength={6}
+                />
+              </div>
+            )}
+
+            {error && (
+              <div style={{
+                background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+                borderRadius: 8, padding: "10px 14px", color: "#f87171", fontSize: 13,
+              }}>{error}</div>
+            )}
+
+            {message && (
+              <div style={{
+                background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.3)",
+                borderRadius: 8, padding: "10px 14px", color: "#4ade80", fontSize: 13,
+              }}>{message}</div>
+            )}
+
+            <button type="submit" disabled={loading} style={{
+              width: "100%", padding: "14px", borderRadius: 10, border: "none",
+              background: "linear-gradient(135deg, #c9a84c, #e5c97e)", color: "#080c16",
+              fontFamily: "'Jost', sans-serif", fontSize: 14, fontWeight: 600,
+              letterSpacing: "0.06em", cursor: "pointer", transition: "all 0.2s",
+              opacity: loading ? 0.6 : 1,
+            }}>
+              {loading ? "Please wait..." : mode === "login" ? "Sign In" : mode === "signup" ? "Create Account" : "Send Reset Link"}
+            </button>
+          </form>
+
+          {/* Mode switches */}
+          <div style={{ marginTop: 20, textAlign: "center" }}>
+            {mode === "login" && (
+              <>
+                <button onClick={() => { setMode("forgot"); setError(""); setMessage(""); }} style={{
+                  background: "none", border: "none", color: "rgba(255,255,255,0.4)",
+                  fontSize: 12, cursor: "pointer", fontFamily: "'Jost', sans-serif",
+                }}>Forgot password?</button>
+                <div style={{ marginTop: 12, color: "rgba(255,255,255,0.4)", fontSize: 13 }}>
+                  Don't have an account?{" "}
+                  <button onClick={() => { setMode("signup"); setError(""); setMessage(""); }} style={{
+                    background: "none", border: "none", color: "#c9a84c",
+                    fontSize: 13, cursor: "pointer", fontFamily: "'Jost', sans-serif", fontWeight: 600,
+                  }}>Sign Up</button>
+                </div>
+              </>
+            )}
+            {mode === "signup" && (
+              <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>
+                Already have an account?{" "}
+                <button onClick={() => { setMode("login"); setError(""); setMessage(""); }} style={{
+                  background: "none", border: "none", color: "#c9a84c",
+                  fontSize: 13, cursor: "pointer", fontFamily: "'Jost', sans-serif", fontWeight: 600,
+                }}>Sign In</button>
+              </div>
+            )}
+            {mode === "forgot" && (
+              <div style={{ color: "rgba(255,255,255,0.4)", fontSize: 13 }}>
+                <button onClick={() => { setMode("login"); setError(""); setMessage(""); }} style={{
+                  background: "none", border: "none", color: "#c9a84c",
+                  fontSize: 13, cursor: "pointer", fontFamily: "'Jost', sans-serif", fontWeight: 600,
+                }}>Back to Sign In</button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ textAlign: "center", marginTop: 24, color: "rgba(255,255,255,0.2)", fontSize: 11 }}>
+          Milestone Media & Photography — DFW
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function StatusBadge({ status }) {
   const colors = {
@@ -1499,17 +1741,13 @@ function AnalyticsView() {
   );
 }
 
-export default function App() {
+// ============================================================
+// MAIN APP SHELL (with auth gate)
+// ============================================================
+function AppShell() {
+  const { user, profile, signOut } = useAuth();
   const [tab, setTab] = useState(0);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    const link = document.createElement("link");
-    link.href = "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Jost:wght@300;400;500;600;700&display=swap";
-    link.rel = "stylesheet";
-    document.head.appendChild(link);
-    setTimeout(() => setMounted(true), 100);
-  }, []);
+  const [showProfile, setShowProfile] = useState(false);
 
   const handleBook = () => setTab(1);
 
@@ -1525,7 +1763,6 @@ export default function App() {
     <div style={{
       minHeight: "100vh", background: "#080c16",
       fontFamily: "'Jost', sans-serif",
-      opacity: mounted ? 1 : 0, transition: "opacity 0.4s ease",
     }}>
       {/* Subtle background texture */}
       <div style={{
@@ -1547,10 +1784,49 @@ export default function App() {
               Media & Photography
             </div>
           </div>
-          <img src="/icons/icon-192.png" alt="Milestone Media" style={{
-            width: 36, height: 36, borderRadius: "50%", objectFit: "cover",
-            border: "1px solid rgba(201,168,76,0.3)",
-          }} />
+          <div style={{ position: "relative" }}>
+            <img
+              src={profile?.avatar_url || "/icons/icon-192.png"}
+              alt="Profile"
+              onClick={() => setShowProfile(!showProfile)}
+              style={{
+                width: 36, height: 36, borderRadius: "50%", objectFit: "cover",
+                border: "1px solid rgba(201,168,76,0.3)", cursor: "pointer",
+              }}
+            />
+            {/* Profile dropdown */}
+            {showProfile && (
+              <div style={{
+                position: "absolute", top: 44, right: 0, width: 220,
+                background: "rgba(16,20,32,0.98)", border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 12, padding: 16, zIndex: 50,
+                backdropFilter: "blur(20px)", boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+              }}>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff", fontWeight: 500 }}>
+                  {profile?.full_name || "Agent"}
+                </div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2, wordBreak: "break-all" }}>
+                  {user?.email}
+                </div>
+                {profile?.role === "admin" && (
+                  <span style={{
+                    display: "inline-block", marginTop: 6, padding: "2px 8px",
+                    borderRadius: 4, fontSize: 9, letterSpacing: "0.1em",
+                    textTransform: "uppercase", fontWeight: 600,
+                    background: "rgba(201,168,76,0.15)", color: "#c9a84c",
+                    border: "1px solid rgba(201,168,76,0.3)",
+                  }}>Admin</span>
+                )}
+                <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "12px 0" }} />
+                <button onClick={signOut} style={{
+                  width: "100%", padding: "10px 0", borderRadius: 8, border: "none",
+                  background: "rgba(239,68,68,0.1)", color: "#f87171",
+                  fontFamily: "'Jost', sans-serif", fontSize: 12, cursor: "pointer",
+                  fontWeight: 500, letterSpacing: "0.04em",
+                }}>Sign Out</button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Content */}
@@ -1585,5 +1861,89 @@ export default function App() {
         ))}
       </div>
     </div>
+  );
+}
+
+// ============================================================
+// ROOT APP — Auth provider wrapper
+// ============================================================
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    const link = document.createElement("link");
+    link.href = "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=Jost:wght@300;400;500;600;700&display=swap";
+    link.rel = "stylesheet";
+    document.head.appendChild(link);
+    setTimeout(() => setMounted(true), 100);
+  }, []);
+
+  // Listen for auth state changes
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      if (session?.user) fetchProfile(session.user.id);
+      else setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      if (session?.user) fetchProfile(session.user.id);
+      else {
+        setProfile(null);
+        setLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const fetchProfile = async (userId) => {
+    const { data, error } = await supabase
+      .from("agents")
+      .select("*")
+      .eq("id", userId)
+      .single();
+    if (data) setProfile(data);
+    setLoading(false);
+  };
+
+  const signOut = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    setUser(null);
+    setProfile(null);
+  };
+
+  if (!mounted) return null;
+
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: "100vh", background: "#080c16", display: "flex",
+        alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16,
+      }}>
+        <img src="/icons/icon-192.png" alt="" style={{ width: 56, height: 56, borderRadius: "50%", opacity: 0.8 }} />
+        <div style={{
+          fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#c9a84c",
+          animation: "pulse 1.5s ease-in-out infinite",
+        }}>Loading...</div>
+        <style>{`@keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }`}</style>
+      </div>
+    );
+  }
+
+  return (
+    <AuthContext.Provider value={{ session, user, profile, signOut, fetchProfile }}>
+      <div style={{ opacity: mounted ? 1 : 0, transition: "opacity 0.4s ease" }}>
+        {user ? <AppShell /> : <AuthView />}
+      </div>
+    </AuthContext.Provider>
   );
 }
