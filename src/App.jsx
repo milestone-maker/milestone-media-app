@@ -1339,10 +1339,12 @@ function MicrositeView() {
     { name: "Derek & Alicia Tran", email: "dtran@outlook.com", phone: "(972) 555-0094", message: "Ready to make an offer. Please contact ASAP.", tourType: "offer", time: "8:03 AM", date: "3/23/2026", read: false, status: "new" },
   ]);
   const [selectedLead, setSelectedLead] = useState(null);
+  const listing = LISTINGS[0];
   const [data, setData] = useState({
-    address: "", city: "", price: "", beds: "", baths: "", sqft: "",
+    address: listing.address || "", city: listing.city || "", price: listing.price || "",
+    beds: listing.beds || "", baths: listing.baths || "", sqft: listing.sqft || "",
     description: "", agentName: "", agentPhone: "",
-    heroImg: LISTINGS[0].img,
+    heroImg: listing.img,
     features: ["", "", "", ""],
     mediaTypes: ["Photos", "Drone", "3D Tour"],
   });
@@ -1395,7 +1397,7 @@ function MicrositeView() {
         video_url: data.videoUrl,
       };
 
-      // Try to upsert into microsites table
+      // Build the record to insert
       const micrositeData = {
         agent_id: user?.id,
         slug,
@@ -1406,14 +1408,24 @@ function MicrositeView() {
         agent_phone: data.agentPhone,
       };
 
-      const { error } = await supabase
+      console.log("Publishing microsite:", JSON.stringify(micrositeData, null, 2));
+      console.log("User ID:", user?.id);
+
+      const { data: result, error } = await supabase
         .from("microsites")
-        .upsert(micrositeData, { onConflict: "slug" });
+        .upsert(micrositeData, { onConflict: "slug" })
+        .select();
+
+      console.log("Upsert result:", JSON.stringify({ data: result, error }));
 
       if (error) {
         console.error("Publish error:", error);
         alert("Failed to publish: " + error.message);
+      } else if (!result || result.length === 0) {
+        console.error("Publish failed: no row returned (RLS blocked the insert)");
+        alert("Publish failed — your account may not have permission. Check the browser console for details.");
       } else {
+        console.log("Microsite published successfully:", result[0]);
         setPublished(true);
         setStep("published");
       }
@@ -2132,7 +2144,12 @@ function PublicMicrosite() {
 
   const theme = THEMES.find(t => t.name === microsite.theme) || THEMES[0];
   const data = microsite.property_data || {};
-  const agent = microsite.agents?.[0] || {};
+  const agent = microsite.agents?.[0] || {
+    full_name: data.agent_name || microsite.agent_name || "",
+    phone: data.agent_phone || microsite.agent_phone || "",
+    email: data.agent_email || "",
+    brokerage: data.brokerage || "",
+  };
 
   return (
     <div style={{ minHeight: "100vh", background: theme.bg, fontFamily: "'Jost', sans-serif" }}>
