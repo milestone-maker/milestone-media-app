@@ -1995,14 +1995,29 @@ function AnalyticsView() {
 }
 
 // ============================================================
-// MAIN APP SHELL (with auth gate)
+// MAIN APP SHELL (responsive: desktop sidebar + mobile bottom nav)
 // ============================================================
 function AppShell() {
   const { user, profile, signOut } = useAuth();
   const [tab, setTab] = useState(0);
   const [showProfile, setShowProfile] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
+
+  useEffect(() => {
+    const handleResize = () => setIsDesktop(window.innerWidth >= 768);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const handleBook = () => setTab(1);
+
+  const navItems = [
+    { label: "Showcase", icon: "✦" },
+    { label: "Book", icon: "+" },
+    { label: "Media", icon: "⊞" },
+    { label: "Analytics", icon: "↗" },
+    { label: "Microsite", icon: "🌐" },
+  ];
 
   const views = [
     <ShowcaseView onBook={handleBook} />,
@@ -2012,6 +2027,170 @@ function AppShell() {
     <MicrositeView />,
   ];
 
+  const ProfileDropdown = showProfile && (
+    <div style={{
+      position: "absolute", top: 44, right: 0, width: 220,
+      background: "#161616", border: "1px solid #2A2A2A",
+      borderRadius: 12, padding: 16, zIndex: 50,
+      boxShadow: "0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(201,168,76,0.08)",
+    }}>
+      <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#F0EDE8", fontWeight: 500 }}>
+        {profile?.full_name || "Agent"}
+      </div>
+      <div style={{ fontSize: 11, color: "#8A8680", marginTop: 2, wordBreak: "break-all" }}>
+        {user?.email}
+      </div>
+      {profile?.role === "admin" && (
+        <span style={{
+          display: "inline-block", marginTop: 6, padding: "2px 8px",
+          borderRadius: 4, fontSize: 9, letterSpacing: "0.1em",
+          textTransform: "uppercase", fontWeight: 600,
+          background: "rgba(201,168,76,0.15)", color: "#c9a84c",
+          border: "1px solid rgba(201,168,76,0.3)",
+        }}>Admin</span>
+      )}
+      <div style={{ height: 1, background: "#2A2A2A", margin: "12px 0" }} />
+      <button onClick={signOut} style={{
+        width: "100%", padding: "10px 0", borderRadius: 8, border: "none",
+        background: "rgba(239,68,68,0.1)", color: "#f87171",
+        fontFamily: "'Jost', sans-serif", fontSize: 12, cursor: "pointer",
+        fontWeight: 500, letterSpacing: "0.04em",
+      }}>Sign Out</button>
+    </div>
+  );
+
+  // ===================== DESKTOP LAYOUT =====================
+  // ===================== DESKTOP LAYOUT — Back Office Dashboard =====================
+  if (isDesktop) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#080c16", fontFamily: "'Jost', sans-serif" }}>
+        {/* Background texture */}
+        <div style={{
+          position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0,
+          background: "radial-gradient(ellipse at 20% 20%, rgba(201,168,76,0.06) 0%, transparent 60%), radial-gradient(ellipse at 80% 80%, rgba(10,22,40,0.8) 0%, transparent 60%)",
+        }} />
+
+        {/* ── TOP NAVIGATION BAR ── */}
+        <div style={{
+          position: "sticky", top: 0, zIndex: 20,
+          background: "rgba(8,12,22,0.95)", backdropFilter: "blur(20px)",
+          borderBottom: "1px solid rgba(255,255,255,0.08)",
+        }}>
+          <div style={{
+            maxWidth: 1200, margin: "0 auto",
+            padding: "0 40px", height: 64,
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+          }}>
+            {/* Logo */}
+            <div style={{ display: "flex", alignItems: "center", gap: 0, cursor: "pointer" }} onClick={() => setTab(0)}>
+              <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: "#fff", letterSpacing: "0.02em" }}>
+                Milestone{" "}
+              </span>
+              <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: "#c9a84c", letterSpacing: "0.02em" }}>
+                Media
+              </span>
+              <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: "#fff", letterSpacing: "0.02em" }}>
+                {" "}& Photography
+              </span>
+            </div>
+
+            {/* Nav links */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {navItems.map((n, i) => (
+                <button key={n.label} onClick={() => setTab(i)} style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  padding: "8px 16px", position: "relative",
+                  fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 400,
+                  letterSpacing: "0.12em", textTransform: "uppercase",
+                  color: tab === i ? "#c9a84c" : "rgba(255,255,255,0.6)",
+                  transition: "color 0.2s",
+                }}>
+                  {n.label}
+                  {tab === i && (
+                    <span style={{
+                      position: "absolute", bottom: 0, left: "50%", transform: "translateX(-50%)",
+                      width: 24, height: 2, background: "#c9a84c", borderRadius: 1,
+                    }} />
+                  )}
+                </button>
+              ))}
+
+              {/* Divider */}
+              <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.1)", margin: "0 8px" }} />
+
+              {/* Profile / avatar */}
+              <div style={{ position: "relative" }}>
+                <div onClick={() => setShowProfile(!showProfile)} style={{
+                  display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "4px 8px",
+                  borderRadius: 8, transition: "background 0.2s",
+                }}>
+                  <img src={profile?.avatar_url || "/icons/icon-192.png"} alt="" style={{
+                    width: 32, height: 32, borderRadius: "50%", objectFit: "cover",
+                    border: "1px solid rgba(201,168,76,0.3)",
+                  }} />
+                  <div style={{ textAlign: "left" }}>
+                    <div style={{ fontSize: 12, color: "#F0EDE8", fontWeight: 500, lineHeight: 1.2 }}>
+                      {profile?.full_name?.split(" ")[0] || "Agent"}
+                    </div>
+                    <div style={{ fontSize: 9, color: "#8A8680", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                      {profile?.role === "admin" ? "Admin" : "Agent"}
+                    </div>
+                  </div>
+                </div>
+                {ProfileDropdown}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── MAIN CONTENT AREA ── */}
+        <div style={{ position: "relative", zIndex: 1 }}>
+          {/* Page header section */}
+          <div style={{
+            maxWidth: 1200, margin: "0 auto", padding: "40px 40px 0",
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+          }}>
+            <div>
+              <div style={{
+                fontFamily: "'Jost', sans-serif", fontSize: 11, color: "#c9a84c",
+                letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 8,
+              }}>
+                Agent Portal
+              </div>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, color: "#fff", lineHeight: 1.1 }}>
+                {navItems[tab].label}
+              </div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              {profile?.role === "admin" && (
+                <span style={{
+                  padding: "6px 14px", borderRadius: 6, fontSize: 10, letterSpacing: "0.1em",
+                  textTransform: "uppercase", fontWeight: 600,
+                  background: "rgba(201,168,76,0.15)", color: "#c9a84c",
+                  border: "1px solid rgba(201,168,76,0.3)",
+                }}>Admin</span>
+              )}
+              <div style={{ fontSize: 13, color: "#8A8680" }}>
+                {new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+              </div>
+            </div>
+          </div>
+
+          {/* Divider — gold accent line like website sections */}
+          <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 40px" }}>
+            <div style={{ height: 1, background: "rgba(201,168,76,0.15)", marginTop: 24 }} />
+          </div>
+
+          {/* Content */}
+          <div style={{ maxWidth: 1200, margin: "0 auto", padding: "32px 40px 80px" }}>
+            {views[tab]}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ===================== MOBILE LAYOUT =====================
   return (
     <div style={{
       minHeight: "100vh", background: "#080c16",
@@ -2047,38 +2226,7 @@ function AppShell() {
                 border: "1px solid rgba(201,168,76,0.3)", cursor: "pointer",
               }}
             />
-            {/* Profile dropdown */}
-            {showProfile && (
-              <div style={{
-                position: "absolute", top: 44, right: 0, width: 220,
-                background: "rgba(16,20,32,0.98)", border: "1px solid rgba(255,255,255,0.1)",
-                borderRadius: 12, padding: 16, zIndex: 50,
-                backdropFilter: "blur(20px)", boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
-              }}>
-                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff", fontWeight: 500 }}>
-                  {profile?.full_name || "Agent"}
-                </div>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2, wordBreak: "break-all" }}>
-                  {user?.email}
-                </div>
-                {profile?.role === "admin" && (
-                  <span style={{
-                    display: "inline-block", marginTop: 6, padding: "2px 8px",
-                    borderRadius: 4, fontSize: 9, letterSpacing: "0.1em",
-                    textTransform: "uppercase", fontWeight: 600,
-                    background: "rgba(201,168,76,0.15)", color: "#c9a84c",
-                    border: "1px solid rgba(201,168,76,0.3)",
-                  }}>Admin</span>
-                )}
-                <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "12px 0" }} />
-                <button onClick={signOut} style={{
-                  width: "100%", padding: "10px 0", borderRadius: 8, border: "none",
-                  background: "rgba(239,68,68,0.1)", color: "#f87171",
-                  fontFamily: "'Jost', sans-serif", fontSize: 12, cursor: "pointer",
-                  fontWeight: 500, letterSpacing: "0.04em",
-                }}>Sign Out</button>
-              </div>
-            )}
+            {ProfileDropdown}
           </div>
         </div>
 
@@ -2095,13 +2243,7 @@ function AppShell() {
         borderTop: "1px solid rgba(255,255,255,0.08)",
         display: "flex", maxWidth: 480, margin: "0 auto",
       }}>
-        {[
-          { label: "Showcase", icon: "✦" },
-          { label: "Book", icon: "+" },
-          { label: "Media", icon: "⊞" },
-          { label: "Analytics", icon: "↗" },
-          { label: "Microsite", icon: "🌐" },
-        ].map((n, i) => (
+        {navItems.map((n, i) => (
           <button key={n.label} onClick={() => setTab(i)} style={{
             flex: 1, background: "none", border: "none", padding: "14px 8px 18px",
             display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
