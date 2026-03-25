@@ -1339,15 +1339,112 @@ function MicrositeView() {
     { name: "Derek & Alicia Tran", email: "dtran@outlook.com", phone: "(972) 555-0094", message: "Ready to make an offer. Please contact ASAP.", tourType: "offer", time: "8:03 AM", date: "3/23/2026", read: false, status: "new" },
   ]);
   const [selectedLead, setSelectedLead] = useState(null);
-  const listing = LISTINGS[0];
+  const [listings, setListings] = useState([]);
+  const [selectedListingId, setSelectedListingId] = useState(null);
+  const [listingPhotos, setListingPhotos] = useState([]);
+  const [listingVideo, setListingVideo] = useState(null);
+  const [listingFloorplan, setListingFloorplan] = useState(null);
+  const [mediaLoading, setMediaLoading] = useState(false);
   const [data, setData] = useState({
-    address: listing.address || "", city: listing.city || "", price: listing.price || "",
-    beds: listing.beds || "", baths: listing.baths || "", sqft: listing.sqft || "",
+    address: "", city: "", price: "",
+    beds: "", baths: "", sqft: "",
     description: "", agentName: "", agentPhone: "",
-    heroImg: listing.img,
+    heroImg: "",
     features: ["", "", "", ""],
     mediaTypes: ["Photos", "Drone", "3D Tour"],
+    matterportUrl: "",
+    videoUrl: "",
   });
+
+  // Fetch listings from Supabase
+  useEffect(() => {
+    const fetchListings = async () => {
+      const { data: rows, error } = await supabase
+        .from("listings")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (!error && rows) setListings(rows);
+    };
+    fetchListings();
+  }, []);
+
+  // When a listing is selected, populate form and fetch media
+  useEffect(() => {
+    if (!selectedListingId) return;
+    const listing = listings.find(l => l.id === selectedListingId);
+    if (!listing) return;
+
+    // Auto-populate form fields
+    setData(d => ({
+      ...d,
+      address: listing.address || "",
+      city: listing.city || "",
+      price: listing.price || "",
+      beds: listing.beds ? String(listing.beds) : "",
+      baths: listing.baths ? String(listing.baths) : "",
+      sqft: listing.sqft ? String(listing.sqft) : "",
+      matterportUrl: listing.matterport_url || "",
+      videoUrl: listing.youtube_url || "",
+    }));
+
+    // Fetch media files from storage
+    const fetchMedia = async () => {
+      setMediaLoading(true);
+      try {
+        // Fetch photos
+        const { data: photoFiles } = await supabase.storage
+          .from("listing-media")
+          .list(`${selectedListingId}/photos`, { limit: 50 });
+
+        const photos = (photoFiles || [])
+          .filter(f => f.name !== ".emptyFolderPlaceholder")
+          .map(f => {
+            const { data: urlData } = supabase.storage
+              .from("listing-media")
+              .getPublicUrl(`${selectedListingId}/photos/${f.name}`);
+            return urlData.publicUrl;
+          });
+        setListingPhotos(photos);
+        if (photos.length > 0) {
+          setData(d => ({ ...d, heroImg: photos[0] }));
+        }
+
+        // Fetch video
+        const { data: videoFiles } = await supabase.storage
+          .from("listing-media")
+          .list(`${selectedListingId}/video`, { limit: 5 });
+
+        const vids = (videoFiles || []).filter(f => f.name !== ".emptyFolderPlaceholder");
+        if (vids.length > 0) {
+          const { data: vidUrl } = supabase.storage
+            .from("listing-media")
+            .getPublicUrl(`${selectedListingId}/video/${vids[0].name}`);
+          setListingVideo(vidUrl.publicUrl);
+        } else {
+          setListingVideo(null);
+        }
+
+        // Fetch floorplan
+        const { data: fpFiles } = await supabase.storage
+          .from("listing-media")
+          .list(`${selectedListingId}/floorplan`, { limit: 5 });
+
+        const fps = (fpFiles || []).filter(f => f.name !== ".emptyFolderPlaceholder");
+        if (fps.length > 0) {
+          const { data: fpUrl } = supabase.storage
+            .from("listing-media")
+            .getPublicUrl(`${selectedListingId}/floorplan/${fps[0].name}`);
+          setListingFloorplan(fpUrl.publicUrl);
+        } else {
+          setListingFloorplan(null);
+        }
+      } catch (err) {
+        console.error("Error fetching media:", err);
+      }
+      setMediaLoading(false);
+    };
+    fetchMedia();
+  }, [selectedListingId, listings]);
 
   const theme = THEMES[themeIdx];
   const slug = (data.address || "your-listing").split(" ").slice(0, 2).join("-").toLowerCase().replace(/[^a-z0-9-]/g, "");
@@ -1393,8 +1490,10 @@ function MicrositeView() {
         agent_phone: data.agentPhone,
         agent_email: data.agentEmail,
         hero_img: data.heroImg,
+        listing_id: selectedListingId,
         matterport_url: data.matterportUrl,
-        video_url: data.videoUrl,
+        video_url: data.videoUrl || listingVideo,
+        floorplan_url: listingFloorplan,
       };
 
       // Build the record to insert
@@ -1854,7 +1953,7 @@ function MicrositeView() {
         </div>
       </div>
 
-      <MicrositePreview data={{ ...data, onLeadSubmit: handleNewLead }} theme={theme} />
+      <MicrositePreview data={{ ...data, videoUrl: data.videoUrl || listingVideo, floorplanUrl: listingFloorplan, onLeadSubmit: handleNewLead }} theme={theme} />
 
       <button onClick={handlePublish} style={{
         background: "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
@@ -1873,20 +1972,49 @@ function MicrositeView() {
         <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Build a branded property page in 60 seconds.</div>
       </div>
 
-      {/* Hero image selector */}
+      {/* Listing Selector */}
+      <div>
+        <div style={labelStyle}>Select Listing</div>
+        <select
+          style={{ ...inputStyle, cursor: "pointer" }}
+          value={selectedListingId || ""}
+          onChange={e => setSelectedListingId(e.target.value ? Number(e.target.value) : null)}
+        >
+          <option value="">— Choose a listing —</option>
+          {listings.map(l => (
+            <option key={l.id} value={l.id}>{l.address} — {l.city}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Hero Image from uploaded photos */}
       <div>
         <div style={labelStyle}>Hero Image</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {LISTINGS.map((l) => (
-            <div key={l.id} onClick={() => setField("heroImg", l.img)} style={{
-              flex: 1, height: 60, borderRadius: 8, overflow: "hidden", cursor: "pointer",
-              border: data.heroImg === l.img ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.1)",
-              transition: "border-color 0.2s",
-            }}>
-              <img src={l.img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-            </div>
-          ))}
-        </div>
+        {mediaLoading ? (
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)", padding: "20px 0" }}>
+            Loading media...
+          </div>
+        ) : listingPhotos.length > 0 ? (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {listingPhotos.map((url, i) => (
+              <div key={i} onClick={() => setField("heroImg", url)} style={{
+                width: 80, height: 60, borderRadius: 8, overflow: "hidden", cursor: "pointer",
+                border: data.heroImg === url ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.1)",
+                transition: "border-color 0.2s", flexShrink: 0,
+              }}>
+                <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              </div>
+            ))}
+          </div>
+        ) : selectedListingId ? (
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.35)", padding: "12px 0" }}>
+            No photos uploaded for this listing. Upload photos in the Admin panel first.
+          </div>
+        ) : (
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.35)", padding: "12px 0" }}>
+            Select a listing above to see available photos.
+          </div>
+        )}
       </div>
 
       {/* Property Details */}
