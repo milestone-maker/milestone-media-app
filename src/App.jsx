@@ -2693,7 +2693,14 @@ function AdminView() {
     agent_id: "",
     description: "",
     hero_img: "",
+    matterport_url: "",
+    youtube_url: "",
   });
+
+  const [selectedListing, setSelectedListing] = useState(null);
+  const [mediaFiles, setMediaFiles] = useState({});
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({});
 
   // Fetch listings and agents on mount
   useEffect(() => {
@@ -2735,6 +2742,92 @@ function AdminView() {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const uploadFile = async (listingId, category, file) => {
+    const filePath = `${listingId}/${category}/${file.name}`;
+    try {
+      const { data, error } = await supabase.storage
+        .from('listing-media')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false,
+        });
+      if (error) throw error;
+      const { data: { publicUrl } } = supabase.storage
+        .from('listing-media')
+        .getPublicUrl(filePath);
+      return publicUrl;
+    } catch (err) {
+      throw new Error(`Upload failed: ${err.message}`);
+    }
+  };
+
+  const listFiles = async (listingId, category) => {
+    try {
+      const { data, error } = await supabase.storage
+        .from('listing-media')
+        .list(`${listingId}/${category}/`, {
+          limit: 100,
+          sortBy: { column: 'name', order: 'asc' },
+        });
+      if (error) throw error;
+      return data || [];
+    } catch (err) {
+      throw new Error(`List files failed: ${err.message}`);
+    }
+  };
+
+  const deleteFile = async (listingId, category, fileName) => {
+    try {
+      const { error } = await supabase.storage
+        .from('listing-media')
+        .remove([`${listingId}/${category}/${fileName}`]);
+      if (error) throw error;
+    } catch (err) {
+      throw new Error(`Delete failed: ${err.message}`);
+    }
+  };
+
+  const loadMediaFiles = async (listingId) => {
+    setMediaLoading(true);
+    try {
+      const photos = await listFiles(listingId, 'photos');
+      const video = await listFiles(listingId, 'video');
+      const floorplan = await listFiles(listingId, 'floorplan');
+      setMediaFiles(prev => ({
+        ...prev,
+        [listingId]: { photos, video, floorplan },
+      }));
+    } catch (err) {
+      setErrorMessage(err.message);
+    } finally {
+      setMediaLoading(false);
+    }
+  };
+
+  const handleMediaUpload = async (listingId, category, files) => {
+    setUploadProgress(prev => ({ ...prev, [listingId]: 'uploading' }));
+    try {
+      for (const file of files) {
+        await uploadFile(listingId, category, file);
+      }
+      await loadMediaFiles(listingId);
+      setUploadProgress(prev => ({ ...prev, [listingId]: 'done' }));
+      setTimeout(() => setUploadProgress(prev => ({ ...prev, [listingId]: null })), 2000);
+    } catch (err) {
+      setErrorMessage(err.message);
+      setUploadProgress(prev => ({ ...prev, [listingId]: null }));
+    }
+  };
+
+  const handleMediaDelete = async (listingId, category, fileName) => {
+    try {
+      await deleteFile(listingId, category, fileName);
+      await loadMediaFiles(listingId);
+    } catch (err) {
+      setErrorMessage(err.message);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
@@ -2762,6 +2855,8 @@ function AdminView() {
             agent_id: formData.agent_id,
             description: formData.description || null,
             hero_img: formData.hero_img || null,
+            matterport_url: formData.matterport_url || null,
+            youtube_url: formData.youtube_url || null,
             created_at: new Date().toISOString(),
           },
         ])
@@ -2782,6 +2877,8 @@ function AdminView() {
         agent_id: "",
         description: "",
         hero_img: "",
+        matterport_url: "",
+        youtube_url: "",
       });
 
       // Refresh listings
@@ -2906,14 +3003,216 @@ function AdminView() {
                     </div>
                   </div>
 
-                  <div>
-                    <div style={{ ...labelStyle, marginBottom: 4, color: "#8A8680" }}>Agent</div>
-                    <div style={{ fontSize: 12, color: "#F0EDE8" }}>
-                      {listing.agents?.full_name || "Unassigned"}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div>
+                      <div style={{ ...labelStyle, marginBottom: 4, color: "#8A8680" }}>Agent</div>
+                      <div style={{ fontSize: 12, color: "#F0EDE8" }}>
+                        {listing.agents?.full_name || "Unassigned"}
+                      </div>
                     </div>
+                    <button
+                      onClick={() => {
+                        setSelectedListing(selectedListing === listing.id ? null : listing.id);
+                        if (selectedListing !== listing.id) {
+                          loadMediaFiles(listing.id);
+                        }
+                      }}
+                      style={{
+                        background: selectedListing === listing.id ? "#c9a84c" : "rgba(201,168,76,0.1)",
+                        color: selectedListing === listing.id ? "#0a0a0a" : "#c9a84c",
+                        border: "1px solid rgba(201,168,76,0.3)",
+                        padding: "6px 12px",
+                        borderRadius: 6,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        fontFamily: "'Jost', sans-serif",
+                        transition: "all 0.2s",
+                      }}
+                    >
+                      {selectedListing === listing.id ? "Hide Media" : "Manage Media"}
+                    </button>
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Media Management Panel */}
+          {selectedListing && (
+            <div style={{
+              ...cardStyle,
+              marginTop: 24,
+              background: "rgba(201,168,76,0.05)",
+              border: "2px solid rgba(201,168,76,0.2)",
+            }}>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: "#c9a84c", marginBottom: 20 }}>
+                Media Management
+              </div>
+
+              {mediaLoading ? (
+                <div style={{ color: "#8A8680", textAlign: "center", padding: "20px" }}>
+                  Loading media files...
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                  {/* Photos Section */}
+                  <div>
+                    <label style={{ ...labelStyle, display: "block", marginBottom: 12, color: "#c9a84c" }}>
+                      📷 Photos
+                    </label>
+                    <div
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+                        if (files.length > 0) handleMediaUpload(selectedListing, 'photos', files);
+                      }}
+                      style={{
+                        border: "2px dashed rgba(201,168,76,0.3)",
+                        borderRadius: 8,
+                        padding: 20,
+                        textAlign: "center",
+                        cursor: "pointer",
+                        marginBottom: 12,
+                        transition: "border-color 0.2s",
+                      }}
+                    >
+                      <input
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        onChange={(e) => handleMediaUpload(selectedListing, 'photos', Array.from(e.target.files))}
+                        style={{ display: "none" }}
+                        id={`photos-input-${selectedListing}`}
+                      />
+                      <label
+                        htmlFor={`photos-input-${selectedListing}`}
+                        style={{ cursor: "pointer", color: "#F0EDE8", fontSize: 12 }}
+                      >
+                        Click to upload photos or drag and drop
+                      </label>
+                    </div>
+                    {mediaFiles[selectedListing]?.photos?.length > 0 && (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(60px, 1fr))", gap: 8 }}>
+                        {mediaFiles[selectedListing].photos.map((file) => (
+                          <div key={file.name} style={{ position: "relative", aspectRatio: "1" }}>
+                            <img
+                              src={supabase.storage.from('listing-media').getPublicUrl(`${selectedListing}/photos/${file.name}`).data.publicUrl}
+                              alt={file.name}
+                              style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 4 }}
+                            />
+                            <button
+                              onClick={() => handleMediaDelete(selectedListing, 'photos', file.name)}
+                              style={{
+                                position: "absolute",
+                                top: -8,
+                                right: -8,
+                                width: 24,
+                                height: 24,
+                                background: "#f87171",
+                                color: "#fff",
+                                border: "none",
+                                borderRadius: "50%",
+                                cursor: "pointer",
+                                fontSize: 14,
+                                fontWeight: "bold",
+                              }}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Video Section */}
+                  <div>
+                    <label style={{ ...labelStyle, display: "block", marginBottom: 12, color: "#c9a84c" }}>
+                      🎬 Video File
+                    </label>
+                    <input
+                      type="file"
+                      accept="video/*"
+                      onChange={(e) => {
+                        if (e.target.files.length > 0) {
+                          handleMediaUpload(selectedListing, 'video', Array.from(e.target.files));
+                        }
+                      }}
+                      style={formInputStyle}
+                    />
+                    {mediaFiles[selectedListing]?.video?.length > 0 && (
+                      <div style={{ marginTop: 12, fontSize: 12, color: "#F0EDE8" }}>
+                        <div>Uploaded: {mediaFiles[selectedListing].video[0].name}</div>
+                        <button
+                          onClick={() => handleMediaDelete(selectedListing, 'video', mediaFiles[selectedListing].video[0].name)}
+                          style={{
+                            marginTop: 8,
+                            background: "#f87171",
+                            color: "#fff",
+                            border: "none",
+                            padding: "4px 8px",
+                            borderRadius: 4,
+                            cursor: "pointer",
+                            fontSize: 11,
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Floorplan Section */}
+                  <div>
+                    <label style={{ ...labelStyle, display: "block", marginBottom: 12, color: "#c9a84c" }}>
+                      📐 Floorplan
+                    </label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        if (e.target.files.length > 0) {
+                          handleMediaUpload(selectedListing, 'floorplan', Array.from(e.target.files));
+                        }
+                      }}
+                      style={formInputStyle}
+                    />
+                    {mediaFiles[selectedListing]?.floorplan?.length > 0 && (
+                      <div style={{ marginTop: 12, fontSize: 12, color: "#F0EDE8" }}>
+                        <div>Uploaded: {mediaFiles[selectedListing].floorplan[0].name}</div>
+                        <button
+                          onClick={() => handleMediaDelete(selectedListing, 'floorplan', mediaFiles[selectedListing].floorplan[0].name)}
+                          style={{
+                            marginTop: 8,
+                            background: "#f87171",
+                            color: "#fff",
+                            border: "none",
+                            padding: "4px 8px",
+                            borderRadius: 4,
+                            cursor: "pointer",
+                            fontSize: 11,
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {uploadProgress[selectedListing] === 'uploading' && (
+                <div style={{ marginTop: 12, color: "#c9a84c", fontSize: 12 }}>
+                  Uploading...
+                </div>
+              )}
+              {uploadProgress[selectedListing] === 'done' && (
+                <div style={{ marginTop: 12, color: "#22c55e", fontSize: 12 }}>
+                  Upload complete!
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -3098,6 +3397,30 @@ function AdminView() {
                 value={formData.hero_img}
                 onChange={(e) => handleInputChange("hero_img", e.target.value)}
                 placeholder="https://..."
+                style={formInputStyle}
+              />
+            </div>
+
+            {/* Matterport URL */}
+            <div style={formFieldContainer}>
+              <label style={labelStyle}>Matterport URL</label>
+              <input
+                type="text"
+                value={formData.matterport_url}
+                onChange={(e) => handleInputChange("matterport_url", e.target.value)}
+                placeholder="https://my.matterport.com/..."
+                style={formInputStyle}
+              />
+            </div>
+
+            {/* YouTube URL */}
+            <div style={formFieldContainer}>
+              <label style={labelStyle}>YouTube URL</label>
+              <input
+                type="text"
+                value={formData.youtube_url}
+                onChange={(e) => handleInputChange("youtube_url", e.target.value)}
+                placeholder="https://youtube.com/watch?v=..."
                 style={formInputStyle}
               />
             </div>
@@ -3318,6 +3641,30 @@ function AdminView() {
             />
           </div>
 
+          {/* Matterport URL */}
+          <div style={formFieldContainer}>
+            <label style={labelStyle}>Matterport URL</label>
+            <input
+              type="text"
+              value={formData.matterport_url}
+              onChange={(e) => handleInputChange("matterport_url", e.target.value)}
+              placeholder="https://my.matterport.com/..."
+              style={formInputStyle}
+            />
+          </div>
+
+          {/* YouTube URL */}
+          <div style={formFieldContainer}>
+            <label style={labelStyle}>YouTube URL</label>
+            <input
+              type="text"
+              value={formData.youtube_url}
+              onChange={(e) => handleInputChange("youtube_url", e.target.value)}
+              placeholder="https://youtube.com/watch?v=..."
+              style={formInputStyle}
+            />
+          </div>
+
           {/* Submit Button */}
           <button
             type="submit"
@@ -3410,6 +3757,182 @@ function AdminView() {
                     {listing.agents?.full_name || "Unassigned"}
                   </div>
                 </div>
+                <button
+                  onClick={() => {
+                    setSelectedListing(selectedListing === listing.id ? null : listing.id);
+                    if (selectedListing !== listing.id) {
+                      loadMediaFiles(listing.id);
+                    }
+                  }}
+                  style={{
+                    width: "100%",
+                    background: selectedListing === listing.id ? "#c9a84c" : "rgba(201,168,76,0.1)",
+                    color: selectedListing === listing.id ? "#0a0a0a" : "#c9a84c",
+                    border: "1px solid rgba(201,168,76,0.3)",
+                    padding: "8px 12px",
+                    borderRadius: 6,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "'Jost', sans-serif",
+                    transition: "all 0.2s",
+                    marginTop: 8,
+                  }}
+                >
+                  {selectedListing === listing.id ? "Hide Media" : "Manage Media"}
+                </button>
+
+                {/* Mobile Media Management Panel */}
+                {selectedListing === listing.id && (
+                  <div style={{
+                    marginTop: 12,
+                    paddingTop: 12,
+                    borderTop: "1px solid rgba(201,168,76,0.2)",
+                  }}>
+                    <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 14, color: "#c9a84c", marginBottom: 12 }}>
+                      Media Management
+                    </div>
+
+                    {mediaLoading ? (
+                      <div style={{ color: "#8A8680", textAlign: "center", padding: "20px 0" }}>
+                        Loading media files...
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        {/* Photos */}
+                        <div>
+                          <label style={{ ...labelStyle, display: "block", marginBottom: 8, color: "#c9a84c" }}>
+                            📷 Photos
+                          </label>
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/*"
+                            onChange={(e) => handleMediaUpload(selectedListing, 'photos', Array.from(e.target.files))}
+                            style={formInputStyle}
+                          />
+                          {mediaFiles[selectedListing]?.photos?.length > 0 && (
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(50px, 1fr))", gap: 6, marginTop: 8 }}>
+                              {mediaFiles[selectedListing].photos.map((file) => (
+                                <div key={file.name} style={{ position: "relative", aspectRatio: "1" }}>
+                                  <img
+                                    src={supabase.storage.from('listing-media').getPublicUrl(`${selectedListing}/photos/${file.name}`).data.publicUrl}
+                                    alt={file.name}
+                                    style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 4 }}
+                                  />
+                                  <button
+                                    onClick={() => handleMediaDelete(selectedListing, 'photos', file.name)}
+                                    style={{
+                                      position: "absolute",
+                                      top: -6,
+                                      right: -6,
+                                      width: 20,
+                                      height: 20,
+                                      background: "#f87171",
+                                      color: "#fff",
+                                      border: "none",
+                                      borderRadius: "50%",
+                                      cursor: "pointer",
+                                      fontSize: 12,
+                                      fontWeight: "bold",
+                                    }}
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Video */}
+                        <div>
+                          <label style={{ ...labelStyle, display: "block", marginBottom: 8, color: "#c9a84c" }}>
+                            🎬 Video
+                          </label>
+                          <input
+                            type="file"
+                            accept="video/*"
+                            onChange={(e) => {
+                              if (e.target.files.length > 0) {
+                                handleMediaUpload(selectedListing, 'video', Array.from(e.target.files));
+                              }
+                            }}
+                            style={formInputStyle}
+                          />
+                          {mediaFiles[selectedListing]?.video?.length > 0 && (
+                            <div style={{ marginTop: 8, fontSize: 11, color: "#F0EDE8" }}>
+                              <div>{mediaFiles[selectedListing].video[0].name}</div>
+                              <button
+                                onClick={() => handleMediaDelete(selectedListing, 'video', mediaFiles[selectedListing].video[0].name)}
+                                style={{
+                                  marginTop: 6,
+                                  background: "#f87171",
+                                  color: "#fff",
+                                  border: "none",
+                                  padding: "4px 8px",
+                                  borderRadius: 4,
+                                  cursor: "pointer",
+                                  fontSize: 10,
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Floorplan */}
+                        <div>
+                          <label style={{ ...labelStyle, display: "block", marginBottom: 8, color: "#c9a84c" }}>
+                            📐 Floorplan
+                          </label>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              if (e.target.files.length > 0) {
+                                handleMediaUpload(selectedListing, 'floorplan', Array.from(e.target.files));
+                              }
+                            }}
+                            style={formInputStyle}
+                          />
+                          {mediaFiles[selectedListing]?.floorplan?.length > 0 && (
+                            <div style={{ marginTop: 8, fontSize: 11, color: "#F0EDE8" }}>
+                              <div>{mediaFiles[selectedListing].floorplan[0].name}</div>
+                              <button
+                                onClick={() => handleMediaDelete(selectedListing, 'floorplan', mediaFiles[selectedListing].floorplan[0].name)}
+                                style={{
+                                  marginTop: 6,
+                                  background: "#f87171",
+                                  color: "#fff",
+                                  border: "none",
+                                  padding: "4px 8px",
+                                  borderRadius: 4,
+                                  cursor: "pointer",
+                                  fontSize: 10,
+                                }}
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {uploadProgress[selectedListing] === 'uploading' && (
+                      <div style={{ marginTop: 8, color: "#c9a84c", fontSize: 11 }}>
+                        Uploading...
+                      </div>
+                    )}
+                    {uploadProgress[selectedListing] === 'done' && (
+                      <div style={{ marginTop: 8, color: "#22c55e", fontSize: 11 }}>
+                        Upload complete!
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
