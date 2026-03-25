@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect, useRef, createContext, useContext } from "react";
 import { supabase } from "./supabaseClient";
 
 const NAV = ["Showcase", "Book", "My Media", "Analytics"];
@@ -1084,19 +1084,19 @@ const THEMES = [
 
 function MicrositePreview({ data, theme }) {
   const t = theme;
-  const [lightboxOpen, setLightboxOpen] = React.useState(false);
-  const [lightboxIndex, setLightboxIndex] = React.useState(0);
-  const [mobileNavOpen, setMobileNavOpen] = React.useState(false);
-  const [activeSection, setActiveSection] = React.useState("photos");
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState("photos");
 
   const photos = data.galleryPhotos || (data.heroImg ? [data.heroImg] : []);
 
-  const photoRef = React.useRef(null);
-  const floorplanRef = React.useRef(null);
-  const droneRef = React.useRef(null);
-  const tourRef = React.useRef(null);
-  const detailsRef = React.useRef(null);
-  const contactRef = React.useRef(null);
+  const photoRef = useRef(null);
+  const floorplanRef = useRef(null);
+  const droneRef = useRef(null);
+  const tourRef = useRef(null);
+  const detailsRef = useRef(null);
+  const contactRef = useRef(null);
 
   const sections = [
     { id: "photos", label: "Photos", ref: photoRef, show: true },
@@ -1107,7 +1107,7 @@ function MicrositePreview({ data, theme }) {
     { id: "contact", label: "Contact", ref: contactRef, show: true },
   ].filter(s => s.show);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const handleScroll = () => {
       for (let section of sections) {
         if (section.ref.current) {
