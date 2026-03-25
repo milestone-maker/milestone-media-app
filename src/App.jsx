@@ -2019,7 +2019,7 @@ function MicrositeView() {
 
   const theme = THEMES[themeIdx];
   const slug = (data.address || "your-listing").split(" ").slice(0, 2).join("-").toLowerCase().replace(/[^a-z0-9-]/g, "");
-  const liveUrl = `${window.location.origin}/p/${slug}`;
+  const liveUrl = `https://app.milestonemediaphotography.com/p/${slug}`;
 
   const setField = (key, val) => setData(d => ({ ...d, [key]: val }));
   const setFeature = (i, val) => setData(d => { const f = [...d.features]; f[i] = val; return { ...d, features: f }; });
@@ -2758,44 +2758,77 @@ function AnalyticsView() {
 // ============================================================
 function PublicMicrosite() {
   const [microsite, setMicrosite] = useState(null);
-  const [mediaFiles, setMediaFiles] = useState([]);
+  const [photos, setPhotos] = useState([]);
+  const [videoUrl, setVideoUrl] = useState(null);
+  const [floorplanUrl, setFloorplanUrl] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState("photos");
 
-  // Extract slug from URL
+  const photoRef = useRef(null);
+  const floorplanRef = useRef(null);
+  const droneRef = useRef(null);
+  const tourRef = useRef(null);
+  const detailsRef = useRef(null);
+  const contactRef = useRef(null);
+
   const slug = window.location.pathname.replace("/p/", "").split("/")[0];
 
   useEffect(() => {
     const fetchMicrosite = async () => {
       try {
-        const { data, error: fetchError } = await supabase
+        const { data: msData, error: fetchError } = await supabase
           .from("microsites")
           .select("*")
           .eq("slug", slug)
           .eq("published", true)
           .single();
 
-        if (fetchError || !data) {
+        if (fetchError || !msData) {
           setError("Microsite not found");
           setLoading(false);
           return;
         }
 
-        setMicrosite(data);
+        setMicrosite(msData);
+        const pd = msData.property_data || {};
 
-        // Fetch media files from storage
-        if (data.listing_id) {
-          const { data: files, error: storageError } = await supabase.storage
-            .from("media")
-            .list(`${data.listing_id}`);
-
-          if (!storageError && files) {
-            const imageFiles = files
+        // Fetch media from listing-media bucket
+        if (pd.listing_id) {
+          // Photos
+          const { data: photoFiles } = await supabase.storage
+            .from("listing-media")
+            .list(`${pd.listing_id}/photos`, { sortBy: { column: "name", order: "asc" } });
+          if (photoFiles && photoFiles.length > 0) {
+            const urls = photoFiles
               .filter(f => /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name))
-              .sort((a, b) => a.name.localeCompare(b.name));
-            setMediaFiles(imageFiles);
+              .map(f => supabase.storage.from("listing-media").getPublicUrl(`${pd.listing_id}/photos/${f.name}`).data.publicUrl);
+            setPhotos(urls);
+          }
+
+          // Video
+          const { data: videoFiles } = await supabase.storage
+            .from("listing-media")
+            .list(`${pd.listing_id}/video`);
+          if (videoFiles && videoFiles.length > 0) {
+            const vid = videoFiles.find(f => /\.(mp4|mov|webm)$/i.test(f.name));
+            if (vid) {
+              setVideoUrl(supabase.storage.from("listing-media").getPublicUrl(`${pd.listing_id}/video/${vid.name}`).data.publicUrl);
+            }
+          }
+
+          // Floorplan
+          const { data: fpFiles } = await supabase.storage
+            .from("listing-media")
+            .list(`${pd.listing_id}/floorplan`);
+          if (fpFiles && fpFiles.length > 0) {
+            const fp = fpFiles.find(f => /\.(jpg|jpeg|png|webp|gif|pdf)$/i.test(f.name));
+            if (fp) {
+              setFloorplanUrl(supabase.storage.from("listing-media").getPublicUrl(`${pd.listing_id}/floorplan/${fp.name}`).data.publicUrl);
+            }
           }
         }
 
@@ -2809,14 +2842,62 @@ function PublicMicrosite() {
     fetchMicrosite();
   }, [slug]);
 
+  // Build sections list for nav
+  const data = microsite?.property_data || {};
+  const hasFloorplan = !!(floorplanUrl || data.floorplan_url);
+  const hasVideo = !!(videoUrl || data.video_url);
+  const hasTour = !!data.matterport_url;
+
+  const sections = [
+    { id: "photos", label: "Photos", ref: photoRef, show: true },
+    { id: "floorplan", label: "Floorplan", ref: floorplanRef, show: hasFloorplan },
+    { id: "drone", label: "Drone", ref: droneRef, show: hasVideo },
+    { id: "tour", label: "3D Tour", ref: tourRef, show: hasTour },
+    { id: "details", label: "Details", ref: detailsRef, show: true },
+    { id: "contact", label: "Contact", ref: contactRef, show: true },
+  ].filter(s => s.show);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      for (let section of sections) {
+        if (section.ref.current) {
+          const rect = section.ref.current.getBoundingClientRect();
+          if (rect.top < 300) setActiveSection(section.id);
+        }
+      }
+    };
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [sections]);
+
+  const scrollToSection = (sectionId) => {
+    const section = sections.find(s => s.id === sectionId);
+    if (section && section.ref.current) {
+      section.ref.current.scrollIntoView({ behavior: "smooth" });
+      setMobileNavOpen(false);
+    }
+  };
+
+  const navLinkStyle = (sectionId) => ({
+    fontFamily: "'Jost', sans-serif",
+    fontSize: 11,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: activeSection === sectionId ? "#C9A84C" : "#888",
+    cursor: "pointer",
+    transition: "color 0.3s",
+    paddingBottom: 6,
+    borderBottom: activeSection === sectionId ? "2px solid #C9A84C" : "2px solid transparent",
+  });
+
   if (loading) {
     return (
       <div style={{
-        minHeight: "100vh", background: "#0a0a0a", display: "flex",
+        minHeight: "100vh", background: "#0f0f1a", display: "flex",
         alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16,
       }}>
         <div style={{
-          fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#c9a84c",
+          fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#C9A84C",
           animation: "pulse 1.5s ease-in-out infinite",
         }}>Loading...</div>
         <style>{`@keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }`}</style>
@@ -2827,10 +2908,10 @@ function PublicMicrosite() {
   if (error || !microsite) {
     return (
       <div style={{
-        minHeight: "100vh", background: "#0a0a0a", display: "flex",
-        alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16, padding: "20px",
+        minHeight: "100vh", background: "#0f0f1a", display: "flex",
+        alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16, padding: 20,
       }}>
-        <div style={{ fontSize: 48, marginBottom: 10 }}>404</div>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 80, color: "#C9A84C", fontWeight: 700 }}>404</div>
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: "#fff", textAlign: "center" }}>
           Microsite not found
         </div>
@@ -2841,383 +2922,356 @@ function PublicMicrosite() {
     );
   }
 
-  const theme = THEMES.find(t => t.name === microsite.theme) || THEMES[0];
-  const data = microsite.property_data || {};
-  const agent = microsite.agents?.[0] || {
-    full_name: data.agent_name || microsite.agent_name || "",
-    phone: data.agent_phone || microsite.agent_phone || "",
-    email: data.agent_email || "",
-    brokerage: data.brokerage || "",
-  };
+  const agentName = data.agent_name || "";
+  const agentPhone = data.agent_phone || "";
+  const finalVideo = videoUrl || data.video_url;
+  const finalFloorplan = floorplanUrl || data.floorplan_url;
+  const galleryPhotos = photos.length > 0 ? photos : (data.hero_img ? [data.hero_img] : []);
 
   return (
-    <div style={{ minHeight: "100vh", background: theme.bg, fontFamily: "'Jost', sans-serif" }}>
-      {/* Navigation Bar */}
+    <div style={{ fontFamily: "'Cormorant Garamond', serif", overflow: "hidden" }}>
+      {/* Fixed Top Nav Bar */}
       <div style={{
-        position: "fixed", top: 0, left: 0, right: 0, zIndex: 50,
-        padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center",
-        background: "rgba(0,0,0,0.3)", backdropFilter: "blur(8px)",
-      }}>
-        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 13, color: theme.accent, letterSpacing: "0.08em" }}>
-          Milestone Media
-        </div>
-        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.12em" }}>
-          Property Showcase
-        </div>
-      </div>
-
-      {/* Hero Section */}
-      <div style={{ position: "relative", height: 400, overflow: "hidden" }}>
-        <img
-          src={data.hero_img || LISTINGS[0].img}
-          alt={data.address}
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
-        <div style={{ position: "absolute", inset: 0, background: `linear-gradient(to top, ${theme.bg} 0%, transparent 50%)` }} />
-        <div style={{ position: "absolute", bottom: 40, left: 20, right: 20 }}>
-          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 40, color: "#fff", fontWeight: 600, lineHeight: 1.1, marginBottom: 8 }}>
-            {data.address || "Property"}
-          </div>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "rgba(255,255,255,0.7)" }}>
-            {data.city || "Location"}
-          </div>
-        </div>
-      </div>
-
-      {/* Details Strip */}
-      <div style={{
-        padding: "20px 16px",
+        position: "fixed",
+        top: 0, left: 0, right: 0,
+        zIndex: 1000,
+        background: "rgba(15,15,26,0.95)",
+        backdropFilter: "blur(10px)",
+        borderBottom: "1px solid rgba(201,168,76,0.2)",
+        padding: "16px 24px",
         display: "flex",
-        gap: 20,
+        justifyContent: "space-between",
         alignItems: "center",
-        borderBottom: `1px solid ${theme.border}`,
-        background: theme.bg,
-        flexWrap: "wrap",
       }}>
-        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, color: theme.accent, fontWeight: 700 }}>
-          {data.price || "Price"}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#C9A84C", letterSpacing: "0.06em" }}>
+            MILESTONE MEDIA
+          </div>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "#888", letterSpacing: "0.08em" }}>
+            Photography & Media
+          </div>
         </div>
-        <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-          {[
-            { icon: "🛏", val: data.beds || "—", label: "Bed" },
-            { icon: "🚿", val: data.baths || "—", label: "Bath" },
-            { icon: "📐", val: data.sqft || "—", label: "sqft" },
-          ].map(s => (
-            <div key={s.label} style={{ textAlign: "center" }}>
-              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: theme.text, fontWeight: 600 }}>{s.val}</div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 9, color: theme.sub, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 2 }}>{s.label}</div>
+        <div style={{ display: "flex", gap: 28 }}>
+          {sections.map(section => (
+            <div key={section.id} onClick={() => scrollToSection(section.id)} style={navLinkStyle(section.id)}>
+              {section.label}
             </div>
           ))}
         </div>
       </div>
 
-      {/* Photo Gallery */}
-      {mediaFiles.length > 0 && (
-        <div style={{ padding: "30px 16px" }}>
-          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: theme.text, marginBottom: 20 }}>
-            Gallery
-          </div>
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-            gap: 12,
-          }}>
-            {mediaFiles.map((file, i) => {
-              const { data: publicUrl } = supabase.storage
-                .from("media")
-                .getPublicUrl(`${microsite.listing_id}/${file.name}`);
-              return (
-                <div
-                  key={i}
-                  onClick={() => {
-                    setLightboxIndex(i);
-                    setLightboxOpen(true);
-                  }}
-                  style={{
-                    position: "relative",
-                    paddingBottom: "100%",
-                    overflow: "hidden",
-                    borderRadius: 10,
-                    cursor: "pointer",
-                  }}
-                >
-                  <img
-                    src={publicUrl.publicUrl}
-                    alt={file.name}
-                    style={{
-                      position: "absolute",
-                      top: 0, left: 0, right: 0, bottom: 0,
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                      transition: "transform 0.3s",
-                    }}
-                    onMouseEnter={e => e.target.style.transform = "scale(1.05)"}
-                    onMouseLeave={e => e.target.style.transform = "scale(1)"}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Lightbox */}
-      {lightboxOpen && mediaFiles.length > 0 && (
-        <div
-          onClick={() => setLightboxOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.95)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 100,
-          }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              position: "relative",
-              width: "90%",
-              height: "80vh",
-              maxWidth: "1000px",
-            }}
-          >
-            <img
-              src={supabase.storage.from("media").getPublicUrl(`${microsite.listing_id}/${mediaFiles[lightboxIndex].name}`).data.publicUrl}
-              alt=""
-              style={{ width: "100%", height: "100%", objectFit: "contain" }}
-            />
-            <button
-              onClick={() => setLightboxOpen(false)}
-              style={{
-                position: "absolute",
-                top: -40,
-                right: 0,
-                background: "none",
-                border: "none",
-                color: "#fff",
-                fontSize: 32,
-                cursor: "pointer",
-              }}
-            >
-              ×
-            </button>
-            <button
-              onClick={() =>
-                setLightboxIndex(
-                  lightboxIndex === 0 ? mediaFiles.length - 1 : lightboxIndex - 1
-                )
-              }
-              style={{
-                position: "absolute",
-                left: -50,
-                top: "50%",
-                transform: "translateY(-50%)",
-                background: "rgba(255,255,255,0.1)",
-                border: "1px solid rgba(255,255,255,0.2)",
-                color: "#fff",
-                padding: "12px 16px",
-                borderRadius: 8,
-                cursor: "pointer",
-              }}
-            >
-              ←
-            </button>
-            <button
-              onClick={() =>
-                setLightboxIndex(
-                  lightboxIndex === mediaFiles.length - 1 ? 0 : lightboxIndex + 1
-                )
-              }
-              style={{
-                position: "absolute",
-                right: -50,
-                top: "50%",
-                transform: "translateY(-50%)",
-                background: "rgba(255,255,255,0.1)",
-                border: "1px solid rgba(255,255,255,0.2)",
-                color: "#fff",
-                padding: "12px 16px",
-                borderRadius: 8,
-                cursor: "pointer",
-              }}
-            >
-              →
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 3D Tour / Video Section */}
-      {(data.matterport_url || data.video_url) && (
-        <div style={{ padding: "30px 16px", borderTop: `1px solid ${theme.border}` }}>
-          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: theme.text, marginBottom: 20 }}>
-            Virtual Tour
-          </div>
-          <div style={{ maxWidth: "100%", borderRadius: 12, overflow: "hidden" }}>
-            {data.matterport_url && (
-              <iframe
-                src={data.matterport_url}
-                width="100%"
-                height="500"
-                frameBorder="0"
-                allow="xr-spatial-tracking"
-                style={{ borderRadius: 12 }}
-              />
-            )}
-            {data.video_url && !data.matterport_url && (
-              <video
-                src={data.video_url}
-                controls
-                style={{ width: "100%", height: "500px", objectFit: "cover", borderRadius: 12 }}
-              />
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Property Description */}
-      {data.description && (
-        <div style={{ padding: "30px 16px", borderTop: `1px solid ${theme.border}` }}>
-          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: theme.text, marginBottom: 12 }}>
-            About
-          </div>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: theme.text, lineHeight: 1.7 }}>
-            {data.description}
-          </div>
-        </div>
-      )}
-
-      {/* Features */}
-      {data.features && data.features.filter(f => f).length > 0 && (
-        <div style={{ padding: "30px 16px", borderTop: `1px solid ${theme.border}` }}>
-          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: theme.text, marginBottom: 16 }}>
-            Highlights
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {data.features.filter(f => f).map((f, i) => (
-              <span
-                key={i}
-                style={{
-                  background: `${theme.accent}18`,
-                  border: `1px solid ${theme.accent}40`,
-                  color: theme.accent,
-                  padding: "8px 16px",
-                  borderRadius: 24,
-                  fontFamily: "'Jost', sans-serif",
-                  fontSize: 12,
-                  letterSpacing: "0.04em",
-                }}
-              >
-                {f}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Agent Card */}
-      <div style={{ padding: "30px 16px", borderTop: `1px solid ${theme.border}` }}>
-        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: theme.text, marginBottom: 20 }}>
-          Contact Agent
-        </div>
+      {/* Hero Section */}
+      <div style={{
+        position: "relative",
+        height: "75vh",
+        marginTop: 60,
+        background: "#000",
+        overflow: "hidden",
+      }}>
+        <img
+          src={data.hero_img || (galleryPhotos[0] || "")}
+          alt="Property"
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
         <div style={{
-          background: theme.card,
-          border: `1px solid ${theme.border}`,
-          borderRadius: 14,
-          padding: 20,
-          display: "flex",
-          gap: 16,
-          alignItems: "center",
-        }}>
-          <div style={{
-            width: 64,
-            height: 64,
-            borderRadius: "50%",
-            background: `linear-gradient(135deg, ${theme.accent}, ${theme.accent}99)`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontFamily: "'Cormorant Garamond', serif",
-            fontSize: 22,
-            color: "#fff",
-            fontWeight: 700,
-            flexShrink: 0,
-          }}>
-            {(agent.full_name || "AG").split(" ").map(n => n[0]).join("").slice(0, 2)}
+          position: "absolute", inset: 0,
+          background: "linear-gradient(to top, rgba(15,15,26,0.7) 0%, transparent 60%)",
+        }} />
+        <div style={{ position: "absolute", bottom: 40, left: 40, color: "#fff" }}>
+          <div style={{ fontSize: 56, fontWeight: 700, lineHeight: 1.1, marginBottom: 8 }}>
+            {data.address || "Luxury Property"}
           </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: theme.text, marginBottom: 4 }}>
-              {agent.full_name || "Agent"}
-            </div>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: theme.sub, marginBottom: 8 }}>
-              {agent.brokerage || "Luxury Realty"}
-            </div>
-            <div style={{ display: "flex", gap: 12, fontSize: 12 }}>
-              {agent.phone && (
-                <a href={`tel:${agent.phone}`} style={{ color: theme.accent, textDecoration: "none" }}>
-                  📱 {agent.phone}
-                </a>
-              )}
-              {agent.email && (
-                <a href={`mailto:${agent.email}`} style={{ color: theme.accent, textDecoration: "none" }}>
-                  📧 Email
-                </a>
-              )}
-            </div>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 18, letterSpacing: "0.08em", marginBottom: 16 }}>
+            {data.city || ""}
           </div>
-          <button
-            onClick={() => {
-              const el = document.querySelector("[data-lead-form-section]");
-              el?.scrollIntoView({ behavior: "smooth" });
-            }}
-            style={{
-              background: theme.accent,
-              color: theme.bg,
-              border: "none",
-              padding: "10px 18px",
-              borderRadius: 8,
-              fontFamily: "'Jost', sans-serif",
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              cursor: "pointer",
-            }}
-          >
-            Inquire
-          </button>
+          <div style={{ fontSize: 40, fontWeight: 700, color: "#C9A84C" }}>
+            {data.price || ""}
+          </div>
         </div>
       </div>
 
-      {/* Lead Capture Form */}
-      <PublicLeadCaptureForm theme={theme} micrositeId={microsite.id} listingId={microsite.listing_id} />
+      {/* Sticky Section Nav */}
+      <div style={{
+        position: "sticky",
+        top: 60,
+        zIndex: 100,
+        background: "#181826",
+        borderBottom: "1px solid rgba(201,168,76,0.2)",
+        padding: "0 40px",
+        display: "flex",
+        gap: 40,
+        overflowX: "auto",
+      }}>
+        {sections.map(section => (
+          <div key={section.id} onClick={() => scrollToSection(section.id)} style={navLinkStyle(section.id)}>
+            {section.label}
+          </div>
+        ))}
+      </div>
+
+      {/* Photo Gallery Section */}
+      <div ref={photoRef} style={{ background: "#fafafa", padding: "80px 40px" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+            Photography
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
+            <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>Photo Gallery</h2>
+            <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+          </div>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+            gap: 16,
+          }}>
+            {galleryPhotos.map((photo, idx) => (
+              <div
+                key={idx}
+                onClick={() => { setLightboxIndex(idx); setLightboxOpen(true); }}
+                style={{
+                  cursor: "pointer",
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  height: 280,
+                  gridColumn: idx === 0 ? "span 2" : "span 1",
+                  gridRow: idx === 0 ? "span 2" : "span 1",
+                }}
+              >
+                <img
+                  src={photo}
+                  alt={`Gallery ${idx}`}
+                  style={{ width: "100%", height: "100%", objectFit: "cover", transition: "transform 0.3s" }}
+                  onMouseEnter={(e) => (e.target.style.transform = "scale(1.05)")}
+                  onMouseLeave={(e) => (e.target.style.transform = "scale(1)")}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Lightbox Modal */}
+      {lightboxOpen && (
+        <div
+          onClick={() => setLightboxOpen(false)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.95)",
+            zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <button onClick={() => setLightboxOpen(false)} style={{
+            position: "absolute", top: 20, right: 30, background: "none", border: "none", color: "#fff", fontSize: 36, cursor: "pointer",
+          }}>✕</button>
+          <button onClick={(e) => { e.stopPropagation(); setLightboxIndex((prev) => (prev - 1 + galleryPhotos.length) % galleryPhotos.length); }} style={{
+            position: "absolute", left: 30, background: "none", border: "none", color: "#fff", fontSize: 36, cursor: "pointer",
+          }}>‹</button>
+          <img
+            src={galleryPhotos[lightboxIndex]}
+            alt="Lightbox"
+            style={{ maxWidth: "90%", maxHeight: "90%", objectFit: "contain" }}
+            onClick={(e) => e.stopPropagation()}
+          />
+          <button onClick={(e) => { e.stopPropagation(); setLightboxIndex((prev) => (prev + 1) % galleryPhotos.length); }} style={{
+            position: "absolute", right: 30, background: "none", border: "none", color: "#fff", fontSize: 36, cursor: "pointer",
+          }}>›</button>
+          <div style={{ position: "absolute", bottom: 30, color: "#fff", fontFamily: "'Jost', sans-serif", fontSize: 14 }}>
+            {lightboxIndex + 1} / {galleryPhotos.length}
+          </div>
+        </div>
+      )}
+
+      {/* Floorplan Section */}
+      {finalFloorplan && (
+        <div ref={floorplanRef} style={{ background: "#faf6ee", padding: "80px 40px" }}>
+          <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+              Floorplan
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
+              <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>Interactive Floorplan</h2>
+              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <img
+                src={finalFloorplan}
+                alt="Floorplan"
+                style={{ maxWidth: 900, width: "100%", borderRadius: 8, boxShadow: "0 10px 30px rgba(0,0,0,0.1)" }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Drone Video Section */}
+      {finalVideo && (
+        <div ref={droneRef} style={{ background: "#0f0f1a", padding: "80px 40px" }}>
+          <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+              Aerial
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
+              <h2 style={{ fontSize: 42, margin: 0, color: "#fff", fontWeight: 600 }}>Drone Video</h2>
+              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <video controls poster={data.hero_img} style={{ maxWidth: 960, width: "100%", borderRadius: 8 }}>
+                <source src={finalVideo} type="video/mp4" />
+                Your browser does not support the video tag.
+              </video>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3D Tour Section */}
+      {data.matterport_url && (
+        <div ref={tourRef} style={{ background: "#fafafa", padding: "80px 40px" }}>
+          <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+              Virtual Tour
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
+              <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>3D Walkthrough</h2>
+              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <iframe
+                src={data.matterport_url}
+                title="3D Tour"
+                style={{ width: "100%", maxWidth: 960, height: 600, borderRadius: 8, border: "none" }}
+              />
+            </div>
+            <p style={{ textAlign: "center", fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#666", marginTop: 20 }}>
+              Use your mouse or touch to walk through the home in full 3D
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Property Details Section */}
+      <div ref={detailsRef} style={{ background: "#0f0f1a", padding: "80px 40px" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+            Property Info
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
+            <h2 style={{ fontSize: 42, margin: 0, color: "#fff", fontWeight: 600 }}>Property Details</h2>
+            <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+          </div>
+
+          {/* Stats Grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 24, marginBottom: 60 }}>
+            <div style={{ background: "#181826", padding: 32, borderRadius: 8, textAlign: "center" }}>
+              <div style={{ fontSize: 48, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>{data.beds || "—"}</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: "0.08em" }}>Bedrooms</div>
+            </div>
+            <div style={{ background: "#181826", padding: 32, borderRadius: 8, textAlign: "center" }}>
+              <div style={{ fontSize: 48, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>{data.baths || "—"}</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: "0.08em" }}>Bathrooms</div>
+            </div>
+            <div style={{ background: "#181826", padding: 32, borderRadius: 8, textAlign: "center" }}>
+              <div style={{ fontSize: 48, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>{data.sqft || "—"}</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: "0.08em" }}>Sq. Ft.</div>
+            </div>
+            <div style={{ background: "#181826", padding: 32, borderRadius: 8, textAlign: "center" }}>
+              <div style={{ fontSize: 36, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>{data.price || "—"}</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: "0.08em" }}>Price</div>
+            </div>
+          </div>
+
+          {/* Description */}
+          {data.description && (
+            <div style={{ background: "#181826", padding: 32, borderRadius: 8, marginBottom: 40, borderLeft: "4px solid #C9A84C" }}>
+              <p style={{ fontFamily: "'Jost', sans-serif", fontSize: 15, lineHeight: 1.8, color: "#ddd", margin: 0 }}>
+                {data.description}
+              </p>
+            </div>
+          )}
+
+          {/* Features */}
+          {data.features && data.features.filter(f => f).length > 0 && (
+            <div>
+              <h3 style={{ fontSize: 24, color: "#fff", marginBottom: 24, fontWeight: 600 }}>Key Features</h3>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16 }}>
+                {data.features.filter(f => f).map((feature, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                    <div style={{ color: "#C9A84C", fontSize: 18, flexShrink: 0 }}>•</div>
+                    <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#ccc" }}>{feature}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Request a Showing Section */}
+      <div ref={contactRef} style={{ background: "#faf6ee", padding: "80px 40px" }}>
+        <div style={{ maxWidth: 800, margin: "0 auto" }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+            Schedule a Visit
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
+            <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>Request a Showing</h2>
+            <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+          </div>
+
+          {/* Agent Card */}
+          {agentName && (
+            <div style={{
+              background: "#fff", padding: 32, borderRadius: 8,
+              display: "flex", alignItems: "center", gap: 20, marginBottom: 40,
+              boxShadow: "0 4px 15px rgba(0,0,0,0.08)",
+            }}>
+              <div style={{
+                width: 80, height: 80, borderRadius: "50%",
+                background: "linear-gradient(135deg, #C9A84C, #e8c97a)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 32, fontWeight: 700, color: "#fff", flexShrink: 0,
+              }}>
+                {agentName.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 24, color: "#0f0f1a", marginBottom: 4, fontWeight: 600 }}>{agentName}</div>
+                {agentPhone && (
+                  <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#666" }}>{agentPhone}</div>
+                )}
+              </div>
+              {agentPhone && (
+                <a href={`tel:${agentPhone}`} style={{
+                  background: "#C9A84C", color: "#0f0f1a", border: "none",
+                  padding: "12px 28px", borderRadius: 6, fontFamily: "'Jost', sans-serif",
+                  fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
+                  cursor: "pointer", textDecoration: "none", transition: "background 0.3s",
+                }}>Call</a>
+              )}
+            </div>
+          )}
+
+          {/* Lead Capture Form */}
+          <PublicLeadCaptureForm
+            theme={{ bg: "#fff", text: "#0f0f1a", sub: "#666", accent: "#C9A84C", border: "#e0e0e0", card: "#f5f5f5" }}
+            micrositeId={microsite.id}
+            listingId={microsite.property_data?.listing_id || microsite.listing_id}
+          />
+        </div>
+      </div>
 
       {/* Footer */}
       <div style={{
-        padding: "30px 16px",
-        borderTop: `1px solid ${theme.border}`,
-        textAlign: "center",
+        background: "#0f0f1a",
+        borderTop: "1px solid #C9A84C",
+        padding: 40,
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
       }}>
-        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: theme.sub, marginBottom: 8 }}>
-          Powered by
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#C9A84C", fontWeight: 700, letterSpacing: "0.08em" }}>
+          MILESTONE MEDIA
         </div>
-        <a
-          href="https://milestonemediaphotography.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            fontFamily: "'Cormorant Garamond', serif",
-            fontSize: 14,
-            color: theme.accent,
-            textDecoration: "none",
-          }}
-        >
-          Milestone Media & Photography
-        </a>
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#666" }}>
+          © 2026 Milestone Media. All rights reserved.
+        </div>
       </div>
     </div>
   );
