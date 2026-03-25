@@ -2065,6 +2065,7 @@ function MicrositeView() {
         matterport_url: data.matterportUrl,
         video_url: data.videoUrl || listingVideo,
         floorplan_url: listingFloorplan,
+        gallery_photos: listingPhotos,
       };
 
       // Build the record to insert
@@ -2796,41 +2797,12 @@ function PublicMicrosite() {
         setMicrosite(msData);
         const pd = msData.property_data || {};
 
-        // Fetch media from listing-media bucket
-        if (pd.listing_id) {
-          // Photos
-          const { data: photoFiles } = await supabase.storage
-            .from("listing-media")
-            .list(`${pd.listing_id}/photos`, { sortBy: { column: "name", order: "asc" } });
-          if (photoFiles && photoFiles.length > 0) {
-            const urls = photoFiles
-              .filter(f => /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name))
-              .map(f => supabase.storage.from("listing-media").getPublicUrl(`${pd.listing_id}/photos/${f.name}`).data.publicUrl);
-            setPhotos(urls);
-          }
-
-          // Video
-          const { data: videoFiles } = await supabase.storage
-            .from("listing-media")
-            .list(`${pd.listing_id}/video`);
-          if (videoFiles && videoFiles.length > 0) {
-            const vid = videoFiles.find(f => /\.(mp4|mov|webm)$/i.test(f.name));
-            if (vid) {
-              setVideoUrl(supabase.storage.from("listing-media").getPublicUrl(`${pd.listing_id}/video/${vid.name}`).data.publicUrl);
-            }
-          }
-
-          // Floorplan
-          const { data: fpFiles } = await supabase.storage
-            .from("listing-media")
-            .list(`${pd.listing_id}/floorplan`);
-          if (fpFiles && fpFiles.length > 0) {
-            const fp = fpFiles.find(f => /\.(jpg|jpeg|png|webp|gif|pdf)$/i.test(f.name));
-            if (fp) {
-              setFloorplanUrl(supabase.storage.from("listing-media").getPublicUrl(`${pd.listing_id}/floorplan/${fp.name}`).data.publicUrl);
-            }
-          }
+        // Use gallery photos saved at publish time (storage .list() requires auth)
+        if (pd.gallery_photos && pd.gallery_photos.length > 0) {
+          setPhotos(pd.gallery_photos);
         }
+        if (pd.video_url) setVideoUrl(pd.video_url);
+        if (pd.floorplan_url) setFloorplanUrl(pd.floorplan_url);
 
         setLoading(false);
       } catch (err) {
