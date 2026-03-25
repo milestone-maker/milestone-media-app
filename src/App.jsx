@@ -1978,7 +1978,7 @@ function MicrositeView() {
         <select
           style={{ ...inputStyle, cursor: "pointer" }}
           value={selectedListingId || ""}
-          onChange={e => setSelectedListingId(e.target.value ? Number(e.target.value) : null)}
+          onChange={e => setSelectedListingId(e.target.value || null)}
         >
           <option value="">— Choose a listing —</option>
           {listings.map(l => (
