@@ -9,7 +9,7 @@
 //   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
 //   (reuses same OAuth2 creds as calendar.js)
 
-const nodemailer = require("nodemailer");
+import nodemailer from "nodemailer";
 
 const BUSINESS_EMAIL = "smiles@milestonemediaphoto.com";
 const BUSINESS_NAME = "Milestone Media & Photography";
@@ -173,7 +173,7 @@ function buildClientEmail(b) {
 }
 
 // ── Handler ──
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
