@@ -1,15 +1,15 @@
-// Vercel Serverless Function â Google Calendar integration for Milestone Media bookings
+// Vercel Serverless Function — Google Calendar integration for Milestone Media bookings
 // Endpoints:
-//   POST /api/calendar  â create a calendar event for a new booking
-//   GET  /api/calendar?date=YYYY-MM-DD  â return busy times for a given date
+//   POST /api/calendar  → create a calendar event for a new booking
+//   GET  /api/calendar?date=YYYY-MM-DD  → return busy times for a given date
 //
 // Required Vercel environment variables:
 //   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN, GOOGLE_CALENDAR_ID
-//   SUPABASE_SERVICE_ROLE_KEY (optional â for updating booking records)
+//   SUPABASE_SERVICE_ROLE_KEY (optional — for updating booking records)
 
 const SUPABASE_URL = "https://cbpnjuotoxtmefmedpmj.supabase.co";
 
-// ââ helpers ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── helpers ──────────────────────────────────────────────────────────
 async function refreshAccessToken() {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -33,7 +33,7 @@ function calendarId() {
   return process.env.GOOGLE_CALENDAR_ID || "primary";
 }
 
-// ââ CORS helper ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── CORS helper ──────────────────────────────────────────────────────
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
@@ -42,7 +42,7 @@ function corsHeaders() {
   };
 }
 
-// ââ GET: fetch busy slots for a date âââââââââââââââââââââââââââââââââ
+// ── GET: fetch busy slots for a date ─────────────────────────────────
 async function handleGet(req, res) {
   const { date } = req.query;
   if (!date) return res.status(400).json({ error: "date query param required (YYYY-MM-DD)" });
@@ -79,7 +79,7 @@ async function handleGet(req, res) {
   return res.json({ date, busySlots });
 }
 
-// ââ POST: create calendar event ââââââââââââââââââââââââââââââââââââââ
+// ── POST: create calendar event ──────────────────────────────────────
 async function handlePost(req, res) {
   const body = req.body;
   if (!body || !body.booking_date || !body.booking_time) {
@@ -89,7 +89,7 @@ async function handlePost(req, res) {
   const accessToken = await refreshAccessToken();
   const cid = calendarId();
 
-  // Parse time like "9:00 AM" â 24h
+  // Parse time like "9:00 AM" → 24h
   const timeParts = body.booking_time.match(/(\d+):(\d+)\s*(AM|PM)/i);
   if (!timeParts) return res.status(400).json({ error: "Invalid booking_time format. Expected HH:MM AM/PM" });
   let hour = parseInt(timeParts[1]);
@@ -104,7 +104,7 @@ async function handlePost(req, res) {
   const endDateTime = `${body.booking_date}T${endHour}:${min}:00-06:00`;
 
   const pkg = body.selected_package ? ` (${body.selected_package})` : "";
-  const summary = `Milestone Media â ${body.client_name || "Booking"}${pkg}`;
+  const summary = `Milestone Media — ${body.client_name || "Booking"}${pkg}`;
   const description = [
     `Client: ${body.client_name || "N/A"}`,
     `Email: ${body.client_email || "N/A"}`,
@@ -172,7 +172,7 @@ async function handlePost(req, res) {
   return res.json({ success: true, eventId: created.id, htmlLink: created.htmlLink });
 }
 
-// ââ main handler âââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// ── main handler ─────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());

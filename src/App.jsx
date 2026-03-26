@@ -3,94 +3,99 @@ import { supabase } from "./supabaseClient";
 
 const NAV = ["Showcase", "Book", "My Media", "Analytics"];
 
-const RELA_PHOTOS = {
-  "2410prosperitydr": [
-    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-001_248.jpg",
-    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-002_276.jpg",
-    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-003_221.jpg",
-    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-004_311.jpg",
-    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-005_249.jpg",
-    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-006_822.jpg",
-    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-007_231.jpg",
-    "https://media.relahq.com/public/styles/kb_full/s3/property-images/prop-nid-165942746/s_surrey_dr-008_237.jpg",
-  ],
-};
-
-const LISTINGS = [
-  {
-    id: 1,
-    address: "2410 Prosperity Dr",
-    city: "Dallas, TX",
-    price: "$1,250,000",
-    beds: 4, baths: 3.5, sqft: "3,840",
-    package: "Luxury",
-    status: "Live",
-    img: RELA_PHOTOS["2410prosperitydr"][0],
-    gallery: RELA_PHOTOS["2410prosperitydr"],
-    views: 1482, shares: 64, leads: 12,
-    media: ["Photos", "Drone", "3D Tour", "Film", "Floor Plan", "Microsite"],
-    relaSite: "https://sites.listvt.com/2410prosperitydr",
-  },
-  {
-    id: 2,
-    address: "2103 Preston Hollow Rd",
-    city: "Dallas, TX 75225",
-    price: "$895,000",
-    beds: 3, baths: 2, sqft: "2,610",
-    package: "Signature",
-    status: "In Production",
-    img: "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=800&q=80",
-    gallery: null,
-    views: 741, shares: 28, leads: 5,
-    media: ["Photos", "Drone", "3D Tour", "Floor Plan"],
-    relaSite: null,
-  },
-  {
-    id: 3,
-    address: "918 Kessler Pkwy",
-    city: "Dallas, TX 75208",
-    price: "$2,100,000",
-    beds: 5, baths: 5, sqft: "5,200",
-    package: "Luxury",
-    status: "Live",
-    img: "https://images.unsplash.com/photo-1600585154526-990dced4db0d?w=800&q=80",
-    gallery: null,
-    views: 2941, shares: 118, leads: 23,
-    media: ["Photos", "Drone", "3D Tour", "Film", "Floor Plan", "Microsite", "Twilight"],
-    relaSite: null,
-  },
-];
+// LISTINGS and RELA_PHOTOS removed — all listing data now fetched from Supabase
 
 const PACKAGES = [
   {
     name: "Essential",
-    price: "$249",
+    price: "Pricing depends on square footage",
     color: "#8fa3b1",
-    features: ["Professional Photography"],
+    features: ["Professional Photography", "3D Virtual Tour with Floor Plan"],
     desc: "Crystal-clear stills that stop the scroll.",
   },
   {
     name: "Signature",
     price: "$549",
     color: "#c9a84c",
-    features: ["Photography", "Drone", "Matterport 3D", "Floor Plan"],
+    features: ["Photography", "Drone", "Matterport 3D", "Floor Plan", "Property Microsite"],
     desc: "The complete digital listing presence.",
     popular: true,
-  },
-  {
-    name: "Zillow Ready",
-    price: "$649",
-    color: "#b08d57",
-    features: ["Everything in Signature", "Zillow Showcase Optimized"],
-    desc: "Engineered to dominate Zillow search.",
   },
   {
     name: "Luxury",
     price: "$1,095",
     color: "#e5c97e",
-    features: ["Everything +", "Cinematic Film", "Custom Microsite", "Twilight Photos"],
+    features: ["Everything +", "Cinematic Film", "Custom Domain Microsite", "Twilight Photos"],
     desc: "The full cinematic experience.",
   },
+];
+
+// ============================================================
+// PRICING DATA — pulled from Rela HQ
+// ============================================================
+const SQFT_TIERS = [
+  { label: "Under 1,500 sf", value: "under_1500" },
+  { label: "1,501 – 2,500 sf", value: "1501_2500" },
+  { label: "2,501 – 3,500 sf", value: "2501_3500" },
+  { label: "3,501 – 4,500 sf", value: "3501_4500" },
+  { label: "Over 4,501 sf", value: "over_4501" },
+];
+
+const ESSENTIAL_PRICING = {
+  under_1500: 185, "1501_2500": 205, "2501_3500": 225, "3501_4500": 250, over_4501: 275,
+};
+
+const INDIVIDUAL_SERVICES = {
+  photography: {
+    name: "Still Photography",
+    desc: "Premium HDR Listing Photos (Interior & Exterior): 30+ professionally edited images.",
+    icon: "📷",
+    priceByTier: { under_1500: 110, "1501_2500": 130, "2501_3500": 150, "3501_4500": 175, over_4501: 200 },
+  },
+  matterport: {
+    name: "Matterport 3D Tour",
+    desc: "Immersive, self-guided 3D walkthrough. Dollhouse view, floor plans & room navigation included.",
+    icon: "🔮",
+    priceByTier: { under_1500: 200, "1501_2500": 250, "2501_3500": 300, "3501_4500": 350, over_4501: 400 },
+  },
+  zillow3d: {
+    name: "Zillow 3D Walkthrough & Floor Plan",
+    desc: "Panoramic 3D tour integrated with high-resolution downloadable floor plans.",
+    icon: "📐",
+    fixedPrice: 100,
+  },
+  aerialVideo: {
+    name: "Aerial Video",
+    desc: "Captivating aerial video (up to 2 min) of the home's exterior and surrounding area.",
+    icon: "🚁",
+    fixedPrice: 200,
+  },
+  aerialPhotos: {
+    name: "Aerial Photos",
+    desc: "5-10 aerial photos showcasing the home's exterior, yard, and neighborhood.",
+    icon: "🛩️",
+    fixedPrice: 125,
+  },
+  socialVideo: {
+    name: "Social Media Listing Video",
+    desc: "Dynamic 30-second mobile-friendly reel optimized for social media.",
+    icon: "🎬",
+    fixedPrice: 125,
+  },
+  cinematicFilm: {
+    name: "Cinematic Film",
+    desc: "Full cinematic property film with professional editing and music.",
+    icon: "🎥",
+    fixedPrice: 400,
+  },
+};
+
+const ADDONS = [
+  { id: "microsite", name: "Custom Property Microsite", price: 150, icon: "🌐", desc: "Custom-designed property website showcasing your listing." },
+  { id: "amenities", name: "Amenities Photography", price: 20, unit: "/location", icon: "🏊", desc: "Professional photos of on-site amenities (pools, clubhouses, etc.).", hasQty: true, maxQty: 5 },
+  { id: "staging1", name: "Virtual Staging — 1 Room", price: 25, icon: "🛋️", desc: "Lifelike virtual furniture for 1 room." },
+  { id: "staging2", name: "Virtual Staging — 2 Rooms", price: 50, icon: "🛋️", desc: "Lifelike virtual furniture for 2 rooms." },
+  { id: "staging3", name: "Virtual Staging — 3 Rooms", price: 75, icon: "🛋️", desc: "Lifelike virtual furniture for 3 rooms." },
 ];
 
 const MEDIA_ICONS = {
@@ -372,15 +377,70 @@ function PackageBadge({ pkg }) {
 function ShowcaseView({ onBook }) {
   const [active, setActive] = useState(0);
   const [heroPhoto, setHeroPhoto] = useState(0);
-  const listing = LISTINGS[active];
+  const [listings, setListings] = useState([]);
+  const [listingPhotos, setListingPhotos] = useState({});
   const [mediaHover, setMediaHover] = useState(null);
-  const photos = listing.gallery || [listing.img];
+  const [loadingListings, setLoadingListings] = useState(true);
+
+  useEffect(() => {
+    const fetchListings = async () => {
+      const { data: rows, error } = await supabase
+        .from("listings")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (!error && rows && rows.length > 0) {
+        setListings(rows);
+        // Fetch photos for each listing from listing-media bucket
+        const photoMap = {};
+        for (const row of rows) {
+          const { data: photoFiles } = await supabase.storage
+            .from("listing-media")
+            .list(`${row.id}/photos`, { sortBy: { column: "name", order: "asc" } });
+          if (photoFiles && photoFiles.length > 0) {
+            photoMap[row.id] = photoFiles
+              .filter(f => /\.(jpg|jpeg|png|webp|gif)$/i.test(f.name))
+              .map(f => supabase.storage.from("listing-media").getPublicUrl(`${row.id}/photos/${f.name}`).data.publicUrl);
+          }
+        }
+        setListingPhotos(photoMap);
+      }
+      setLoadingListings(false);
+    };
+    fetchListings();
+  }, []);
+
+  const listing = listings[active] || {};
+  const photos = listingPhotos[listing.id] || (listing.hero_img ? [listing.hero_img] : []);
+  const displayMedia = listing.media_types || (listing.package === "Luxury"
+    ? ["Photos", "Drone", "3D Tour", "Film", "Floor Plan", "Microsite", "Twilight"]
+    : listing.package === "Signature"
+    ? ["Photos", "Drone", "3D Tour", "Floor Plan"]
+    : ["Photos"]);
+
+  if (loadingListings) return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "80px 0" }}>
+      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#c9a84c" }}>Loading listings...</div>
+    </div>
+  );
+
+  if (listings.length === 0) return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "80px 0", gap: 16 }}>
+      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#fff" }}>No Listings Yet</div>
+      <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.5)" }}>Create your first listing in the Admin panel.</div>
+      <button onClick={onBook} style={{
+        background: "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
+        border: "none", borderRadius: 10, padding: "14px 28px",
+        fontFamily: "'Jost', sans-serif", fontWeight: 600, fontSize: 13,
+        letterSpacing: "0.1em", textTransform: "uppercase", color: "#0a1628", cursor: "pointer",
+      }}>Book Your First Listing →</button>
+    </div>
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
       {/* Hero Listing */}
       <div style={{ position: "relative", borderRadius: 16, overflow: "hidden", height: 420 }}>
-        <img src={photos[heroPhoto] || listing.img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", transition: "opacity 0.3s" }} />
+        <img src={photos[heroPhoto] || listing.hero_img || ""} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", transition: "opacity 0.3s" }} />
         <div style={{
           position: "absolute", inset: 0,
           background: "linear-gradient(to top, rgba(8,18,40,0.95) 0%, rgba(8,18,40,0.4) 60%, transparent 100%)",
@@ -449,9 +509,9 @@ function ShowcaseView({ onBook }) {
           {listing.city}
         </div>
         <div style={{ display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#c9a84c", fontWeight: 700 }}>{listing.price}</span>
+          <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#c9a84c", fontWeight: 700 }}>{typeof listing.price === "number" ? `$${listing.price.toLocaleString()}` : listing.price}</span>
           <span style={{ fontFamily: "'Jost', sans-serif", color: "rgba(255,255,255,0.5)", fontSize: 13 }}>
-            {listing.beds} bd · {listing.baths} ba · {listing.sqft} sqft
+            {listing.beds} bd · {listing.baths} ba · {Number(listing.sqft || 0).toLocaleString()} sqft
           </span>
         </div>
       </div>
@@ -462,7 +522,7 @@ function ShowcaseView({ onBook }) {
           Delivered Media
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {listing.media.map((m) => (
+          {displayMedia.map((m) => (
             <div key={m} onMouseEnter={() => setMediaHover(m)} onMouseLeave={() => setMediaHover(null)}
               style={{
                 background: mediaHover === m ? "rgba(201,168,76,0.2)" : "rgba(255,255,255,0.05)",
@@ -480,9 +540,9 @@ function ShowcaseView({ onBook }) {
       {/* Stats row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
         {[
-          { label: "Total Views", value: listing.views.toLocaleString(), icon: "👁" },
-          { label: "Shares", value: listing.shares, icon: "↗" },
-          { label: "Leads", value: listing.leads, icon: "✉" },
+          { label: "Total Views", value: (listing.views || 0).toLocaleString(), icon: "👁" },
+          { label: "Shares", value: listing.shares || 0, icon: "↗" },
+          { label: "Leads", value: listing.leads || 0, icon: "✉" },
         ].map((s) => (
           <div key={s.label} style={{
             background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
@@ -513,37 +573,221 @@ function ShowcaseView({ onBook }) {
 }
 
 function BookView() {
-  const [selected, setSelected] = useState(1);
+  // ── State ──
   const [step, setStep] = useState(1);
-  const [date, setDate] = useState("");
+  const [bookingMode, setBookingMode] = useState(null); // "package" | "individual"
   const [address, setAddress] = useState("");
+  const [city, setCity] = useState("");
+  const [state, setState] = useState("Texas");
+  const [zip, setZip] = useState("");
+  const [sqftTier, setSqftTier] = useState("");
+  const [accessMethod, setAccessMethod] = useState("");
+  // Package mode
+  const [selectedPackage, setSelectedPackage] = useState(null); // 0,1,2
+  // Individual service mode
+  const [selectedServices, setSelectedServices] = useState({}); // { photography: true, matterport: true, ... }
+  // Add-ons
+  const [selectedAddons, setSelectedAddons] = useState({}); // { microsite: true, amenities: 2, ... }
+  // Scheduling
+  const [selectedDate, setSelectedDate] = useState("");
+  const [selectedTime, setSelectedTime] = useState("");
+  const [busySlots, setBusySlots] = useState([]);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  // Contact info
+  const [clientName, setClientName] = useState("");
+  const [clientEmail, setClientEmail] = useState("");
+  const [clientPhone, setClientPhone] = useState("");
+  // Booking complete
   const [booked, setBooked] = useState(false);
+  const [processing, setProcessing] = useState(false);
 
-  const pkg = PACKAGES[selected];
+  const STEPS = ["Address", "Services", "Add-ons", "Schedule", "Review & Pay"];
 
-  if (booked) return (
-    <div style={{ textAlign: "center", padding: "60px 20px" }}>
-      <div style={{ fontSize: 64, marginBottom: 24 }}>✨</div>
-      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 40, color: "#c9a84c", marginBottom: 12 }}>
-        You're Booked!
+  // Fetch Google Calendar busy slots when date changes
+  React.useEffect(() => {
+    if (!selectedDate) { setBusySlots([]); return; }
+    let cancelled = false;
+    setLoadingSlots(true);
+    fetch(`/api/calendar?date=${selectedDate}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!cancelled) setBusySlots(data.busySlots || []);
+      })
+      .catch(() => { if (!cancelled) setBusySlots([]); })
+      .finally(() => { if (!cancelled) setLoadingSlots(false); });
+    return () => { cancelled = true; };
+  }, [selectedDate]);
+
+  // Check if a time slot overlaps with any busy period
+  const isSlotBusy = (slotLabel) => {
+    if (!busySlots.length || !selectedDate) return false;
+    const parts = slotLabel.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!parts) return false;
+    let h = parseInt(parts[1]);
+    const m = parseInt(parts[2]);
+    if (parts[3].toUpperCase() === "PM" && h !== 12) h += 12;
+    if (parts[3].toUpperCase() === "AM" && h === 12) h = 0;
+    const slotStart = new Date(`${selectedDate}T${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:00`);
+    const slotEnd = new Date(slotStart.getTime() + 2 * 60 * 60 * 1000);
+    return busySlots.some(b => {
+      const bStart = new Date(b.start);
+      const bEnd = new Date(b.end);
+      return slotStart < bEnd && slotEnd > bStart;
+    });
+  };
+
+  // ── Helpers ──
+  const inputStyle = {
+    width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 8, padding: "13px 16px", color: "#fff",
+    fontFamily: "'Jost', sans-serif", fontSize: 14, outline: "none",
+    boxSizing: "border-box", colorScheme: "dark", transition: "border-color 0.2s",
+  };
+  const labelStyle = {
+    fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.5)",
+    letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8, display: "block",
+  };
+
+  const getServicePrice = (svc) => {
+    if (svc.fixedPrice !== undefined) return svc.fixedPrice;
+    if (svc.priceByTier && sqftTier) return svc.priceByTier[sqftTier];
+    return null;
+  };
+
+  // ── Total calc ──
+  const calcTotal = () => {
+    let total = 0;
+    if (bookingMode === "package") {
+      if (selectedPackage === 0 && sqftTier) total += ESSENTIAL_PRICING[sqftTier] || 0;
+      else if (selectedPackage === 1) total += 549;
+      else if (selectedPackage === 2) total += 1095;
+    } else if (bookingMode === "individual") {
+      Object.keys(selectedServices).forEach(key => {
+        if (selectedServices[key]) {
+          const svc = INDIVIDUAL_SERVICES[key];
+          const p = getServicePrice(svc);
+          if (p) total += p;
+        }
+      });
+    }
+    // Add-ons
+    ADDONS.forEach(a => {
+      const val = selectedAddons[a.id];
+      if (val) {
+        if (a.hasQty) total += a.price * (typeof val === "number" ? val : 1);
+        else if (val === true) total += a.price;
+      }
+    });
+    return total;
+  };
+
+  const canProceed = () => {
+    if (step === 1) return address.trim() && city.trim() && zip.trim() && sqftTier;
+    if (step === 2) {
+      if (bookingMode === "package") return selectedPackage !== null;
+      if (bookingMode === "individual") return Object.values(selectedServices).some(v => v);
+      return false;
+    }
+    if (step === 3) return true; // add-ons optional
+    if (step === 4) return selectedDate && selectedTime;
+    if (step === 5) return clientName.trim() && clientEmail.trim() && clientEmail.includes("@");
+    return true;
+  };
+
+  const handleBook = async () => {
+    setProcessing(true);
+    try {
+      const selSvcs = bookingMode === "individual"
+        ? Object.keys(selectedServices).filter(k => selectedServices[k])
+        : [];
+      const selAddons = [];
+      ADDONS.forEach(a => {
+        if (selectedAddons[a.id]) selAddons.push({ id: a.id, qty: typeof selectedAddons[a.id] === "number" ? selectedAddons[a.id] : 1 });
+      });
+      const bookingData = {
+        client_name: clientName,
+        client_email: clientEmail,
+        client_phone: clientPhone || null,
+        address, city, state: st, zip,
+        sqft_tier: sqftTier,
+        access_method: accessMethod || "lockbox",
+        booking_mode: bookingMode,
+        selected_package: bookingMode === "package" ? ["essential","signature","luxury"][selectedPackage] : null,
+        selected_services: selSvcs,
+        selected_addons: selAddons,
+        booking_date: selectedDate,
+        booking_time: selectedTime,
+        subtotal: calcTotal(),
+      };
+      const { data: inserted, error } = await supabase.from("bookings").insert(bookingData).select("id").single();
+      if (error) console.error("Booking error:", error);
+
+      // Create Google Calendar event
+      try {
+        const calBody = { ...bookingData, booking_id: inserted?.id };
+        await fetch("/api/calendar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(calBody),
+        });
+      } catch (calErr) {
+        console.error("Calendar sync error (non-blocking):", calErr);
+      }
+    } catch (err) {
+      console.error("Booking error:", err);
+    }
+    setProcessing(false);
+    setBooked(true);
+  };
+
+  const resetBooking = () => {
+    setStep(1); setBookingMode(null); setAddress(""); setCity(""); setState("Texas");
+    setZip(""); setSqftTier(""); setAccessMethod(""); setSelectedPackage(null);
+    setSelectedServices({}); setSelectedAddons({}); setSelectedDate(""); setSelectedTime("");
+    setClientName(""); setClientEmail(""); setClientPhone("");
+    setBooked(false); setProcessing(false);
+  };
+
+  // ── Time slots (placeholder until Google Calendar integration) ──
+  const TIME_SLOTS = [
+    "9:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
+    "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM",
+  ];
+
+  // ── BOOKED STATE ──
+  if (booked) {
+    const pkgName = bookingMode === "package" ? PACKAGES[selectedPackage]?.name : "Individual Services";
+    return (
+      <div style={{ textAlign: "center", padding: "60px 20px" }}>
+        <div style={{ fontSize: 64, marginBottom: 24 }}>✨</div>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 40, color: "#c9a84c", marginBottom: 12 }}>
+          You're Booked!
+        </div>
+        <div style={{ fontFamily: "'Jost', sans-serif", color: "rgba(255,255,255,0.6)", fontSize: 15, marginBottom: 8 }}>
+          Your {pkgName} session for {address}, {city} {state} {zip} is confirmed.
+        </div>
+        <div style={{ fontFamily: "'Jost', sans-serif", color: "rgba(255,255,255,0.4)", fontSize: 13, marginBottom: 8 }}>
+          {selectedDate} at {selectedTime}
+        </div>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#c9a84c", marginBottom: 32 }}>
+          Total: ${calcTotal().toLocaleString()}
+        </div>
+        <div style={{ fontFamily: "'Jost', sans-serif", color: "rgba(255,255,255,0.5)", fontSize: 13, marginBottom: 32 }}>
+          We'll reach out within 24 hours to finalize details.
+        </div>
+        <button onClick={resetBooking} style={{
+          background: "transparent", border: "1px solid rgba(201,168,76,0.5)",
+          color: "#c9a84c", padding: "12px 28px", borderRadius: 8,
+          fontFamily: "'Jost', sans-serif", fontSize: 13, letterSpacing: "0.1em",
+          textTransform: "uppercase", cursor: "pointer",
+        }}>Book Another Listing</button>
       </div>
-      <div style={{ fontFamily: "'Jost', sans-serif", color: "rgba(255,255,255,0.6)", fontSize: 15, marginBottom: 32 }}>
-        Your {pkg.name} session for {address} is confirmed.<br />
-        We'll reach out within 24 hours to finalize details.
-      </div>
-      <button onClick={() => { setBooked(false); setStep(1); setAddress(""); setDate(""); }} style={{
-        background: "transparent", border: "1px solid rgba(201,168,76,0.5)",
-        color: "#c9a84c", padding: "12px 28px", borderRadius: 8,
-        fontFamily: "'Jost', sans-serif", fontSize: 13, letterSpacing: "0.1em",
-        textTransform: "uppercase", cursor: "pointer",
-      }}>
-        Book Another Listing
-      </button>
-    </div>
-  );
+    );
+  }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
+      {/* Header */}
       <div>
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 32, color: "#fff", marginBottom: 6 }}>
           Book a Session
@@ -553,100 +797,395 @@ function BookView() {
         </div>
       </div>
 
-      {/* Steps */}
+      {/* Running total bar */}
+      {(step >= 2) && (
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          background: "rgba(201,168,76,0.08)", border: "1px solid rgba(201,168,76,0.2)",
+          borderRadius: 10, padding: "12px 20px",
+        }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "#c9a84c", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+            {address}, {city}
+          </div>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#c9a84c", fontWeight: 700 }}>
+            ${calcTotal().toLocaleString()}
+          </div>
+        </div>
+      )}
+
+      {/* Step indicators */}
       <div style={{ display: "flex", gap: 0 }}>
-        {["Choose Package", "Property Details", "Confirm"].map((s, i) => (
+        {STEPS.map((s, i) => (
           <div key={s} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
             <div style={{
-              width: 32, height: 32, borderRadius: "50%",
+              width: 30, height: 30, borderRadius: "50%",
               background: step > i + 1 ? "#c9a84c" : step === i + 1 ? "rgba(201,168,76,0.2)" : "rgba(255,255,255,0.05)",
               border: step >= i + 1 ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.1)",
               display: "flex", alignItems: "center", justifyContent: "center",
-              fontFamily: "'Jost', sans-serif", fontSize: 13, fontWeight: 600,
+              fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 600,
               color: step > i + 1 ? "#0a1628" : step === i + 1 ? "#c9a84c" : "rgba(255,255,255,0.3)",
               transition: "all 0.3s", marginBottom: 6,
             }}>{step > i + 1 ? "✓" : i + 1}</div>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: step === i + 1 ? "#c9a84c" : "rgba(255,255,255,0.3)", letterSpacing: "0.08em", textTransform: "uppercase" }}>{s}</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 9, color: step === i + 1 ? "#c9a84c" : "rgba(255,255,255,0.3)", letterSpacing: "0.06em", textTransform: "uppercase", textAlign: "center" }}>{s}</div>
           </div>
         ))}
       </div>
 
-      {/* Step 1: packages */}
+      {/* ═══════════ STEP 1: ADDRESS ═══════════ */}
       {step === 1 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
-          {PACKAGES.map((p, i) => (
-            <div key={p.name} onClick={() => setSelected(i)} style={{
-              border: selected === i ? `2px solid ${p.color}` : "2px solid rgba(255,255,255,0.08)",
-              borderRadius: 12, padding: 20, cursor: "pointer",
-              background: selected === i ? `rgba(${p.color === "#c9a84c" ? "201,168,76" : "255,255,255"},0.05)` : "rgba(255,255,255,0.02)",
-              position: "relative", transition: "all 0.2s",
-            }}>
-              {p.popular && (
-                <div style={{
-                  position: "absolute", top: -1, right: 12,
-                  background: "#c9a84c", color: "#0a1628",
-                  fontFamily: "'Jost', sans-serif", fontSize: 9, fontWeight: 700,
-                  letterSpacing: "0.1em", textTransform: "uppercase",
-                  padding: "3px 8px", borderRadius: "0 0 6px 6px",
-                }}>Most Popular</div>
-              )}
-              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: p.color, marginBottom: 4 }}>{p.name}</div>
-              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#fff", fontWeight: 700, marginBottom: 10 }}>{p.price}</div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 10 }}>{p.desc}</div>
-              {p.features.map(f => (
-                <div key={f} style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.6)", marginBottom: 3 }}>
-                  <span style={{ color: p.color, marginRight: 6 }}>✓</span>{f}
-                </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12 }}>
+            <div>
+              <label style={labelStyle}>Street Address</label>
+              <input value={address} onChange={e => setAddress(e.target.value)} placeholder="123 Main St" style={inputStyle} />
+            </div>
+            <div style={{ width: 80 }}>
+              <label style={labelStyle}>Unit #</label>
+              <input placeholder="Apt" style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 100px", gap: 12 }}>
+            <div>
+              <label style={labelStyle}>City</label>
+              <input value={city} onChange={e => setCity(e.target.value)} placeholder="Dallas" style={inputStyle} />
+            </div>
+            <div>
+              <label style={labelStyle}>State</label>
+              <select value={state} onChange={e => setState(e.target.value)} style={{ ...inputStyle, cursor: "pointer" }}>
+                <option value="Texas">Texas</option>
+                <option value="Oklahoma">Oklahoma</option>
+                <option value="Arkansas">Arkansas</option>
+                <option value="Louisiana">Louisiana</option>
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Zip</label>
+              <input value={zip} onChange={e => setZip(e.target.value)} placeholder="75201" style={inputStyle} />
+            </div>
+          </div>
+          <div>
+            <label style={labelStyle}>Property Size</label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+              {SQFT_TIERS.map(t => (
+                <button key={t.value} onClick={() => setSqftTier(t.value)} style={{
+                  padding: "12px 4px", borderRadius: 8, cursor: "pointer",
+                  border: sqftTier === t.value ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.08)",
+                  background: sqftTier === t.value ? "rgba(201,168,76,0.1)" : "rgba(255,255,255,0.03)",
+                  color: sqftTier === t.value ? "#c9a84c" : "rgba(255,255,255,0.5)",
+                  fontFamily: "'Jost', sans-serif", fontSize: 11, textAlign: "center",
+                  transition: "all 0.2s", lineHeight: 1.3,
+                }}>{t.label}</button>
               ))}
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* Step 2 */}
-      {step === 2 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {[
-            { label: "Property Address", placeholder: "123 Main St, Dallas TX", val: address, set: setAddress },
-            { label: "Preferred Shoot Date", placeholder: "Select date", val: date, set: setDate, type: "date" },
-          ].map(f => (
-            <div key={f.label}>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>{f.label}</div>
-              <input type={f.type || "text"} placeholder={f.placeholder} value={f.val} onChange={e => f.set(e.target.value)}
-                style={{
-                  width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
-                  borderRadius: 8, padding: "13px 16px", color: "#fff",
-                  fontFamily: "'Jost', sans-serif", fontSize: 14, outline: "none",
-                  boxSizing: "border-box", colorScheme: "dark",
-                }} />
-            </div>
-          ))}
-          <div style={{ background: "rgba(201,168,76,0.08)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 10, padding: 16 }}>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "#c9a84c", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>Selected Package</div>
-            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#fff" }}>{pkg.name} — <span style={{ color: "#c9a84c" }}>{pkg.price}</span></div>
+          </div>
+          <div>
+            <label style={labelStyle}>Method of Access</label>
+            <input value={accessMethod} onChange={e => setAccessMethod(e.target.value)} placeholder="Lockbox code, agent, seller, etc." style={inputStyle} />
           </div>
         </div>
       )}
 
-      {/* Step 3 */}
-      {step === 3 && (
-        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 24 }}>
-          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: "#fff", marginBottom: 20 }}>Confirm Your Booking</div>
-          {[
-            { label: "Package", value: `${pkg.name} — ${pkg.price}` },
-            { label: "Address", value: address || "Not provided" },
-            { label: "Date", value: date || "Flexible" },
-            { label: "Turnaround", value: "24–48 hours" },
-          ].map(r => (
-            <div key={r.label} style={{ display: "flex", justifyContent: "space-between", padding: "12px 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-              <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)", letterSpacing: "0.08em", textTransform: "uppercase" }}>{r.label}</span>
-              <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff" }}>{r.value}</span>
+      {/* ═══════════ STEP 2: SERVICE SELECTION ═══════════ */}
+      {step === 2 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          {/* Mode toggle */}
+          <div style={{ display: "flex", gap: 0, borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.12)" }}>
+            {["package", "individual"].map(m => (
+              <button key={m} onClick={() => { setBookingMode(m); if (m === "package") setSelectedServices({}); if (m === "individual") setSelectedPackage(null); }} style={{
+                flex: 1, padding: "14px", border: "none", cursor: "pointer",
+                background: bookingMode === m ? "#c9a84c" : "rgba(255,255,255,0.03)",
+                color: bookingMode === m ? "#0a1628" : "rgba(255,255,255,0.5)",
+                fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 600,
+                letterSpacing: "0.1em", textTransform: "uppercase", transition: "all 0.2s",
+              }}>{m === "package" ? "Packages" : "Individual Services"}</button>
+            ))}
+          </div>
+
+          {/* PACKAGES view */}
+          {bookingMode === "package" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {PACKAGES.map((p, i) => {
+                const isEssential = i === 0;
+                const priceDisplay = isEssential
+                  ? (sqftTier ? `$${ESSENTIAL_PRICING[sqftTier]}` : "Select sqft")
+                  : p.price;
+                return (
+                  <div key={p.name} onClick={() => setSelectedPackage(i)} style={{
+                    border: selectedPackage === i ? `2px solid ${p.color}` : "2px solid rgba(255,255,255,0.08)",
+                    borderRadius: 12, padding: 20, cursor: "pointer",
+                    background: selectedPackage === i ? `rgba(${p.color === "#c9a84c" ? "201,168,76" : p.color === "#e5c97e" ? "229,201,126" : "143,163,177"},0.06)` : "rgba(255,255,255,0.02)",
+                    position: "relative", transition: "all 0.2s",
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                  }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+                        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: p.color }}>{p.name}</div>
+                        {p.popular && (
+                          <span style={{
+                            background: "#c9a84c", color: "#0a1628",
+                            fontFamily: "'Jost', sans-serif", fontSize: 9, fontWeight: 700,
+                            letterSpacing: "0.1em", textTransform: "uppercase",
+                            padding: "2px 8px", borderRadius: 4,
+                          }}>Most Popular</span>
+                        )}
+                      </div>
+                      <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 8 }}>{p.desc}</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                        {p.features.map(f => (
+                          <span key={f} style={{
+                            fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.6)",
+                            background: "rgba(255,255,255,0.05)", padding: "3px 8px", borderRadius: 4,
+                          }}>✓ {f}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: "#fff", fontWeight: 700, marginLeft: 16, textAlign: "right", whiteSpace: "nowrap" }}>
+                      {priceDisplay}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ))}
+          )}
+
+          {/* INDIVIDUAL SERVICES view */}
+          {bookingMode === "individual" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {Object.entries(INDIVIDUAL_SERVICES).map(([key, svc]) => {
+                const price = getServicePrice(svc);
+                const isSelected = !!selectedServices[key];
+                return (
+                  <div key={key} onClick={() => setSelectedServices(prev => ({ ...prev, [key]: !prev[key] }))} style={{
+                    border: isSelected ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.08)",
+                    borderRadius: 10, padding: 16, cursor: "pointer",
+                    background: isSelected ? "rgba(201,168,76,0.06)" : "rgba(255,255,255,0.02)",
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    transition: "all 0.2s",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
+                      <div style={{ fontSize: 24 }}>{svc.icon}</div>
+                      <div>
+                        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: isSelected ? "#c9a84c" : "#fff", fontWeight: 500 }}>{svc.name}</div>
+                        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{svc.desc}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: isSelected ? "#c9a84c" : "#fff", fontWeight: 700 }}>
+                        {price !== null ? `$${price}` : "—"}
+                      </div>
+                      <div style={{
+                        width: 24, height: 24, borderRadius: 6,
+                        border: isSelected ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.2)",
+                        background: isSelected ? "#c9a84c" : "transparent",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 14, color: "#0a1628", transition: "all 0.2s",
+                      }}>{isSelected ? "✓" : ""}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Nav buttons */}
+      {/* ═══════════ STEP 3: ADD-ONS ═══════════ */}
+      {step === 3 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: "#fff", marginBottom: 4 }}>
+            Enhance Your Shoot
+          </div>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 8 }}>
+            Optional add-ons to take your listing further. Skip if not needed.
+          </div>
+          {ADDONS.map(a => {
+            const isSelected = !!selectedAddons[a.id];
+            return (
+              <div key={a.id} onClick={() => {
+                if (a.hasQty) {
+                  setSelectedAddons(prev => prev[a.id] ? { ...prev, [a.id]: undefined } : { ...prev, [a.id]: 1 });
+                } else {
+                  setSelectedAddons(prev => ({ ...prev, [a.id]: !prev[a.id] }));
+                }
+              }} style={{
+                border: isSelected ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.08)",
+                borderRadius: 10, padding: 16, cursor: "pointer",
+                background: isSelected ? "rgba(201,168,76,0.06)" : "rgba(255,255,255,0.02)",
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                transition: "all 0.2s",
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flex: 1 }}>
+                  <div style={{ fontSize: 22 }}>{a.icon}</div>
+                  <div>
+                    <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: isSelected ? "#c9a84c" : "#fff", fontWeight: 500 }}>{a.name}</div>
+                    <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{a.desc}</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {a.hasQty && isSelected && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={e => e.stopPropagation()}>
+                      <button onClick={() => setSelectedAddons(prev => ({ ...prev, [a.id]: Math.max(1, (prev[a.id] || 1) - 1) }))} style={{
+                        width: 26, height: 26, borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)",
+                        background: "transparent", color: "#fff", cursor: "pointer", fontSize: 14,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>−</button>
+                      <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#fff", minWidth: 20, textAlign: "center" }}>{selectedAddons[a.id]}</span>
+                      <button onClick={() => setSelectedAddons(prev => ({ ...prev, [a.id]: Math.min(a.maxQty || 10, (prev[a.id] || 1) + 1) }))} style={{
+                        width: 26, height: 26, borderRadius: 6, border: "1px solid rgba(255,255,255,0.2)",
+                        background: "transparent", color: "#fff", cursor: "pointer", fontSize: 14,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>+</button>
+                    </div>
+                  )}
+                  <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: isSelected ? "#c9a84c" : "#fff", fontWeight: 700, whiteSpace: "nowrap" }}>
+                    ${a.price}{a.unit || ""}
+                  </div>
+                  <div style={{
+                    width: 22, height: 22, borderRadius: 6,
+                    border: isSelected ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.2)",
+                    background: isSelected ? "#c9a84c" : "transparent",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 13, color: "#0a1628", transition: "all 0.2s",
+                  }}>{isSelected ? "✓" : ""}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ═══════════ STEP 4: SCHEDULE ═══════════ */}
+      {step === 4 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: "#fff" }}>
+            Choose a Date & Time
+          </div>
+          <div>
+            <label style={labelStyle}>Preferred Shoot Date</label>
+            <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)}
+              min={new Date().toISOString().split("T")[0]}
+              style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Preferred Time {loadingSlots && <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>(checking availability...)</span>}</label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+              {TIME_SLOTS.map(t => {
+                const busy = isSlotBusy(t);
+                return (
+                <button key={t} onClick={() => !busy && setSelectedTime(t)} disabled={busy} style={{
+                  padding: "12px", borderRadius: 8, cursor: busy ? "not-allowed" : "pointer",
+                  border: selectedTime === t ? "2px solid #c9a84c" : busy ? "2px solid rgba(255,0,0,0.15)" : "2px solid rgba(255,255,255,0.08)",
+                  background: selectedTime === t ? "rgba(201,168,76,0.1)" : busy ? "rgba(255,0,0,0.05)" : "rgba(255,255,255,0.03)",
+                  color: selectedTime === t ? "#c9a84c" : busy ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.6)",
+                  fontFamily: "'Jost', sans-serif", fontSize: 13, textAlign: "center",
+                  transition: "all 0.2s", opacity: busy ? 0.5 : 1,
+                  textDecoration: busy ? "line-through" : "none",
+                }}>{t}</button>
+                );
+              })}
+            </div>
+          </div>
+          <div style={{
+            background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.15)",
+            borderRadius: 8, padding: 12,
+          }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)" }}>
+              Availability synced with Google Calendar — greyed-out slots are already booked.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════ STEP 5: REVIEW & PAY ═══════════ */}
+      {step === 5 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: "#fff" }}>
+            Review Your Booking
+          </div>
+          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 20 }}>
+            {/* Property */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Property</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#fff" }}>{address}, {city}, {state} {zip}</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>{SQFT_TIERS.find(t => t.value === sqftTier)?.label}</div>
+            </div>
+            {/* Services */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>Services</div>
+              {bookingMode === "package" && selectedPackage !== null && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                  <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff" }}>
+                    {PACKAGES[selectedPackage].name} Package
+                  </span>
+                  <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#c9a84c", fontWeight: 600 }}>
+                    ${selectedPackage === 0 ? (ESSENTIAL_PRICING[sqftTier] || 0) : selectedPackage === 1 ? 549 : 1095}
+                  </span>
+                </div>
+              )}
+              {bookingMode === "individual" && Object.entries(selectedServices).filter(([, v]) => v).map(([key]) => {
+                const svc = INDIVIDUAL_SERVICES[key];
+                const price = getServicePrice(svc);
+                return (
+                  <div key={key} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                    <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff" }}>{svc.name}</span>
+                    <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#c9a84c", fontWeight: 600 }}>${price}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {/* Add-ons */}
+            {ADDONS.some(a => selectedAddons[a.id]) && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>Add-ons</div>
+                {ADDONS.filter(a => selectedAddons[a.id]).map(a => (
+                  <div key={a.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                    <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff" }}>
+                      {a.name}{a.hasQty ? ` × ${selectedAddons[a.id]}` : ""}
+                    </span>
+                    <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#c9a84c", fontWeight: 600 }}>
+                      ${a.hasQty ? a.price * selectedAddons[a.id] : a.price}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* Schedule */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Schedule</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#fff" }}>{selectedDate} at {selectedTime}</div>
+            </div>
+            {/* Total */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 16, borderTop: "2px solid rgba(201,168,76,0.3)" }}>
+              <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#fff" }}>Total</span>
+              <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#c9a84c", fontWeight: 700 }}>${calcTotal().toLocaleString()}</span>
+            </div>
+          </div>
+          {/* Contact info */}
+          <div style={{
+            background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 10, padding: 16, marginBottom: 12,
+          }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12 }}>Contact Information</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <input type="text" placeholder="Full Name *" value={clientName} onChange={e => setClientName(e.target.value)} style={inputStyle} />
+              <input type="email" placeholder="Email Address *" value={clientEmail} onChange={e => setClientEmail(e.target.value)} style={inputStyle} />
+              <input type="tel" placeholder="Phone Number" value={clientPhone} onChange={e => setClientPhone(e.target.value)} style={inputStyle} />
+            </div>
+          </div>
+          {/* Payment stub */}
+          <div style={{
+            background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 10, padding: 16,
+          }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>Payment</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.5)" }}>
+              Payment processing will be available soon. Your booking will be confirmed and invoiced separately.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════ NAV BUTTONS ═══════════ */}
       <div style={{ display: "flex", gap: 12 }}>
         {step > 1 && (
           <button onClick={() => setStep(s => s - 1)} style={{
@@ -656,13 +1195,19 @@ function BookView() {
             textTransform: "uppercase", cursor: "pointer",
           }}>← Back</button>
         )}
-        <button onClick={() => step < 3 ? setStep(s => s + 1) : setBooked(true)} style={{
-          flex: 2, background: "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
-          border: "none", borderRadius: 8, padding: "14px",
-          fontFamily: "'Jost', sans-serif", fontWeight: 600, fontSize: 13,
-          letterSpacing: "0.1em", textTransform: "uppercase", color: "#0a1628", cursor: "pointer",
-        }}>
-          {step === 3 ? "Confirm Booking ✓" : "Continue →"}
+        <button
+          onClick={() => step < 5 ? setStep(s => s + 1) : handleBook()}
+          disabled={!canProceed() || processing}
+          style={{
+            flex: 2, background: canProceed() ? "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)" : "rgba(255,255,255,0.08)",
+            border: "none", borderRadius: 8, padding: "14px",
+            fontFamily: "'Jost', sans-serif", fontWeight: 600, fontSize: 13,
+            letterSpacing: "0.1em", textTransform: "uppercase",
+            color: canProceed() ? "#0a1628" : "rgba(255,255,255,0.3)",
+            cursor: canProceed() ? "pointer" : "not-allowed",
+            opacity: processing ? 0.7 : 1, transition: "all 0.2s",
+          }}>
+          {processing ? "Processing..." : step === 5 ? "Confirm Booking ✓" : "Continue →"}
         </button>
       </div>
     </div>
@@ -673,6 +1218,7 @@ function MediaView() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin";
   const [active, setActive] = useState(0);
+  const [listings, setListings] = useState([]);
   const [showRelaSite, setShowRelaSite] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [uploadType, setUploadType] = useState("Photos");
@@ -681,24 +1227,37 @@ function MediaView() {
   const [mediaFiles, setMediaFiles] = useState({});
   const [viewingType, setViewingType] = useState(null);
   const [toast, setToast] = useState(null);
-  const listing = LISTINGS[active];
+
+  // Fetch listings from Supabase
+  useEffect(() => {
+    const fetchListings = async () => {
+      const { data: rows, error } = await supabase
+        .from("listings")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (!error && rows) setListings(rows);
+    };
+    fetchListings();
+  }, []);
+
+  const listing = listings[active] || {};
 
   // Fetch uploaded media for current listing
   useEffect(() => {
-    fetchMedia();
-  }, [active]);
+    if (listing.id) fetchMedia();
+  }, [active, listing.id]);
 
   const fetchMedia = async () => {
-    const listingSlug = listing.address.toLowerCase().replace(/\s+/g, "-");
+    if (!listing.id) return;
     const types = ["Photos", "Drone", "3D Tour", "Film", "Floor Plan", "Twilight"];
     const result = {};
     for (const type of types) {
-      const folder = `${listingSlug}/${type.toLowerCase().replace(/\s+/g, "-")}`;
-      const { data } = await supabase.storage.from("media").list(folder, { limit: 100 });
+      const folder = `${listing.id}/${type.toLowerCase().replace(/\s+/g, "-")}`;
+      const { data } = await supabase.storage.from("listing-media").list(folder, { limit: 100 });
       if (data && data.length > 0) {
         result[type] = data.filter(f => f.name !== ".emptyFolderPlaceholder").map(f => ({
           name: f.name,
-          url: `https://cbpnjuotoxtmefmedpmj.supabase.co/storage/v1/object/public/media/${folder}/${f.name}`,
+          url: supabase.storage.from("listing-media").getPublicUrl(`${folder}/${f.name}`).data.publicUrl,
           size: f.metadata?.size || 0,
           created: f.created_at,
         }));
@@ -714,15 +1273,14 @@ function MediaView() {
 
   const handleUpload = async (e) => {
     const files = Array.from(e.target.files);
-    if (!files.length) return;
+    if (!files.length || !listing.id) return;
     setUploading(true);
-    const listingSlug = listing.address.toLowerCase().replace(/\s+/g, "-");
-    const folder = `${listingSlug}/${uploadType.toLowerCase().replace(/\s+/g, "-")}`;
+    const folder = `${listing.id}/${uploadType.toLowerCase().replace(/\s+/g, "-")}`;
     let uploaded = 0;
     for (const file of files) {
       setUploadProgress(`Uploading ${uploaded + 1} of ${files.length}...`);
-      const filePath = `${folder}/${Date.now()}-${file.name}`;
-      const { error } = await supabase.storage.from("media").upload(filePath, file, {
+      const filePath = `${folder}/${file.name}`;
+      const { error } = await supabase.storage.from("listing-media").upload(filePath, file, {
         cacheControl: "3600",
         upsert: false,
       });
@@ -739,9 +1297,9 @@ function MediaView() {
   };
 
   const handleDelete = async (type, fileName) => {
-    const listingSlug = listing.address.toLowerCase().replace(/\s+/g, "-");
-    const folder = `${listingSlug}/${type.toLowerCase().replace(/\s+/g, "-")}`;
-    const { error } = await supabase.storage.from("media").remove([`${folder}/${fileName}`]);
+    if (!listing.id) return;
+    const folder = `${listing.id}/${type.toLowerCase().replace(/\s+/g, "-")}`;
+    const { error } = await supabase.storage.from("listing-media").remove([`${folder}/${fileName}`]);
     if (error) showToast(`Delete failed: ${error.message}`, "error");
     else {
       showToast("File deleted");
@@ -964,15 +1522,15 @@ function MediaView() {
 
       {/* Listing selector */}
       <div style={{ display: "flex", gap: 10 }}>
-        {LISTINGS.map((l, i) => (
+        {listings.map((l, i) => (
           <div key={l.id} onClick={() => { setActive(i); setShowRelaSite(false); setViewingType(null); }} style={{
             flex: 1, borderRadius: 10, overflow: "hidden", cursor: "pointer", position: "relative", height: 80,
             border: active === i ? "2px solid #c9a84c" : "2px solid transparent", transition: "all 0.2s",
           }}>
-            <img src={l.img} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            <img src={l.hero_img || ""} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             <div style={{ position: "absolute", inset: 0, background: active === i ? "rgba(201,168,76,0.15)" : "rgba(8,18,40,0.5)" }} />
             <div style={{ position: "absolute", bottom: 6, left: 8, fontFamily: "'Jost', sans-serif", fontSize: 9, color: "#fff", letterSpacing: "0.06em" }}>
-              {l.address.split(" ").slice(0, 2).join(" ")}
+              {(l.address || "").split(" ").slice(0, 2).join(" ")}
             </div>
           </div>
         ))}
@@ -1052,7 +1610,7 @@ function MediaView() {
       </div>
 
       {/* Share microsite */}
-      {listing.media.includes("Microsite") && (
+      {(listing.package === "Luxury" || listing.package === "Signature") && (
         <div style={{
           background: "linear-gradient(135deg, rgba(201,168,76,0.1) 0%, rgba(201,168,76,0.03) 100%)",
           border: "1px solid rgba(201,168,76,0.25)", borderRadius: 12, padding: 20,
@@ -1916,6 +2474,8 @@ function MicrositeView() {
   const [listingVideo, setListingVideo] = useState(null);
   const [listingFloorplan, setListingFloorplan] = useState(null);
   const [mediaLoading, setMediaLoading] = useState(false);
+  const [addonRequested, setAddonRequested] = useState(false);
+  const [addonStatus, setAddonStatus] = useState(null); // null | 'pending' | 'approved' | 'denied'
   const [data, setData] = useState({
     address: "", city: "", price: "",
     beds: "", baths: "", sqft: "",
@@ -1938,6 +2498,28 @@ function MicrositeView() {
     };
     fetchListings();
   }, []);
+
+  // Check microsite addon request status when listing changes
+  useEffect(() => {
+    if (!selectedListingId || !user?.id) { setAddonStatus(null); setAddonRequested(false); return; }
+    const checkAddon = async () => {
+      const { data: reqs } = await supabase
+        .from("microsite_requests")
+        .select("status")
+        .eq("listing_id", selectedListingId)
+        .eq("agent_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      if (reqs && reqs.length > 0) {
+        setAddonStatus(reqs[0].status);
+        setAddonRequested(true);
+      } else {
+        setAddonStatus(null);
+        setAddonRequested(false);
+      }
+    };
+    checkAddon();
+  }, [selectedListingId, user?.id]);
 
   // When a listing is selected, populate form and fetch media
   useEffect(() => {
@@ -2039,6 +2621,26 @@ function MicrositeView() {
   };
 
   const updateLeadStatus = (idx, status) => setLeads(l => l.map((x, i) => i === idx ? { ...x, status } : x));
+
+  // Package tier gating helper
+  const selectedListing = listings.find(l => l.id === selectedListingId);
+  const listingPackage = selectedListing?.package || "";
+  const micrositeIncluded = listingPackage === "Luxury" || listingPackage === "Signature";
+  const micrositeAddonApproved = selectedListing?.microsite_addon === true;
+  const micrositeAccessible = micrositeIncluded || micrositeAddonApproved;
+
+  const handleRequestAddon = async () => {
+    if (!selectedListingId || !user?.id) return;
+    const { error } = await supabase.from("microsite_requests").insert({
+      listing_id: selectedListingId,
+      agent_id: user.id,
+      status: "pending",
+    });
+    if (!error) {
+      setAddonRequested(true);
+      setAddonStatus("pending");
+    }
+  };
 
   const handleGenerate = () => {
     setGenerating(true);
@@ -2378,7 +2980,7 @@ function MicrositeView() {
             padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
             letterSpacing: "0.06em", cursor: "pointer",
           }}>🔔 Alerts</button>
-          <button onClick={() => { setStep("build"); setPublished(false); setLeads([]); setData({ address: "", city: "", price: "", beds: "", baths: "", sqft: "", description: "", agentName: "", agentPhone: "", heroImg: LISTINGS[0].img, features: ["","","",""], mediaTypes: ["Photos","Drone","3D Tour"] }); }} style={{
+          <button onClick={() => { setStep("build"); setPublished(false); setLeads([]); setData({ address: "", city: "", price: "", beds: "", baths: "", sqft: "", description: "", agentName: "", agentPhone: "", heroImg: "", features: ["","","",""], mediaTypes: ["Photos","Drone","3D Tour"] }); }} style={{
             background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.35)",
             padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
             letterSpacing: "0.06em", textTransform: "uppercase", cursor: "pointer",
@@ -2557,7 +3159,65 @@ function MicrositeView() {
             <option key={l.id} value={l.id}>{l.address} — {l.city}</option>
           ))}
         </select>
+        {selectedListingId && selectedListing && (
+          <div style={{ marginTop: 6, fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+            Package: <span style={{ color: listingPackage === "Luxury" ? "#e5c97e" : listingPackage === "Signature" ? "#c9a84c" : "#8fa3b1", fontWeight: 600 }}>{listingPackage || "Unknown"}</span>
+            {micrositeIncluded && <span style={{ color: "rgba(201,168,76,0.7)", marginLeft: 8 }}>— Microsite included</span>}
+            {!micrositeIncluded && micrositeAddonApproved && <span style={{ color: "#4ade80", marginLeft: 8 }}>— Microsite add-on active</span>}
+          </div>
+        )}
       </div>
+
+      {/* Package tier gate — Essential without addon */}
+      {selectedListingId && !micrositeAccessible && listingPackage === "Essential" && (
+        <div style={{
+          background: "rgba(255,255,255,0.03)", border: "1px solid rgba(201,168,76,0.2)",
+          borderRadius: 14, padding: 28, textAlign: "center",
+        }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🌐</div>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#fff", marginBottom: 8 }}>
+            Unlock Your Property Microsite
+          </div>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.6, maxWidth: 420, margin: "0 auto 20px" }}>
+            Your Essential package doesn't include a microsite. Add one for just <span style={{ color: "#c9a84c", fontWeight: 600 }}>$150</span> to give your listing a branded, shareable property page with lead capture.
+          </div>
+          {addonStatus === "pending" ? (
+            <div style={{
+              display: "inline-block", padding: "12px 28px", borderRadius: 10,
+              background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.3)",
+              fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c",
+              letterSpacing: "0.08em", fontWeight: 600,
+            }}>
+              Request Pending — Awaiting Admin Approval
+            </div>
+          ) : addonStatus === "denied" ? (
+            <div style={{
+              display: "inline-block", padding: "12px 28px", borderRadius: 10,
+              background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+              fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#f87171",
+              letterSpacing: "0.08em", fontWeight: 600,
+            }}>
+              Request Denied — Contact admin for details
+            </div>
+          ) : (
+            <button onClick={handleRequestAddon} style={{
+              background: "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
+              border: "none", borderRadius: 10, padding: "14px 32px",
+              fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 12,
+              letterSpacing: "0.1em", textTransform: "uppercase", color: "#0a1628",
+              cursor: "pointer", transition: "all 0.3s",
+            }}>
+              Add Microsite — $150
+            </button>
+          )}
+          <div style={{ marginTop: 16, fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.25)" }}>
+            Or upgrade to Signature or Luxury for a free microsite with every listing.
+          </div>
+        </div>
+      )}
+
+      {/* Show builder only if microsite is accessible (or no listing selected yet) */}
+      {(!selectedListingId || micrositeAccessible) && <>
 
       {/* Hero Image from uploaded photos */}
       <div>
@@ -2674,11 +3334,21 @@ function MicrositeView() {
       }}>
         {generating ? "✨ Generating your microsite..." : "Preview Microsite →"}
       </button>
+
+      </>}
     </div>
   );
 }
 
 function AnalyticsView() {
+  const [analyticsListings, setAnalyticsListings] = useState([]);
+  useEffect(() => {
+    const fetchListings = async () => {
+      const { data: rows } = await supabase.from("listings").select("*").order("created_at", { ascending: false });
+      if (rows) setAnalyticsListings(rows);
+    };
+    fetchListings();
+  }, []);
   const total = { views: 5164, leads: 40, shares: 210 };
   const bars = [
     { label: "Mon", v: 320 }, { label: "Tue", v: 540 }, { label: "Wed", v: 410 },
@@ -2733,18 +3403,18 @@ function AnalyticsView() {
       {/* Per listing */}
       <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, overflow: "hidden" }}>
         <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "rgba(255,255,255,0.7)" }}>By Listing</div>
-        {LISTINGS.map((l, i) => (
+        {analyticsListings.map((l, i) => (
           <div key={l.id} style={{
             display: "flex", alignItems: "center", gap: 14, padding: "14px 20px",
-            borderBottom: i < LISTINGS.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
+            borderBottom: i < analyticsListings.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
           }}>
-            <img src={l.img} alt="" style={{ width: 44, height: 36, borderRadius: 6, objectFit: "cover" }} />
+            <img src={l.hero_img || ""} alt="" style={{ width: 44, height: 36, borderRadius: 6, objectFit: "cover" }} />
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#fff" }}>{l.address}</div>
-              <StatusBadge status={l.status} />
+              <StatusBadge status={l.status || "In Production"} />
             </div>
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#c9a84c" }}>{l.views.toLocaleString()}</div>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#c9a84c" }}>{(l.views || 0).toLocaleString()}</div>
               <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)" }}>views</div>
             </div>
           </div>
@@ -3394,6 +4064,157 @@ function PublicLeadCaptureForm({ theme: t, micrositeId, listingId }) {
 }
 
 // ============================================================
+// BOOKINGS MANAGER VIEW — View & manage all bookings
+// ============================================================
+function BookingsManagerView() {
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all"); // all, confirmed, completed, cancelled
+
+  useEffect(() => {
+    fetchBookings();
+  }, []);
+
+  const fetchBookings = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("bookings")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (data) setBookings(data);
+    if (error) console.error("Error loading bookings:", error);
+    setLoading(false);
+  };
+
+  const updateStatus = async (id, newStatus) => {
+    await supabase.from("bookings").update({ status: newStatus }).eq("id", id);
+    fetchBookings();
+  };
+
+  const filtered = filter === "all" ? bookings : bookings.filter(b => b.status === filter);
+
+  const statusColors = {
+    confirmed: "#c9a84c",
+    in_progress: "#4ecdc4",
+    completed: "#27ae60",
+    cancelled: "#e74c3c",
+  };
+
+  const cardStyle = {
+    background: "rgba(255,255,255,0.03)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 12,
+  };
+
+  const labelSt = {
+    fontFamily: "'Jost', sans-serif",
+    fontSize: 10,
+    color: "rgba(255,255,255,0.4)",
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    marginBottom: 4,
+  };
+
+  return (
+    <div style={{ padding: "32px 24px", maxWidth: 900, margin: "0 auto" }}>
+      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 32, color: "#c9a84c", marginBottom: 8 }}>
+        Bookings
+      </div>
+      <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 24 }}>
+        {bookings.length} total booking{bookings.length !== 1 ? "s" : ""}
+      </div>
+
+      {/* Filter tabs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 24, flexWrap: "wrap" }}>
+        {["all", "confirmed", "in_progress", "completed", "cancelled"].map(f => (
+          <button key={f} onClick={() => setFilter(f)} style={{
+            background: filter === f ? "rgba(201,168,76,0.15)" : "rgba(255,255,255,0.03)",
+            border: filter === f ? "1px solid rgba(201,168,76,0.4)" : "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 20, padding: "6px 16px", color: filter === f ? "#c9a84c" : "rgba(255,255,255,0.5)",
+            fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase",
+            cursor: "pointer",
+          }}>{f.replace("_", " ")}</button>
+        ))}
+      </div>
+
+      {loading && <div style={{ color: "rgba(255,255,255,0.4)", fontFamily: "'Jost', sans-serif" }}>Loading...</div>}
+
+      {!loading && filtered.length === 0 && (
+        <div style={{ color: "rgba(255,255,255,0.4)", fontFamily: "'Jost', sans-serif", textAlign: "center", padding: 40 }}>
+          No bookings found.
+        </div>
+      )}
+
+      {filtered.map(b => (
+        <div key={b.id} style={cardStyle}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+            <div>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#fff" }}>{b.client_name}</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>{b.client_email} {b.client_phone ? `· ${b.client_phone}` : ""}</div>
+            </div>
+            <span style={{
+              background: `${statusColors[b.status]}22`,
+              color: statusColors[b.status],
+              padding: "4px 12px", borderRadius: 12,
+              fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase",
+            }}>{b.status?.replace("_", " ")}</span>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div>
+              <div style={labelSt}>Property</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff" }}>{b.address}</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)" }}>{b.city}, {b.state} {b.zip}</div>
+            </div>
+            <div>
+              <div style={labelSt}>Schedule</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff" }}>{b.booking_date}</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)" }}>{b.booking_time}</div>
+            </div>
+            <div>
+              <div style={labelSt}>Total</div>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#c9a84c", fontWeight: 700 }}>${Number(b.subtotal || 0).toLocaleString()}</div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={labelSt}>
+              {b.booking_mode === "package" ? `${b.selected_package} package` : `${(b.selected_services || []).length} services`}
+              {" · "}{b.sqft_tier?.replace("_", "-").replace("under", "<").replace("over", ">")} sf
+            </div>
+          </div>
+
+          {b.status === "confirmed" && (
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button onClick={() => updateStatus(b.id, "in_progress")} style={{
+                background: "rgba(78,205,196,0.15)", border: "1px solid rgba(78,205,196,0.3)",
+                borderRadius: 6, padding: "6px 14px", color: "#4ecdc4",
+                fontFamily: "'Jost', sans-serif", fontSize: 11, cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase",
+              }}>Start</button>
+              <button onClick={() => updateStatus(b.id, "cancelled")} style={{
+                background: "rgba(231,76,60,0.1)", border: "1px solid rgba(231,76,60,0.2)",
+                borderRadius: 6, padding: "6px 14px", color: "#e74c3c",
+                fontFamily: "'Jost', sans-serif", fontSize: 11, cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase",
+              }}>Cancel</button>
+            </div>
+          )}
+          {b.status === "in_progress" && (
+            <div style={{ marginTop: 12 }}>
+              <button onClick={() => updateStatus(b.id, "completed")} style={{
+                background: "rgba(39,174,96,0.15)", border: "1px solid rgba(39,174,96,0.3)",
+                borderRadius: 6, padding: "6px 14px", color: "#27ae60",
+                fontFamily: "'Jost', sans-serif", fontSize: 11, cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase",
+              }}>Mark Complete</button>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ADMIN VIEW — Property Creation & Management
 // ============================================================
 function AdminView() {
@@ -3426,6 +4247,33 @@ function AdminView() {
   const [mediaFiles, setMediaFiles] = useState({});
   const [mediaLoading, setMediaLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState({});
+  const [micrositeRequests, setMicrositeRequests] = useState([]);
+
+  const fetchMicrositeRequests = async () => {
+    const { data: reqs } = await supabase
+      .from("microsite_requests")
+      .select("*, listings(address, city, package), agents:agent_id(full_name)")
+      .order("created_at", { ascending: false });
+    if (reqs) setMicrositeRequests(reqs);
+  };
+
+  const handleApproveAddon = async (requestId, listingId) => {
+    // Approve the request
+    await supabase.from("microsite_requests").update({
+      status: "approved", resolved_at: new Date().toISOString(), resolved_by: user?.id,
+    }).eq("id", requestId);
+    // Enable microsite_addon on the listing
+    await supabase.from("listings").update({ microsite_addon: true }).eq("id", listingId);
+    fetchMicrositeRequests();
+    fetchListingsAndAgents();
+  };
+
+  const handleDenyAddon = async (requestId) => {
+    await supabase.from("microsite_requests").update({
+      status: "denied", resolved_at: new Date().toISOString(), resolved_by: user?.id,
+    }).eq("id", requestId);
+    fetchMicrositeRequests();
+  };
 
   // Fetch listings and agents on mount
   useEffect(() => {
@@ -3436,6 +4284,7 @@ function AdminView() {
 
   useEffect(() => {
     fetchListingsAndAgents();
+    fetchMicrositeRequests();
   }, []);
 
   const fetchListingsAndAgents = async () => {
@@ -3653,12 +4502,77 @@ function AdminView() {
     marginBottom: 16,
   };
 
+  const pendingRequests = micrositeRequests.filter(r => r.status === "pending");
+
+  const MicrositeRequestsSection = () => (
+    <div style={{ marginBottom: 32 }}>
+      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: "#c9a84c", marginBottom: 16 }}>
+        Microsite Add-on Requests
+        {pendingRequests.length > 0 && (
+          <span style={{
+            display: "inline-block", marginLeft: 10, padding: "2px 10px",
+            borderRadius: 12, fontSize: 11, fontFamily: "'Jost', sans-serif",
+            fontWeight: 600, background: "rgba(239,68,68,0.15)", color: "#f87171",
+            verticalAlign: "middle",
+          }}>{pendingRequests.length} pending</span>
+        )}
+      </div>
+      {micrositeRequests.length === 0 ? (
+        <div style={{ color: "#8A8680", fontSize: 13, fontFamily: "'Jost', sans-serif", padding: "16px 0" }}>
+          No microsite add-on requests yet.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {micrositeRequests.map(req => (
+            <div key={req.id} style={{
+              background: "#111827", border: `1px solid ${req.status === "pending" ? "rgba(201,168,76,0.3)" : "rgba(255,255,255,0.08)"}`,
+              borderRadius: 12, padding: "14px 18px",
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#F0EDE8", fontWeight: 500 }}>
+                  {req.listings?.address || "Unknown"} — {req.listings?.city || ""}
+                </div>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "#8A8680", marginTop: 2 }}>
+                  Agent: {req.agents?.full_name || "Unknown"} · Package: {req.listings?.package || "—"} · {new Date(req.created_at).toLocaleDateString()}
+                </div>
+              </div>
+              {req.status === "pending" ? (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => handleApproveAddon(req.id, req.listing_id)} style={{
+                    padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer",
+                    background: "rgba(74,222,128,0.15)", color: "#4ade80",
+                    fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 600,
+                  }}>Approve</button>
+                  <button onClick={() => handleDenyAddon(req.id)} style={{
+                    padding: "7px 16px", borderRadius: 8, border: "none", cursor: "pointer",
+                    background: "rgba(239,68,68,0.1)", color: "#f87171",
+                    fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 600,
+                  }}>Deny</button>
+                </div>
+              ) : (
+                <span style={{
+                  padding: "4px 12px", borderRadius: 8, fontSize: 10, fontWeight: 600,
+                  fontFamily: "'Jost', sans-serif", letterSpacing: "0.08em", textTransform: "uppercase",
+                  background: req.status === "approved" ? "rgba(74,222,128,0.1)" : "rgba(239,68,68,0.1)",
+                  color: req.status === "approved" ? "#4ade80" : "#f87171",
+                }}>{req.status}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   // Desktop layout: two columns
   if (isDesktop) {
     return (
       <div style={{ display: "grid", gridTemplateColumns: "1fr 380px", gap: 40 }}>
-        {/* LEFT: Listings Table */}
+        {/* LEFT: Requests + Listings */}
         <div>
+          <MicrositeRequestsSection />
+
           <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: "#c9a84c", marginBottom: 24 }}>
             Existing Listings
           </div>
@@ -4182,6 +5096,8 @@ function AdminView() {
   // Mobile layout: stacked
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+      <MicrositeRequestsSection />
+
       {/* Form */}
       <div>
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#c9a84c", marginBottom: 20 }}>
@@ -4693,7 +5609,7 @@ function AppShell() {
     { label: "Microsite", icon: "🌐" },
   ];
   const navItems = isAdmin
-    ? [...baseNavItems, { label: "Admin", icon: "⚙" }]
+    ? [...baseNavItems, { label: "Bookings", icon: "📋" }, { label: "Admin", icon: "⚙" }]
     : baseNavItems;
 
   const baseViews = [
@@ -4704,7 +5620,7 @@ function AppShell() {
     <MicrositeView />,
   ];
   const views = isAdmin
-    ? [...baseViews, <AdminView />]
+    ? [...baseViews, <BookingsManagerView />, <AdminView />]
     : baseViews;
 
   const ProfileDropdown = showProfile && (
