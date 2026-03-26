@@ -768,6 +768,39 @@ function BookView() {
       } catch (emailErr) {
         console.error("Email send error (non-blocking):", emailErr);
       }
+
+      // Create & send Stripe invoice (non-blocking)
+      try {
+        const pkgName2 = bookingMode === "package" ? PACKAGES[selectedPackage]?.name : null;
+        const svcList2 = bookingMode === "individual"
+          ? Object.keys(selectedServices).filter(k => selectedServices[k]).map(k => {
+              const svc = Object.values(INDIVIDUAL_SERVICES).find(s => s.name && Object.keys(INDIVIDUAL_SERVICES).find(key => key === k));
+              const svcData = INDIVIDUAL_SERVICES[k];
+              return svcData ? { name: svcData.name, price: svcData.priceByTier?.[sqftTier] || svcData.fixedPrice || 0 } : null;
+            }).filter(Boolean)
+          : [];
+        const addonList2 = [];
+        ADDONS.forEach(a => {
+          if (selectedAddons[a.id]) addonList2.push({ name: a.name, price: a.price * (typeof selectedAddons[a.id] === "number" ? selectedAddons[a.id] : 1) });
+        });
+        await fetch("/api/create-invoice", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            booking: {
+              clientName, clientEmail, clientPhone,
+              address: `${address}, ${city}, ${st} ${zip}`,
+              sqftTier, accessMethod,
+              date: selectedDate, time: selectedTime,
+              packageName: pkgName2,
+              services: svcList2, addons: addonList2,
+              total: calcTotal(),
+            },
+          }),
+        });
+      } catch (invoiceErr) {
+        console.error("Stripe invoice error (non-blocking):", invoiceErr);
+      }
     } catch (err) {
       console.error("Booking error:", err);
     }
