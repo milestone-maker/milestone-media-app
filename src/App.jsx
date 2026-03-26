@@ -17,7 +17,7 @@ const PACKAGES = [
     name: "Signature",
     price: "$549",
     color: "#c9a84c",
-    features: ["Photography", "Drone", "Matterport 3D", "Floor Plan", "Property Microsite"],
+    features: ["Everything in Essential +", "Drone Photos & Video", "Social Media Reels"],
     desc: "The complete digital listing presence.",
     popular: true,
   },
@@ -414,7 +414,7 @@ function ShowcaseView({ onBook }) {
   const displayMedia = listing.media_types || (listing.package === "Luxury"
     ? ["Photos", "Drone", "3D Tour", "Film", "Floor Plan", "Microsite", "Twilight"]
     : listing.package === "Signature"
-    ? ["Photos", "Drone", "3D Tour", "Floor Plan"]
+    ? ["Photos", "Drone", "Reels"]
     : ["Photos"]);
 
   if (loadingListings) return (
@@ -1645,7 +1645,7 @@ function MediaView() {
       </div>
 
       {/* Share microsite */}
-      {(listing.package === "Luxury" || listing.package === "Signature") && (
+      {(listing.package === "Luxury") && (
         <div style={{
           background: "linear-gradient(135deg, rgba(201,168,76,0.1) 0%, rgba(201,168,76,0.03) 100%)",
           border: "1px solid rgba(201,168,76,0.25)", borderRadius: 12, padding: 20,
@@ -2660,7 +2660,7 @@ function MicrositeView() {
   // Package tier gating helper
   const selectedListing = listings.find(l => l.id === selectedListingId);
   const listingPackage = selectedListing?.package || "";
-  const micrositeIncluded = listingPackage === "Luxury" || listingPackage === "Signature";
+  const micrositeIncluded = listingPackage === "Luxury";
   const micrositeAddonApproved = selectedListing?.microsite_addon === true;
   const micrositeAccessible = micrositeIncluded || micrositeAddonApproved;
 
@@ -3246,7 +3246,7 @@ function MicrositeView() {
             </button>
           )}
           <div style={{ marginTop: 16, fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.25)" }}>
-            Or upgrade to Signature or Luxury for a free microsite with every listing.
+            Or upgrade to Luxury for a free microsite with every listing.
           </div>
         </div>
       )}
