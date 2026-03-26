@@ -733,6 +733,41 @@ function BookView() {
       } catch (calErr) {
         console.error("Calendar sync error (non-blocking):", calErr);
       }
+
+      // Send booking confirmation emails (owner + client)
+      try {
+        const pkgName = bookingMode === "package" ? PACKAGES[selectedPackage]?.name : null;
+        const svcList = bookingMode === "individual"
+          ? Object.keys(selectedServices).filter(k => selectedServices[k]).map(k => {
+              const svc = SERVICES.find(s => s.id === k);
+              return svc ? { name: svc.name, price: svc.tiers?.[sqftTier] || svc.price || 0 } : null;
+            }).filter(Boolean)
+          : (bookingMode === "package" && PACKAGES[selectedPackage]
+              ? PACKAGES[selectedPackage].features.map(f => ({ name: f, price: 0 }))
+              : []);
+        const addonList = [];
+        ADDONS.forEach(a => {
+          if (selectedAddons[a.id]) addonList.push({ name: a.name, price: a.price * (typeof selectedAddons[a.id] === "number" ? selectedAddons[a.id] : 1) });
+        });
+        const emailPayload = {
+          booking: {
+            clientName, clientEmail, clientPhone,
+            address: `${address}, ${city}, ${st} ${zip}`,
+            sqftTier, accessMethod,
+            date: selectedDate, time: selectedTime,
+            packageName: pkgName,
+            services: svcList, addons: addonList,
+            total: calcTotal(),
+          },
+        };
+        await fetch("/api/send-email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(emailPayload),
+        });
+      } catch (emailErr) {
+        console.error("Email send error (non-blocking):", emailErr);
+      }
     } catch (err) {
       console.error("Booking error:", err);
     }
