@@ -143,13 +143,29 @@ function AuthView() {
     setMessage("");
 
     if (mode === "signup") {
-      const { error } = await supabase.auth.signUp({
+      const { data: signUpData, error } = await supabase.auth.signUp({
         email,
         password,
         options: { data: { full_name: fullName } },
       });
-      if (error) setError(error.message);
-      else setMessage("Check your email for a confirmation link!");
+      if (error) {
+        setError(error.message);
+      } else if (signUpData?.user) {
+        // Create agent profile row so the app can load their profile
+        const { error: profileError } = await supabase.from("agents").upsert({
+          id: signUpData.user.id,
+          full_name: fullName,
+          email: email,
+          role: "agent",
+        }, { onConflict: "id" });
+        if (profileError) console.error("Error creating agent profile:", profileError);
+        // If session exists (email confirm disabled), user is auto-logged-in
+        if (signUpData.session) {
+          // Auth state change listener will handle the rest
+        } else {
+          setMessage("Check your email for a confirmation link!");
+        }
+      }
     } else if (mode === "login") {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setError(error.message);
