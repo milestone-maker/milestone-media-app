@@ -2561,8 +2561,8 @@ function MicrositeView() {
   const [mediaLoading, setMediaLoading] = useState(false);
   const [addonRequested, setAddonRequested] = useState(false);
   const [addonStatus, setAddonStatus] = useState(null); // null | 'pending' | 'approved' | 'denied'
-  // Source toggle: "listing" or "booking"
-  const [sourceType, setSourceType] = useState("listing");
+  // Source toggle: "listing" or "booking" — agents always use bookings
+  const [sourceType, setSourceType] = useState(isAdmin ? "listing" : "booking");
   const [bookings, setBookings] = useState([]);
   const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [data, setData] = useState({
@@ -3362,27 +3362,29 @@ function MicrositeView() {
         <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Build a branded property page in 60 seconds.</div>
       </div>
 
-      {/* Source Toggle: Listings vs Bookings */}
-      <div>
-        <div style={labelStyle}>Source</div>
-        <div style={{ display: "flex", gap: 0, borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.12)" }}>
-          {[{ key: "listing", label: "Listings" }, { key: "booking", label: "Bookings" }].map(s => (
-            <button key={s.key} onClick={() => setSourceType(s.key)} style={{
-              flex: 1, padding: "10px 0", border: "none", cursor: "pointer",
-              background: sourceType === s.key ? "rgba(201,168,76,0.2)" : "rgba(255,255,255,0.03)",
-              color: sourceType === s.key ? "#c9a84c" : "rgba(255,255,255,0.4)",
-              fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: sourceType === s.key ? 600 : 400,
-              letterSpacing: "0.08em", transition: "all 0.2s",
-              borderRight: s.key === "listing" ? "1px solid rgba(255,255,255,0.12)" : "none",
-            }}>{s.label}</button>
-          ))}
+      {/* Source Toggle: Admin only — agents always use bookings */}
+      {isAdmin && (
+        <div>
+          <div style={labelStyle}>Source</div>
+          <div style={{ display: "flex", gap: 0, borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.12)" }}>
+            {[{ key: "listing", label: "Listings" }, { key: "booking", label: "Bookings" }].map(s => (
+              <button key={s.key} onClick={() => setSourceType(s.key)} style={{
+                flex: 1, padding: "10px 0", border: "none", cursor: "pointer",
+                background: sourceType === s.key ? "rgba(201,168,76,0.2)" : "rgba(255,255,255,0.03)",
+                color: sourceType === s.key ? "#c9a84c" : "rgba(255,255,255,0.4)",
+                fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: sourceType === s.key ? 600 : 400,
+                letterSpacing: "0.08em", transition: "all 0.2s",
+                borderRight: s.key === "listing" ? "1px solid rgba(255,255,255,0.12)" : "none",
+              }}>{s.label}</button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Listing or Booking Selector */}
+      {/* Property Selector */}
       <div>
-        <div style={labelStyle}>{sourceType === "listing" ? "Select Listing" : "Select Booking"}</div>
-        {sourceType === "listing" ? (
+        <div style={labelStyle}>{sourceType === "listing" && isAdmin ? "Select Listing" : "Select a Listing"}</div>
+        {sourceType === "listing" && isAdmin ? (
           <select
             style={{ ...inputStyle, cursor: "pointer" }}
             value={selectedListingId || ""}
@@ -3399,10 +3401,10 @@ function MicrositeView() {
             value={selectedBookingId || ""}
             onChange={e => setSelectedBookingId(e.target.value || null)}
           >
-            <option value="">— Choose a booking —</option>
+            <option value="">— Choose a listing —</option>
             {bookings.map(b => (
               <option key={b.id} value={b.id}>
-                {b.address || "No address"}{b.city ? ` — ${b.city}` : ""} ({b.client_name || "Unknown"})
+                {b.address || "No address"}{b.city ? ` — ${b.city}` : ""}
               </option>
             ))}
           </select>
