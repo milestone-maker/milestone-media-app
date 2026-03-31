@@ -4376,32 +4376,53 @@ function BookingsManagerView() {
           <span style={{ marginLeft: 12, color: "rgba(255,255,255,0.3)" }}>{mediaCount} file{mediaCount !== 1 ? "s" : ""}</span>
         </div>
 
-        {/* Admin: Invoice Paid Toggle */}
+        {/* Admin: Invoice & Payment Section */}
         {isAdmin && (
           <div style={{
             background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
-            borderRadius: 12, padding: 16, marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center",
+            borderRadius: 12, padding: 20, marginBottom: 16,
           }}>
-            <div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.6)", letterSpacing: "0.06em", textTransform: "uppercase" }}>Invoice Status</div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: mediaModal.invoice_paid ? "#27ae60" : "#e74c3c", marginTop: 4 }}>
-                {mediaModal.invoice_paid ? "Paid — Media unlocked for agent" : "Unpaid — Media locked for agent"}
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>Invoice & Payment</div>
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-end", marginBottom: 16 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Stripe Invoice ID</div>
+                <input
+                  value={mediaModal.stripe_invoice_id || ""}
+                  onChange={e => setMediaModal({ ...mediaModal, stripe_invoice_id: e.target.value })}
+                  placeholder="in_1abc123... (paste from Stripe Dashboard)"
+                  style={inputSt}
+                />
               </div>
-              {mediaModal.stripe_invoice_id && (
-                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>
-                  Stripe: {mediaModal.stripe_invoice_id}
-                </div>
-              )}
+              <button onClick={async () => {
+                const { error } = await supabase.from("bookings").update({ stripe_invoice_id: mediaModal.stripe_invoice_id }).eq("id", mediaModal.id);
+                if (error) alert("Failed to save invoice ID.");
+                else { fetchBookings(); alert("Invoice ID saved! Media will auto-unlock when paid."); }
+              }} style={{
+                ...btnBase, padding: "10px 16px", whiteSpace: "nowrap",
+                background: "rgba(78,205,196,0.12)", border: "1px solid rgba(78,205,196,0.3)", color: "#4ecdc4",
+              }}>Save Invoice ID</button>
             </div>
-            <button onClick={() => {
-              toggleInvoicePaid(mediaModal.id, mediaModal.invoice_paid);
-              setMediaModal({ ...mediaModal, invoice_paid: !mediaModal.invoice_paid });
-            }} style={{
-              ...btnBase,
-              background: mediaModal.invoice_paid ? "rgba(231,76,60,0.12)" : "rgba(39,174,96,0.12)",
-              border: `1px solid ${mediaModal.invoice_paid ? "rgba(231,76,60,0.3)" : "rgba(39,174,96,0.3)"}`,
-              color: mediaModal.invoice_paid ? "#e74c3c" : "#27ae60",
-            }}>{mediaModal.invoice_paid ? "Mark Unpaid" : "Mark Paid"}</button>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: mediaModal.invoice_paid ? "#27ae60" : "#e74c3c" }}>
+                  {mediaModal.invoice_paid ? "Paid — Media unlocked for agent" : "Unpaid — Media locked for agent"}
+                </div>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>
+                  {mediaModal.stripe_invoice_id
+                    ? "Auto-unlocks when agent pays via Stripe"
+                    : "Add a Stripe Invoice ID above for auto-unlock, or toggle manually"}
+                </div>
+              </div>
+              <button onClick={() => {
+                toggleInvoicePaid(mediaModal.id, mediaModal.invoice_paid);
+                setMediaModal({ ...mediaModal, invoice_paid: !mediaModal.invoice_paid });
+              }} style={{
+                ...btnBase,
+                background: mediaModal.invoice_paid ? "rgba(231,76,60,0.12)" : "rgba(39,174,96,0.12)",
+                border: `1px solid ${mediaModal.invoice_paid ? "rgba(231,76,60,0.3)" : "rgba(39,174,96,0.3)"}`,
+                color: mediaModal.invoice_paid ? "#e74c3c" : "#27ae60",
+              }}>{mediaModal.invoice_paid ? "Mark Unpaid" : "Mark Paid"}</button>
+            </div>
           </div>
         )}
 
