@@ -4143,6 +4143,15 @@ function BookingsManagerView() {
   const [editingBooking, setEditingBooking] = useState(null);
   const [saving, setSaving] = useState(false);
   const [cancelConfirm, setCancelConfirm] = useState(null);
+  // Media upload/download state
+  const [mediaModal, setMediaModal] = useState(null); // booking object when modal is open
+  const [mediaFiles, setMediaFiles] = useState([]);
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [tourUrl, setTourUrl] = useState("");
+  const [tourLabel, setTourLabel] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef(null);
 
   useEffect(() => { fetchBookings(); }, []);
 
@@ -4175,6 +4184,122 @@ function BookingsManagerView() {
     setSaving(false);
   };
 
+  // ——— Media Functions ———
+  const openMediaModal = async (booking) => {
+    setMediaModal(booking);
+    setTourUrl("");
+    setTourLabel("");
+    await loadMedia(booking.id);
+  };
+
+  const loadMedia = async (bookingId) => {
+    setMediaLoading(true);
+    const { data, error } = await supabase
+      .from("booking_media")
+      .select("*")
+      .eq("booking_id", bookingId)
+      .order("created_at", { ascending: false });
+    if (data) setMediaFiles(data);
+    if (error) console.error("Error loading media:", error);
+    setMediaLoading(false);
+  };
+
+  const handleFileUpload = async (files) => {
+    if (!mediaModal || !files.length) return;
+    setUploading(true);
+    const bookingId = mediaModal.id;
+
+    for (const file of files) {
+      const isVideo = file.type.startsWith("video/");
+      const fileType = isVideo ? "video" : "photo";
+      const filePath = `${bookingId}/${Date.now()}_${file.name}`;
+
+      // Upload to Supabase Storage
+      const { error: uploadErr } = await supabase.storage
+        .from("booking-media")
+        .upload(filePath, file, { contentType: file.type });
+
+      if (uploadErr) {
+        console.error("Upload error:", uploadErr);
+        alert(`Failed to upload ${file.name}`);
+        continue;
+      }
+
+      // Insert record into booking_media table
+      const { error: dbErr } = await supabase.from("booking_media").insert({
+        booking_id: bookingId,
+        file_name: file.name,
+        file_type: fileType,
+        file_path: filePath,
+        file_size: file.size,
+        mime_type: file.type,
+        uploaded_by: user?.id,
+      });
+
+      if (dbErr) console.error("DB insert error:", dbErr);
+    }
+
+    await loadMedia(bookingId);
+    setUploading(false);
+  };
+
+  const addTourLink = async () => {
+    if (!mediaModal || !tourUrl.trim()) return;
+    const { error } = await supabase.from("booking_media").insert({
+      booking_id: mediaModal.id,
+      file_name: tourLabel.trim() || "3D Tour",
+      file_type: "3d_tour",
+      tour_url: tourUrl.trim(),
+      uploaded_by: user?.id,
+    });
+    if (error) { console.error("Tour link error:", error); alert("Failed to add tour link."); }
+    else { setTourUrl(""); setTourLabel(""); await loadMedia(mediaModal.id); }
+  };
+
+  const deleteMedia = async (media) => {
+    if (!confirm(`Delete "${media.file_name}"?`)) return;
+    // Delete from storage if it's a file (not a tour link)
+    if (media.file_path) {
+      await supabase.storage.from("booking-media").remove([media.file_path]);
+    }
+    await supabase.from("booking_media").delete().eq("id", media.id);
+    await loadMedia(mediaModal.id);
+  };
+
+  const getDownloadUrl = async (filePath) => {
+    const { data } = await supabase.storage
+      .from("booking-media")
+      .createSignedUrl(filePath, 3600); // 1 hour expiry
+    return data?.signedUrl;
+  };
+
+  const downloadSingleFile = async (media) => {
+    const url = await getDownloadUrl(media.file_path);
+    if (url) {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = media.file_name;
+      a.click();
+    }
+  };
+
+  const downloadAllMedia = async () => {
+    const downloadable = mediaFiles.filter(m => m.file_path);
+    if (!downloadable.length) return alert("No files to download.");
+    // Download each file sequentially (browser will handle multiple downloads)
+    for (const media of downloadable) {
+      await downloadSingleFile(media);
+      // Small delay between downloads so browser doesn't block them
+      await new Promise(r => setTimeout(r, 500));
+    }
+  };
+
+  const toggleInvoicePaid = async (bookingId, currentVal) => {
+    const { error } = await supabase.from("bookings").update({ invoice_paid: !currentVal }).eq("id", bookingId);
+    if (error) alert("Failed to update invoice status.");
+    else fetchBookings();
+  };
+
   const filtered = filter === "all" ? bookings : bookings.filter(b => b.status === filter);
 
   const statusColors = {
@@ -4205,6 +4330,318 @@ function BookingsManagerView() {
     fontFamily: "'Jost', sans-serif", fontSize: 11, cursor: "pointer",
     letterSpacing: "0.06em", textTransform: "uppercase", borderRadius: 6, padding: "6px 14px",
   };
+
+  // ——— Media Modal (Admin: upload | Agent: download) ———
+  if (mediaModal) {
+    const photos = mediaFiles.filter(m => m.file_type === "photo");
+    const videos = mediaFiles.filter(m => m.file_type === "video");
+    const tours = mediaFiles.filter(m => m.file_type === "3d_tour");
+    const mediaCount = mediaFiles.length;
+    const canDownload = isAdmin || mediaModal.invoice_paid;
+
+    const sectionHeader = (text) => ({
+      fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c",
+      letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12, marginTop: 20,
+    });
+    const dropZoneSt = {
+      border: dragOver ? "2px dashed #c9a84c" : "2px dashed rgba(255,255,255,0.15)",
+      borderRadius: 12, padding: 40, textAlign: "center", cursor: "pointer",
+      background: dragOver ? "rgba(201,168,76,0.06)" : "rgba(255,255,255,0.02)",
+      transition: "all 0.2s",
+    };
+    const thumbSt = {
+      width: 80, height: 80, objectFit: "cover", borderRadius: 8,
+      border: "1px solid rgba(255,255,255,0.1)",
+    };
+    const inputSt = {
+      width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
+      borderRadius: 8, padding: "10px 12px", color: "#fff", fontFamily: "'Jost', sans-serif", fontSize: 13,
+      outline: "none", boxSizing: "border-box",
+    };
+
+    return (
+      <div style={{ padding: "32px 24px", maxWidth: 750, margin: "0 auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#c9a84c" }}>
+            {isAdmin ? "Manage Media" : "Booking Media"}
+          </div>
+          <button onClick={() => setMediaModal(null)} style={{
+            background: "transparent", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8,
+            padding: "8px 16px", color: "rgba(255,255,255,0.6)", fontFamily: "'Jost', sans-serif",
+            fontSize: 12, cursor: "pointer", letterSpacing: "0.06em",
+          }}>← Back</button>
+        </div>
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 24 }}>
+          {mediaModal.client_name} — {mediaModal.address}, {mediaModal.city}
+          <span style={{ marginLeft: 12, color: "rgba(255,255,255,0.3)" }}>{mediaCount} file{mediaCount !== 1 ? "s" : ""}</span>
+        </div>
+
+        {/* Admin: Invoice Paid Toggle */}
+        {isAdmin && (
+          <div style={{
+            background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 12, padding: 16, marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center",
+          }}>
+            <div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.6)", letterSpacing: "0.06em", textTransform: "uppercase" }}>Invoice Status</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: mediaModal.invoice_paid ? "#27ae60" : "#e74c3c", marginTop: 4 }}>
+                {mediaModal.invoice_paid ? "Paid — Media unlocked for agent" : "Unpaid — Media locked for agent"}
+              </div>
+              {mediaModal.stripe_invoice_id && (
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>
+                  Stripe: {mediaModal.stripe_invoice_id}
+                </div>
+              )}
+            </div>
+            <button onClick={() => {
+              toggleInvoicePaid(mediaModal.id, mediaModal.invoice_paid);
+              setMediaModal({ ...mediaModal, invoice_paid: !mediaModal.invoice_paid });
+            }} style={{
+              ...btnBase,
+              background: mediaModal.invoice_paid ? "rgba(231,76,60,0.12)" : "rgba(39,174,96,0.12)",
+              border: `1px solid ${mediaModal.invoice_paid ? "rgba(231,76,60,0.3)" : "rgba(39,174,96,0.3)"}`,
+              color: mediaModal.invoice_paid ? "#e74c3c" : "#27ae60",
+            }}>{mediaModal.invoice_paid ? "Mark Unpaid" : "Mark Paid"}</button>
+          </div>
+        )}
+
+        {/* Agent: Payment Required Notice */}
+        {!isAdmin && !mediaModal.invoice_paid && (
+          <div style={{
+            background: "rgba(231,76,60,0.06)", border: "1px solid rgba(231,76,60,0.2)",
+            borderRadius: 12, padding: 20, marginBottom: 16, textAlign: "center",
+          }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#e74c3c", marginBottom: 6 }}>
+              Media downloads are locked until your invoice is paid.
+            </div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
+              Please complete payment to access your photos, videos, and tours.
+            </div>
+          </div>
+        )}
+
+        {/* Admin: Upload Zone */}
+        {isAdmin && (
+          <div style={{
+            background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 12, padding: 20, marginBottom: 16,
+          }}>
+            <div style={sectionHeader()}>Upload Photos & Videos</div>
+            <div
+              style={dropZoneSt}
+              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={e => { e.preventDefault(); setDragOver(false); handleFileUpload(Array.from(e.dataTransfer.files)); }}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="image/*,video/*"
+                style={{ display: "none" }}
+                onChange={e => { handleFileUpload(Array.from(e.target.files)); e.target.value = ""; }}
+              />
+              {uploading ? (
+                <div style={{ fontFamily: "'Jost', sans-serif", color: "#c9a84c", fontSize: 14 }}>
+                  Uploading... Please wait
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "rgba(255,255,255,0.6)", marginBottom: 6 }}>
+                    Drag & drop photos or videos here
+                  </div>
+                  <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.3)" }}>
+                    or click to browse — JPG, PNG, WebP, MP4, MOV
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div style={sectionHeader()}>Add 3D Tour Link</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr auto", gap: 8, alignItems: "end" }}>
+              <div>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Label</div>
+                <input
+                  value={tourLabel}
+                  onChange={e => setTourLabel(e.target.value)}
+                  placeholder="e.g. Matterport Tour"
+                  style={inputSt}
+                />
+              </div>
+              <div>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Tour URL</div>
+                <input
+                  value={tourUrl}
+                  onChange={e => setTourUrl(e.target.value)}
+                  placeholder="https://my.matterport.com/show/?m=..."
+                  style={inputSt}
+                />
+              </div>
+              <button onClick={addTourLink} style={{
+                ...btnBase, padding: "10px 18px",
+                background: "rgba(78,205,196,0.12)", border: "1px solid rgba(78,205,196,0.3)", color: "#4ecdc4",
+              }}>Add Tour</button>
+            </div>
+          </div>
+        )}
+
+        {/* Media Gallery */}
+        {mediaLoading ? (
+          <div style={{ color: "rgba(255,255,255,0.4)", fontFamily: "'Jost', sans-serif", padding: 20, textAlign: "center" }}>Loading media...</div>
+        ) : mediaFiles.length === 0 ? (
+          <div style={{
+            background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 12, padding: 40, textAlign: "center",
+          }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "rgba(255,255,255,0.4)" }}>
+              No media uploaded yet.
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Download All button (for agents with paid invoice, or admin) */}
+            {canDownload && mediaFiles.some(m => m.file_path) && (
+              <button onClick={downloadAllMedia} style={{
+                ...btnBase, padding: "10px 20px", marginBottom: 16,
+                background: "linear-gradient(135deg, #C9A84C 0%, #e8c97a 100%)",
+                border: "none", color: "#0a1628", fontWeight: 600,
+              }}>Download All Files</button>
+            )}
+
+            {/* Photos Section */}
+            {photos.length > 0 && (
+              <div style={{
+                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 12, padding: 20, marginBottom: 16,
+              }}>
+                <div style={sectionHeader()}>Photos ({photos.length})</div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  {photos.map(p => (
+                    <div key={p.id} style={{ position: "relative", display: "inline-block" }}>
+                      <img
+                        src={supabase.storage.from("booking-media").getPublicUrl(p.file_path).data?.publicUrl || "#"}
+                        alt={p.file_name}
+                        style={thumbSt}
+                        onError={async (e) => {
+                          // If public URL fails, try signed URL
+                          const url = await getDownloadUrl(p.file_path);
+                          if (url) e.target.src = url;
+                        }}
+                      />
+                      <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 4, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {p.file_name}
+                      </div>
+                      <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                        {canDownload && (
+                          <button onClick={() => downloadSingleFile(p)} style={{
+                            ...btnBase, padding: "2px 8px", fontSize: 9,
+                            background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.2)", color: "#c9a84c",
+                          }}>Download</button>
+                        )}
+                        {isAdmin && (
+                          <button onClick={() => deleteMedia(p)} style={{
+                            ...btnBase, padding: "2px 8px", fontSize: 9,
+                            background: "rgba(231,76,60,0.08)", border: "1px solid rgba(231,76,60,0.15)", color: "#e74c3c",
+                          }}>×</button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Videos Section */}
+            {videos.length > 0 && (
+              <div style={{
+                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 12, padding: 20, marginBottom: 16,
+              }}>
+                <div style={sectionHeader()}>Videos ({videos.length})</div>
+                {videos.map(v => (
+                  <div key={v.id} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.05)",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{
+                        width: 40, height: 40, borderRadius: 8, background: "rgba(78,205,196,0.1)",
+                        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
+                      }}>🎬</div>
+                      <div>
+                        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff" }}>{v.file_name}</div>
+                        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.3)" }}>
+                          {v.file_size ? `${(v.file_size / 1048576).toFixed(1)} MB` : "Video"}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {canDownload && (
+                        <button onClick={() => downloadSingleFile(v)} style={{
+                          ...btnBase,
+                          background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.2)", color: "#c9a84c",
+                        }}>Download</button>
+                      )}
+                      {isAdmin && (
+                        <button onClick={() => deleteMedia(v)} style={{
+                          ...btnBase,
+                          background: "rgba(231,76,60,0.08)", border: "1px solid rgba(231,76,60,0.15)", color: "#e74c3c",
+                        }}>Delete</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 3D Tours Section */}
+            {tours.length > 0 && (
+              <div style={{
+                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 12, padding: 20, marginBottom: 16,
+              }}>
+                <div style={sectionHeader()}>3D Tours ({tours.length})</div>
+                {tours.map(t => (
+                  <div key={t.id} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.05)",
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{
+                        width: 40, height: 40, borderRadius: 8, background: "rgba(201,168,76,0.1)",
+                        display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
+                      }}>🏠</div>
+                      <div>
+                        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff" }}>{t.file_name}</div>
+                        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.3)", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {t.tour_url}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {canDownload && (
+                        <button onClick={() => window.open(t.tour_url, "_blank")} style={{
+                          ...btnBase,
+                          background: "rgba(78,205,196,0.12)", border: "1px solid rgba(78,205,196,0.3)", color: "#4ecdc4",
+                        }}>Open Tour</button>
+                      )}
+                      {isAdmin && (
+                        <button onClick={() => deleteMedia(t)} style={{
+                          ...btnBase,
+                          background: "rgba(231,76,60,0.08)", border: "1px solid rgba(231,76,60,0.15)", color: "#e74c3c",
+                        }}>Delete</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  }
 
   // ——— Edit Modal ———
   if (editingBooking) {
@@ -4480,6 +4917,48 @@ function BookingsManagerView() {
                   ...btnBase,
                   background: "rgba(231,76,60,0.08)", border: "1px solid rgba(231,76,60,0.2)", color: "#e74c3c",
                 }}>Cancel Booking</button>
+              )}
+              {/* Admin: Upload Media button */}
+              {isAdmin && (
+                <button onClick={() => openMediaModal(b)} style={{
+                  ...btnBase,
+                  background: "rgba(155,89,182,0.12)", border: "1px solid rgba(155,89,182,0.3)", color: "#9b59b6",
+                }}>Upload Media</button>
+              )}
+            </div>
+          )}
+
+          {/* Media button row — always visible (even for completed/cancelled bookings) */}
+          {b.status === "completed" && (
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              {isAdmin && (
+                <button onClick={() => openMediaModal(b)} style={{
+                  ...btnBase,
+                  background: "rgba(155,89,182,0.12)", border: "1px solid rgba(155,89,182,0.3)", color: "#9b59b6",
+                }}>Upload Media</button>
+              )}
+            </div>
+          )}
+
+          {/* Agent: Download Media button */}
+          {!isAdmin && (
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
+              {b.invoice_paid ? (
+                <button onClick={() => openMediaModal(b)} style={{
+                  ...btnBase,
+                  background: "linear-gradient(135deg, #C9A84C 0%, #e8c97a 100%)",
+                  border: "none", color: "#0a1628", fontWeight: 600,
+                }}>Download Media</button>
+              ) : (
+                <>
+                  <button onClick={() => openMediaModal(b)} style={{
+                    ...btnBase,
+                    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.3)",
+                  }}>View Media</button>
+                  <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(231,76,60,0.7)" }}>
+                    🔒 Invoice payment required
+                  </span>
+                </>
               )}
             </div>
           )}
