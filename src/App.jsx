@@ -2517,7 +2517,8 @@ function LeadCaptureForm({ theme: t, onSubmit }) {
 }
 
 function MicrositeView() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const [step, setStep] = useState("build");
   const [themeIdx, setThemeIdx] = useState(0);
   const [generating, setGenerating] = useState(false);
@@ -2544,6 +2545,10 @@ function MicrositeView() {
   const [mediaLoading, setMediaLoading] = useState(false);
   const [addonRequested, setAddonRequested] = useState(false);
   const [addonStatus, setAddonStatus] = useState(null); // null | 'pending' | 'approved' | 'denied'
+  // Source toggle: "listing" or "booking"
+  const [sourceType, setSourceType] = useState("listing");
+  const [bookings, setBookings] = useState([]);
+  const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [data, setData] = useState({
     address: "", city: "", price: "",
     beds: "", baths: "", sqft: "",
@@ -2566,6 +2571,19 @@ function MicrositeView() {
     };
     fetchListings();
   }, []);
+
+  // Fetch bookings from Supabase (admin sees all, agents see their own)
+  useEffect(() => {
+    const fetchBookings = async () => {
+      let query = supabase.from("bookings").select("*").order("created_at", { ascending: false });
+      if (!isAdmin && user?.email) {
+        query = query.eq("client_email", user.email);
+      }
+      const { data: rows, error } = await query;
+      if (!error && rows) setBookings(rows);
+    };
+    fetchBookings();
+  }, [isAdmin, user?.email]);
 
   // Check microsite addon request status when listing changes
   useEffect(() => {
@@ -2667,6 +2685,98 @@ function MicrositeView() {
     fetchMedia();
   }, [selectedListingId, listings]);
 
+  // When a booking is selected, populate form and fetch media from booking-media bucket
+  useEffect(() => {
+    if (!selectedBookingId) return;
+    const booking = bookings.find(b => b.id === selectedBookingId);
+    if (!booking) return;
+
+    // Auto-populate form fields from booking data
+    setData(d => ({
+      ...d,
+      address: booking.address || "",
+      city: [booking.city, booking.state, booking.zip].filter(Boolean).join(", ") || "",
+      agentName: booking.client_name || "",
+      matterportUrl: "",
+      videoUrl: "",
+    }));
+
+    // Fetch media from booking_media table (private bucket, needs signed URLs)
+    const fetchBookingMedia = async () => {
+      setMediaLoading(true);
+      try {
+        const { data: mediaRows, error } = await supabase
+          .from("booking_media")
+          .select("*")
+          .eq("booking_id", selectedBookingId)
+          .order("created_at", { ascending: false });
+
+        if (error) { console.error("Error fetching booking media:", error); setMediaLoading(false); return; }
+
+        const photos = [];
+        let video = null;
+        let tourUrl = null;
+
+        if (mediaRows && mediaRows.length > 0) {
+          // Generate signed URLs for all files
+          for (const item of mediaRows) {
+            if (item.file_type === "3d_tour") {
+              tourUrl = item.url || item.file_path;
+              continue;
+            }
+            if (!item.file_path) continue;
+
+            const { data: signedData } = await supabase.storage
+              .from("booking-media")
+              .createSignedUrl(item.file_path, 3600);
+            const signedUrl = signedData?.signedUrl;
+            if (!signedUrl) continue;
+
+            if (item.file_type === "video") {
+              video = signedUrl;
+            } else {
+              photos.push(signedUrl);
+            }
+          }
+        }
+
+        setListingPhotos(photos);
+        setListingVideo(video);
+        setListingFloorplan(null); // bookings don't have separate floorplan category
+        if (photos.length > 0) {
+          setData(d => ({ ...d, heroImg: photos[0] }));
+        }
+        if (tourUrl) {
+          setData(d => ({ ...d, matterportUrl: tourUrl }));
+        }
+      } catch (err) {
+        console.error("Error fetching booking media:", err);
+      }
+      setMediaLoading(false);
+    };
+    fetchBookingMedia();
+  }, [selectedBookingId, bookings]);
+
+  // Reset state when switching source type
+  useEffect(() => {
+    setSelectedListingId(null);
+    setSelectedBookingId(null);
+    setListingPhotos([]);
+    setListingVideo(null);
+    setListingFloorplan(null);
+    setStep("build");
+    setPublished(false);
+    setData(d => ({
+      ...d,
+      address: "", city: "", price: "",
+      beds: "", baths: "", sqft: "",
+      description: "", agentName: "", agentPhone: "",
+      heroImg: "",
+      features: ["", "", "", ""],
+      matterportUrl: "", videoUrl: "",
+    }));
+  }, [sourceType]);
+
   const theme = THEMES[themeIdx];
   const slug = (data.address || "your-listing").split(" ").slice(0, 2).join("-").toLowerCase().replace(/[^a-z0-9-]/g, "");
   const liveUrl = `https://app.milestonemediaphotography.com/p/${slug}`;
@@ -2690,12 +2800,32 @@ function MicrositeView() {
 
   const updateLeadStatus = (idx, status) => setLeads(l => l.map((x, i) => i === idx ? { ...x, status } : x));
 
-  // Package tier gating helper
+  // Package tier gating helper — works for both listings and bookings
   const selectedListing = listings.find(l => l.id === selectedListingId);
-  const listingPackage = selectedListing?.package || "";
-  const micrositeIncluded = listingPackage === "Luxury";
-  const micrositeAddonApproved = selectedListing?.microsite_addon === true;
-  const micrositeAccessible = micrositeIncluded || micrositeAddonApproved;
+  const selectedBooking = bookings.find(b => b.id === selectedBookingId);
+
+  // Determine package based on source
+  let activePackage = "";
+  let micrositeIncluded = false;
+  let micrositeAddonApproved = false;
+  let micrositeAccessible = false;
+
+  if (sourceType === "listing") {
+    activePackage = selectedListing?.package || "";
+    micrositeIncluded = activePackage === "Luxury";
+    micrositeAddonApproved = selectedListing?.microsite_addon === true;
+  } else {
+    // Booking source
+    const bookingPkg = selectedBooking?.selected_package || "";
+    activePackage = bookingPkg.charAt(0).toUpperCase() + bookingPkg.slice(1); // Capitalize for display
+    micrositeIncluded = bookingPkg.toLowerCase() === "luxury";
+    // Check if microsite addon was purchased with this booking
+    const addons = selectedBooking?.selected_addons || [];
+    micrositeAddonApproved = Array.isArray(addons) && addons.some(a => a.id === "microsite" || a === "microsite");
+  }
+  // Admin always has access
+  micrositeAccessible = isAdmin || micrositeIncluded || micrositeAddonApproved;
+  const hasSourceSelection = sourceType === "listing" ? !!selectedListingId : !!selectedBookingId;
 
   const handleRequestAddon = async () => {
     if (!selectedListingId || !user?.id) return;
@@ -2731,7 +2861,9 @@ function MicrositeView() {
         agent_phone: data.agentPhone,
         agent_email: data.agentEmail,
         hero_img: data.heroImg,
-        listing_id: selectedListingId,
+        listing_id: selectedListingId || null,
+        booking_id: selectedBookingId || null,
+        source_type: sourceType,
         matterport_url: data.matterportUrl,
         video_url: data.videoUrl || listingVideo,
         floorplan_url: listingFloorplan,
@@ -3214,30 +3346,64 @@ function MicrositeView() {
         <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Build a branded property page in 60 seconds.</div>
       </div>
 
-      {/* Listing Selector */}
+      {/* Source Toggle: Listings vs Bookings */}
       <div>
-        <div style={labelStyle}>Select Listing</div>
-        <select
-          style={{ ...inputStyle, cursor: "pointer" }}
-          value={selectedListingId || ""}
-          onChange={e => setSelectedListingId(e.target.value || null)}
-        >
-          <option value="">— Choose a listing —</option>
-          {listings.map(l => (
-            <option key={l.id} value={l.id}>{l.address} — {l.city}</option>
+        <div style={labelStyle}>Source</div>
+        <div style={{ display: "flex", gap: 0, borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.12)" }}>
+          {[{ key: "listing", label: "Listings" }, { key: "booking", label: "Bookings" }].map(s => (
+            <button key={s.key} onClick={() => setSourceType(s.key)} style={{
+              flex: 1, padding: "10px 0", border: "none", cursor: "pointer",
+              background: sourceType === s.key ? "rgba(201,168,76,0.2)" : "rgba(255,255,255,0.03)",
+              color: sourceType === s.key ? "#c9a84c" : "rgba(255,255,255,0.4)",
+              fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: sourceType === s.key ? 600 : 400,
+              letterSpacing: "0.08em", transition: "all 0.2s",
+              borderRight: s.key === "listing" ? "1px solid rgba(255,255,255,0.12)" : "none",
+            }}>{s.label}</button>
           ))}
-        </select>
-        {selectedListingId && selectedListing && (
+        </div>
+      </div>
+
+      {/* Listing or Booking Selector */}
+      <div>
+        <div style={labelStyle}>{sourceType === "listing" ? "Select Listing" : "Select Booking"}</div>
+        {sourceType === "listing" ? (
+          <select
+            style={{ ...inputStyle, cursor: "pointer" }}
+            value={selectedListingId || ""}
+            onChange={e => setSelectedListingId(e.target.value || null)}
+          >
+            <option value="">— Choose a listing —</option>
+            {listings.map(l => (
+              <option key={l.id} value={l.id}>{l.address} — {l.city}</option>
+            ))}
+          </select>
+        ) : (
+          <select
+            style={{ ...inputStyle, cursor: "pointer" }}
+            value={selectedBookingId || ""}
+            onChange={e => setSelectedBookingId(e.target.value || null)}
+          >
+            <option value="">— Choose a booking —</option>
+            {bookings.map(b => (
+              <option key={b.id} value={b.id}>
+                {b.address || "No address"}{b.city ? ` — ${b.city}` : ""} ({b.client_name || "Unknown"})
+              </option>
+            ))}
+          </select>
+        )}
+        {/* Package info display */}
+        {hasSourceSelection && (
           <div style={{ marginTop: 6, fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
-            Package: <span style={{ color: listingPackage === "Luxury" ? "#e5c97e" : listingPackage === "Signature" ? "#c9a84c" : "#8fa3b1", fontWeight: 600 }}>{listingPackage || "Unknown"}</span>
-            {micrositeIncluded && <span style={{ color: "rgba(201,168,76,0.7)", marginLeft: 8 }}>— Microsite included</span>}
-            {!micrositeIncluded && micrositeAddonApproved && <span style={{ color: "#4ade80", marginLeft: 8 }}>— Microsite add-on active</span>}
+            Package: <span style={{ color: activePackage === "Luxury" ? "#e5c97e" : activePackage === "Signature" ? "#c9a84c" : "#8fa3b1", fontWeight: 600 }}>{activePackage || "Unknown"}</span>
+            {isAdmin && <span style={{ color: "#4ade80", marginLeft: 8 }}>— Admin access</span>}
+            {!isAdmin && micrositeIncluded && <span style={{ color: "rgba(201,168,76,0.7)", marginLeft: 8 }}>— Microsite included</span>}
+            {!isAdmin && !micrositeIncluded && micrositeAddonApproved && <span style={{ color: "#4ade80", marginLeft: 8 }}>— Microsite add-on active</span>}
           </div>
         )}
       </div>
 
-      {/* Package tier gate — Essential without addon */}
-      {selectedListingId && !micrositeAccessible && listingPackage === "Essential" && (
+      {/* Package tier gate — non-admin without microsite access */}
+      {hasSourceSelection && !micrositeAccessible && (
         <div style={{
           background: "rgba(255,255,255,0.03)", border: "1px solid rgba(201,168,76,0.2)",
           borderRadius: 14, padding: 28, textAlign: "center",
@@ -3247,36 +3413,47 @@ function MicrositeView() {
             Unlock Your Property Microsite
           </div>
           <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.6, maxWidth: 420, margin: "0 auto 20px" }}>
-            Your Essential package doesn't include a microsite. Add one for just <span style={{ color: "#c9a84c", fontWeight: 600 }}>$150</span> to give your listing a branded, shareable property page with lead capture.
+            Your {activePackage || "current"} package doesn't include a microsite. Add one for just <span style={{ color: "#c9a84c", fontWeight: 600 }}>$150</span> to give your listing a branded, shareable property page with lead capture.
           </div>
-          {addonStatus === "pending" ? (
+          {sourceType === "listing" && (
+            <>
+              {addonStatus === "pending" ? (
+                <div style={{
+                  display: "inline-block", padding: "12px 28px", borderRadius: 10,
+                  background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.3)",
+                  fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c",
+                  letterSpacing: "0.08em", fontWeight: 600,
+                }}>
+                  Request Pending — Awaiting Admin Approval
+                </div>
+              ) : addonStatus === "denied" ? (
+                <div style={{
+                  display: "inline-block", padding: "12px 28px", borderRadius: 10,
+                  background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+                  fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#f87171",
+                  letterSpacing: "0.08em", fontWeight: 600,
+                }}>
+                  Request Denied — Contact admin for details
+                </div>
+              ) : (
+                <button onClick={handleRequestAddon} style={{
+                  background: "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
+                  border: "none", borderRadius: 10, padding: "14px 32px",
+                  fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 12,
+                  letterSpacing: "0.1em", textTransform: "uppercase", color: "#0a1628",
+                  cursor: "pointer", transition: "all 0.3s",
+                }}>
+                  Add Microsite — $150
+                </button>
+              )}
+            </>
+          )}
+          {sourceType === "booking" && (
             <div style={{
-              display: "inline-block", padding: "12px 28px", borderRadius: 10,
-              background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.3)",
-              fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c",
-              letterSpacing: "0.08em", fontWeight: 600,
+              fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)", marginTop: 8,
             }}>
-              Request Pending — Awaiting Admin Approval
+              Contact admin to add the Microsite add-on to this booking.
             </div>
-          ) : addonStatus === "denied" ? (
-            <div style={{
-              display: "inline-block", padding: "12px 28px", borderRadius: 10,
-              background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
-              fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#f87171",
-              letterSpacing: "0.08em", fontWeight: 600,
-            }}>
-              Request Denied — Contact admin for details
-            </div>
-          ) : (
-            <button onClick={handleRequestAddon} style={{
-              background: "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
-              border: "none", borderRadius: 10, padding: "14px 32px",
-              fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 12,
-              letterSpacing: "0.1em", textTransform: "uppercase", color: "#0a1628",
-              cursor: "pointer", transition: "all 0.3s",
-            }}>
-              Add Microsite — $150
-            </button>
           )}
           <div style={{ marginTop: 16, fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.25)" }}>
             Or upgrade to Luxury for a free microsite with every listing.
@@ -3284,8 +3461,8 @@ function MicrositeView() {
         </div>
       )}
 
-      {/* Show builder only if microsite is accessible (or no listing selected yet) */}
-      {(!selectedListingId || micrositeAccessible) && <>
+      {/* Show builder only if microsite is accessible (or no source selected yet) */}
+      {(!hasSourceSelection || micrositeAccessible) && <>
 
       {/* Hero Image from uploaded photos */}
       <div>
@@ -3306,13 +3483,13 @@ function MicrositeView() {
               </div>
             ))}
           </div>
-        ) : selectedListingId ? (
+        ) : hasSourceSelection ? (
           <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.35)", padding: "12px 0" }}>
-            No photos uploaded for this listing. Upload photos in the Admin panel first.
+            No photos uploaded yet. Upload photos in the Admin panel first.
           </div>
         ) : (
           <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.35)", padding: "12px 0" }}>
-            Select a listing above to see available photos.
+            Select a {sourceType} above to see available photos.
           </div>
         )}
       </div>
