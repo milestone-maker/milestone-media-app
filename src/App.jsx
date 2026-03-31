@@ -2865,6 +2865,72 @@ function MicrositeView() {
 
   const handlePublish = async () => {
     try {
+      let galleryPhotos = listingPhotos;
+      let heroImg = data.heroImg;
+      let publishVideoUrl = data.videoUrl || listingVideo;
+      let publishFloorplanUrl = listingFloorplan;
+
+      // For booking source, copy media from private bucket to public bucket
+      // so published microsite URLs never expire
+      if (sourceType === "booking" && selectedBookingId) {
+        const { data: mediaRows } = await supabase
+          .from("booking_media")
+          .select("*")
+          .eq("booking_id", selectedBookingId)
+          .order("created_at", { ascending: false });
+
+        if (mediaRows && mediaRows.length > 0) {
+          const publishedPhotos = [];
+          let publishedVideo = null;
+
+          for (const item of mediaRows) {
+            if (item.file_type === "3d_tour" || !item.file_path) continue;
+
+            // Download from private bucket
+            const { data: fileBlob, error: dlError } = await supabase.storage
+              .from("booking-media")
+              .download(item.file_path);
+
+            if (dlError || !fileBlob) {
+              console.error("Download error for", item.file_path, dlError);
+              continue;
+            }
+
+            // Upload to public bucket under slug folder
+            const fileName = item.file_path.split("/").pop();
+            const destPath = `${slug}/${fileName}`;
+            const { error: upError } = await supabase.storage
+              .from("published-media")
+              .upload(destPath, fileBlob, { upsert: true, contentType: fileBlob.type });
+
+            if (upError) {
+              console.error("Upload to published-media error:", upError);
+              continue;
+            }
+
+            // Get permanent public URL
+            const { data: pubUrlData } = supabase.storage
+              .from("published-media")
+              .getPublicUrl(destPath);
+
+            const publicUrl = pubUrlData?.publicUrl;
+            if (!publicUrl) continue;
+
+            if (item.file_type === "video") {
+              publishedVideo = publicUrl;
+            } else {
+              publishedPhotos.push(publicUrl);
+            }
+          }
+
+          if (publishedPhotos.length > 0) {
+            galleryPhotos = publishedPhotos;
+            heroImg = publishedPhotos[0];
+          }
+          if (publishedVideo) publishVideoUrl = publishedVideo;
+        }
+      }
+
       const property_data = {
         address: data.address,
         city: data.city,
@@ -2878,14 +2944,14 @@ function MicrositeView() {
         agent_name: data.agentName,
         agent_phone: data.agentPhone,
         agent_email: data.agentEmail,
-        hero_img: data.heroImg,
+        hero_img: heroImg,
         listing_id: selectedListingId || null,
         booking_id: selectedBookingId || null,
         source_type: sourceType,
         matterport_url: data.matterportUrl,
-        video_url: data.videoUrl || listingVideo,
-        floorplan_url: listingFloorplan,
-        gallery_photos: listingPhotos,
+        video_url: publishVideoUrl,
+        floorplan_url: publishFloorplanUrl,
+        gallery_photos: galleryPhotos,
       };
 
       // Build the record to insert
@@ -3536,15 +3602,15 @@ function MicrositeView() {
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: "rgba(255,255,255,0.6)" }}>Property Details</div>
         <div>
           <label style={labelStyle}>Street Address</label>
-          <input style={inputStyle} placeholder="4821 Lakewood Blvd" value={data.address} onChange={e => setField("address", e.target.value)} />
+          <input style={inputStyle} placeholder={sourceType === "booking" ? "123 Main St" : "4821 Lakewood Blvd"} value={data.address} onChange={e => setField("address", e.target.value)} />
         </div>
         <div>
-          <label style={labelStyle}>City & ZIP</label>
-          <input style={inputStyle} placeholder="Dallas, TX 75206" value={data.city} onChange={e => setField("city", e.target.value)} />
+          <label style={labelStyle}>City, State & ZIP</label>
+          <input style={inputStyle} placeholder={sourceType === "booking" ? "Fort Worth, TX 76109" : "Dallas, TX 75206"} value={data.city} onChange={e => setField("city", e.target.value)} />
         </div>
         <div>
           <label style={labelStyle}>List Price</label>
-          <input style={inputStyle} placeholder="$1,250,000" value={data.price} onChange={e => setField("price", e.target.value)} />
+          <input style={inputStyle} placeholder={sourceType === "booking" ? "$750,000" : "$1,250,000"} value={data.price} onChange={e => setField("price", e.target.value)} />
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
           {[{ key: "beds", ph: "4" }, { key: "baths", ph: "3.5" }, { key: "sqft", ph: "3,840" }].map(f => (
@@ -3557,7 +3623,7 @@ function MicrositeView() {
         <div>
           <label style={labelStyle}>Property Description</label>
           <textarea style={{ ...inputStyle, height: 90, resize: "none", lineHeight: 1.5 }}
-            placeholder="Describe the property's best features..."
+            placeholder={sourceType === "booking" ? "Describe the property highlights for your microsite..." : "Describe the property's best features..."}
             value={data.description} onChange={e => setField("description", e.target.value)} />
         </div>
       </div>
@@ -3567,7 +3633,9 @@ function MicrositeView() {
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: "rgba(255,255,255,0.6)" }}>Highlights</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
           {data.features.map((f, i) => (
-            <input key={i} style={inputStyle} placeholder={["Chef's Kitchen", "Pool & Spa", "Smart Home", "3-Car Garage"][i]}
+            <input key={i} style={inputStyle} placeholder={sourceType === "booking"
+              ? ["Open Floor Plan", "Updated Kitchen", "Large Backyard", "New Roof"][i]
+              : ["Chef's Kitchen", "Pool & Spa", "Smart Home", "3-Car Garage"][i]}
               value={f} onChange={e => setFeature(i, e.target.value)} />
           ))}
         </div>
