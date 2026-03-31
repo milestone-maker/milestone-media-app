@@ -4135,20 +4135,25 @@ function PublicLeadCaptureForm({ theme: t, micrositeId, listingId }) {
 // BOOKINGS MANAGER VIEW — View & manage all bookings
 // ============================================================
 function BookingsManagerView() {
+  const { user, profile } = useAuth();
+  const isAdmin = profile?.role === "admin";
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("all"); // all, confirmed, completed, cancelled
+  const [filter, setFilter] = useState("all");
+  const [editingBooking, setEditingBooking] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [cancelConfirm, setCancelConfirm] = useState(null);
 
-  useEffect(() => {
-    fetchBookings();
-  }, []);
+  useEffect(() => { fetchBookings(); }, []);
 
   const fetchBookings = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("bookings")
-      .select("*")
-      .order("created_at", { ascending: false });
+    let query = supabase.from("bookings").select("*").order("created_at", { ascending: false });
+    // Agents only see their own bookings (matched by email)
+    if (!isAdmin && user?.email) {
+      query = query.eq("client_email", user.email);
+    }
+    const { data, error } = await query;
     if (data) setBookings(data);
     if (error) console.error("Error loading bookings:", error);
     setLoading(false);
@@ -4157,6 +4162,16 @@ function BookingsManagerView() {
   const updateStatus = async (id, newStatus) => {
     await supabase.from("bookings").update({ status: newStatus }).eq("id", id);
     fetchBookings();
+    setCancelConfirm(null);
+  };
+
+  const saveBooking = async (updated) => {
+    setSaving(true);
+    const { id, created_at, ...fields } = updated;
+    const { error } = await supabase.from("bookings").update(fields).eq("id", id);
+    if (error) { console.error("Save error:", error); alert("Failed to save changes."); }
+    else { setEditingBooking(null); fetchBookings(); }
+    setSaving(false);
   };
 
   const filtered = filter === "all" ? bookings : bookings.filter(b => b.status === filter);
@@ -4185,13 +4200,182 @@ function BookingsManagerView() {
     marginBottom: 4,
   };
 
+  const btnBase = {
+    fontFamily: "'Jost', sans-serif", fontSize: 11, cursor: "pointer",
+    letterSpacing: "0.06em", textTransform: "uppercase", borderRadius: 6, padding: "6px 14px",
+  };
+
+  // ——— Edit Modal ———
+  if (editingBooking) {
+    const b = editingBooking;
+    const set = (key, val) => setEditingBooking({ ...b, [key]: val });
+    const inputSt = {
+      width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
+      borderRadius: 8, padding: "10px 12px", color: "#fff", fontFamily: "'Jost', sans-serif", fontSize: 13,
+      outline: "none", boxSizing: "border-box",
+    };
+    const fieldLabel = { ...labelSt, marginTop: 14 };
+    const pkgOpts = ["essential", "signature", "luxury"];
+    const tierOpts = [
+      { value: "under_1500", label: "Under 1,500 sf" },
+      { value: "1501_2500", label: "1,501 – 2,500 sf" },
+      { value: "2501_3500", label: "2,501 – 3,500 sf" },
+      { value: "3501_4500", label: "3,501 – 4,500 sf" },
+      { value: "over_4501", label: "Over 4,501 sf" },
+    ];
+    const timeSlots = ["9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM"];
+
+    return (
+      <div style={{ padding: "32px 24px", maxWidth: 700, margin: "0 auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#c9a84c" }}>Edit Booking</div>
+          <button onClick={() => setEditingBooking(null)} style={{
+            background: "transparent", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8,
+            padding: "8px 16px", color: "rgba(255,255,255,0.6)", fontFamily: "'Jost', sans-serif",
+            fontSize: 12, cursor: "pointer", letterSpacing: "0.06em",
+          }}>← Back</button>
+        </div>
+
+        {/* Contact */}
+        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 20, marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>Contact Information</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <div style={fieldLabel}>Full Name</div>
+              <input value={b.client_name || ""} onChange={e => set("client_name", e.target.value)} style={inputSt} />
+            </div>
+            <div>
+              <div style={fieldLabel}>Phone</div>
+              <input value={b.client_phone || ""} onChange={e => set("client_phone", e.target.value)} style={inputSt} />
+            </div>
+          </div>
+          <div style={fieldLabel}>Email</div>
+          <input value={b.client_email || ""} onChange={e => set("client_email", e.target.value)} style={inputSt} />
+        </div>
+
+        {/* Property */}
+        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 20, marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>Property Details</div>
+          <div style={fieldLabel}>Street Address</div>
+          <input value={b.address || ""} onChange={e => set("address", e.target.value)} style={inputSt} />
+          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 12 }}>
+            <div>
+              <div style={fieldLabel}>City</div>
+              <input value={b.city || ""} onChange={e => set("city", e.target.value)} style={inputSt} />
+            </div>
+            <div>
+              <div style={fieldLabel}>State</div>
+              <input value={b.state || ""} onChange={e => set("state", e.target.value)} style={inputSt} />
+            </div>
+            <div>
+              <div style={fieldLabel}>Zip</div>
+              <input value={b.zip || ""} onChange={e => set("zip", e.target.value)} style={inputSt} />
+            </div>
+          </div>
+          <div style={fieldLabel}>Property Size</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {tierOpts.map(t => (
+              <button key={t.value} onClick={() => set("sqft_tier", t.value)} style={{
+                background: b.sqft_tier === t.value ? "rgba(201,168,76,0.15)" : "rgba(255,255,255,0.03)",
+                border: b.sqft_tier === t.value ? "1px solid rgba(201,168,76,0.4)" : "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 6, padding: "6px 12px", color: b.sqft_tier === t.value ? "#c9a84c" : "rgba(255,255,255,0.5)",
+                fontFamily: "'Jost', sans-serif", fontSize: 11, cursor: "pointer",
+              }}>{t.label}</button>
+            ))}
+          </div>
+          <div style={fieldLabel}>Method of Access</div>
+          <input value={b.access_method || ""} onChange={e => set("access_method", e.target.value)} style={inputSt} />
+        </div>
+
+        {/* Services */}
+        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 20, marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>Services</div>
+          <div style={fieldLabel}>Package</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {pkgOpts.map(p => (
+              <button key={p} onClick={() => set("selected_package", p)} style={{
+                background: b.selected_package === p ? "rgba(201,168,76,0.15)" : "rgba(255,255,255,0.03)",
+                border: b.selected_package === p ? "1px solid rgba(201,168,76,0.4)" : "1px solid rgba(255,255,255,0.08)",
+                borderRadius: 6, padding: "8px 18px", color: b.selected_package === p ? "#c9a84c" : "rgba(255,255,255,0.5)",
+                fontFamily: "'Jost', sans-serif", fontSize: 12, cursor: "pointer", textTransform: "capitalize",
+              }}>{p}</button>
+            ))}
+            <button onClick={() => set("selected_package", null)} style={{
+              background: !b.selected_package ? "rgba(201,168,76,0.15)" : "rgba(255,255,255,0.03)",
+              border: !b.selected_package ? "1px solid rgba(201,168,76,0.4)" : "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 6, padding: "8px 18px", color: !b.selected_package ? "#c9a84c" : "rgba(255,255,255,0.5)",
+              fontFamily: "'Jost', sans-serif", fontSize: 12, cursor: "pointer",
+            }}>Individual</button>
+          </div>
+          <div style={fieldLabel}>Subtotal ($)</div>
+          <input type="number" value={b.subtotal || 0} onChange={e => set("subtotal", Number(e.target.value))} style={{ ...inputSt, width: 160 }} />
+        </div>
+
+        {/* Schedule */}
+        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 20, marginBottom: 24 }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 12 }}>Schedule</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div>
+              <div style={fieldLabel}>Date</div>
+              <input type="date" value={b.booking_date || ""} onChange={e => set("booking_date", e.target.value)} style={inputSt} />
+            </div>
+            <div>
+              <div style={fieldLabel}>Time</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {timeSlots.map(t => (
+                  <button key={t} onClick={() => set("booking_time", t)} style={{
+                    background: b.booking_time === t ? "rgba(201,168,76,0.15)" : "rgba(255,255,255,0.03)",
+                    border: b.booking_time === t ? "1px solid rgba(201,168,76,0.4)" : "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: 6, padding: "4px 10px", color: b.booking_time === t ? "#c9a84c" : "rgba(255,255,255,0.5)",
+                    fontFamily: "'Jost', sans-serif", fontSize: 11, cursor: "pointer",
+                  }}>{t}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+          {isAdmin && (
+            <>
+              <div style={fieldLabel}>Status</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {["confirmed", "in_progress", "completed", "cancelled"].map(s => (
+                  <button key={s} onClick={() => set("status", s)} style={{
+                    background: b.status === s ? `${statusColors[s]}22` : "rgba(255,255,255,0.03)",
+                    border: `1px solid ${b.status === s ? statusColors[s] : "rgba(255,255,255,0.08)"}`,
+                    borderRadius: 6, padding: "6px 14px", color: b.status === s ? statusColors[s] : "rgba(255,255,255,0.5)",
+                    fontFamily: "'Jost', sans-serif", fontSize: 11, cursor: "pointer", textTransform: "uppercase", letterSpacing: "0.06em",
+                  }}>{s.replace("_", " ")}</button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Save / Cancel buttons */}
+        <div style={{ display: "flex", gap: 12 }}>
+          <button onClick={() => saveBooking(b)} disabled={saving} style={{
+            flex: 1, background: saving ? "rgba(201,168,76,0.3)" : "linear-gradient(135deg, #C9A84C 0%, #e8c97a 100%)",
+            border: "none", borderRadius: 8, padding: "14px 24px", color: "#0a1628",
+            fontFamily: "'Jost', sans-serif", fontWeight: 600, fontSize: 13, cursor: saving ? "wait" : "pointer",
+            letterSpacing: "0.1em", textTransform: "uppercase",
+          }}>{saving ? "Saving..." : "Save Changes"}</button>
+          <button onClick={() => setEditingBooking(null)} style={{
+            background: "transparent", border: "1px solid rgba(255,255,255,0.15)",
+            borderRadius: 8, padding: "14px 24px", color: "rgba(255,255,255,0.6)",
+            fontFamily: "'Jost', sans-serif", fontSize: 13, cursor: "pointer", letterSpacing: "0.06em",
+          }}>Discard</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ——— Bookings List ———
   return (
     <div style={{ padding: "32px 24px", maxWidth: 900, margin: "0 auto" }}>
       <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 32, color: "#c9a84c", marginBottom: 8 }}>
-        Bookings
+        {isAdmin ? "All Bookings" : "My Bookings"}
       </div>
       <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.5)", marginBottom: 24 }}>
-        {bookings.length} total booking{bookings.length !== 1 ? "s" : ""}
+        {bookings.length} booking{bookings.length !== 1 ? "s" : ""}
       </div>
 
       {/* Filter tabs */}
@@ -4216,18 +4400,23 @@ function BookingsManagerView() {
       )}
 
       {filtered.map(b => (
-        <div key={b.id} style={cardStyle}>
+        <div key={b.id} style={{
+          ...cardStyle,
+          borderLeft: b.status === "cancelled" ? "3px solid #e74c3c" : cardStyle.border,
+          opacity: b.status === "cancelled" ? 0.65 : 1,
+        }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
             <div>
               <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#fff" }}>{b.client_name}</div>
               <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>{b.client_email} {b.client_phone ? `· ${b.client_phone}` : ""}</div>
             </div>
             <span style={{
-              background: `${statusColors[b.status]}22`,
-              color: statusColors[b.status],
+              background: `${statusColors[b.status] || "#888"}22`,
+              color: statusColors[b.status] || "#888",
               padding: "4px 12px", borderRadius: 12,
               fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase",
-            }}>{b.status?.replace("_", " ")}</span>
+              textDecoration: b.status === "cancelled" ? "line-through" : "none",
+            }}>{b.status?.replace("_", " ") || "pending"}</span>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
@@ -4247,34 +4436,50 @@ function BookingsManagerView() {
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
             <div style={labelSt}>
               {b.booking_mode === "package" ? `${b.selected_package} package` : `${(b.selected_services || []).length} services`}
               {" · "}{b.sqft_tier?.replace("_", "-").replace("under", "<").replace("over", ">")} sf
             </div>
           </div>
 
-          {b.status === "confirmed" && (
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button onClick={() => updateStatus(b.id, "in_progress")} style={{
-                background: "rgba(78,205,196,0.15)", border: "1px solid rgba(78,205,196,0.3)",
-                borderRadius: 6, padding: "6px 14px", color: "#4ecdc4",
-                fontFamily: "'Jost', sans-serif", fontSize: 11, cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase",
-              }}>Start</button>
-              <button onClick={() => updateStatus(b.id, "cancelled")} style={{
-                background: "rgba(231,76,60,0.1)", border: "1px solid rgba(231,76,60,0.2)",
-                borderRadius: 6, padding: "6px 14px", color: "#e74c3c",
-                fontFamily: "'Jost', sans-serif", fontSize: 11, cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase",
-              }}>Cancel</button>
-            </div>
-          )}
-          {b.status === "in_progress" && (
-            <div style={{ marginTop: 12 }}>
-              <button onClick={() => updateStatus(b.id, "completed")} style={{
-                background: "rgba(39,174,96,0.15)", border: "1px solid rgba(39,174,96,0.3)",
-                borderRadius: 6, padding: "6px 14px", color: "#27ae60",
-                fontFamily: "'Jost', sans-serif", fontSize: 11, cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase",
-              }}>Mark Complete</button>
+          {/* Action buttons */}
+          {b.status !== "cancelled" && b.status !== "completed" && (
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              <button onClick={() => setEditingBooking({ ...b })} style={{
+                ...btnBase,
+                background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.3)", color: "#c9a84c",
+              }}>Edit</button>
+              {isAdmin && b.status === "confirmed" && (
+                <button onClick={() => updateStatus(b.id, "in_progress")} style={{
+                  ...btnBase,
+                  background: "rgba(78,205,196,0.15)", border: "1px solid rgba(78,205,196,0.3)", color: "#4ecdc4",
+                }}>Start</button>
+              )}
+              {isAdmin && b.status === "in_progress" && (
+                <button onClick={() => updateStatus(b.id, "completed")} style={{
+                  ...btnBase,
+                  background: "rgba(39,174,96,0.15)", border: "1px solid rgba(39,174,96,0.3)", color: "#27ae60",
+                }}>Mark Complete</button>
+              )}
+              {cancelConfirm === b.id ? (
+                <>
+                  <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#e74c3c", padding: "6px 0", alignSelf: "center" }}>Are you sure?</span>
+                  <button onClick={() => updateStatus(b.id, "cancelled")} style={{
+                    ...btnBase,
+                    background: "rgba(231,76,60,0.2)", border: "1px solid rgba(231,76,60,0.4)", color: "#e74c3c",
+                  }}>Yes, Cancel</button>
+                  <button onClick={() => setCancelConfirm(null)} style={{
+                    ...btnBase,
+                    background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.5)",
+                  }}>No</button>
+                </>
+              ) : (
+                <button onClick={() => setCancelConfirm(b.id)} style={{
+                  ...btnBase,
+                  background: "rgba(231,76,60,0.08)", border: "1px solid rgba(231,76,60,0.2)", color: "#e74c3c",
+                }}>Cancel Booking</button>
+              )}
             </div>
           )}
         </div>
@@ -5678,7 +5883,7 @@ function AppShell() {
   ];
   const navItems = isAdmin
     ? [...baseNavItems, { label: "Bookings", icon: "📋" }, { label: "Admin", icon: "⚙" }]
-    : baseNavItems;
+    : [...baseNavItems, { label: "Bookings", icon: "📋" }];
 
   const baseViews = [
     <ShowcaseView onBook={handleBook} />,
@@ -5689,7 +5894,7 @@ function AppShell() {
   ];
   const views = isAdmin
     ? [...baseViews, <BookingsManagerView />, <AdminView />]
-    : baseViews;
+    : [...baseViews, <BookingsManagerView />];
 
   const ProfileDropdown = showProfile && (
     <div style={{
