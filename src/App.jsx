@@ -4160,8 +4160,9 @@ function BookingsManagerView() {
   };
 
   const updateStatus = async (id, newStatus) => {
-    await supabase.from("bookings").update({ status: newStatus }).eq("id", id);
-    fetchBookings();
+    const { error } = await supabase.from("bookings").update({ status: newStatus }).eq("id", id);
+    if (error) { console.error("Status update error:", error); alert("Failed to update status."); }
+    else { fetchBookings(); }
     setCancelConfirm(null);
   };
 
