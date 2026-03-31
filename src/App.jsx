@@ -4199,8 +4199,22 @@ function BookingsManagerView() {
       .select("*")
       .eq("booking_id", bookingId)
       .order("created_at", { ascending: false });
-    if (data) setMediaFiles(data);
-    if (error) console.error("Error loading media:", error);
+    if (error) { console.error("Error loading media:", error); setMediaLoading(false); return; }
+    // Generate signed URLs for photos/videos (private bucket)
+    if (data && data.length > 0) {
+      const withUrls = await Promise.all(data.map(async (item) => {
+        if (item.file_path && item.file_type !== "3d_tour") {
+          const { data: signedData } = await supabase.storage
+            .from("booking-media")
+            .createSignedUrl(item.file_path, 3600); // 1 hour
+          return { ...item, signed_url: signedData?.signedUrl || null };
+        }
+        return item;
+      }));
+      setMediaFiles(withUrls);
+    } else {
+      setMediaFiles(data || []);
+    }
     setMediaLoading(false);
   };
 
@@ -4541,14 +4555,9 @@ function BookingsManagerView() {
                   {photos.map(p => (
                     <div key={p.id} style={{ position: "relative", display: "inline-block" }}>
                       <img
-                        src={supabase.storage.from("booking-media").getPublicUrl(p.file_path).data?.publicUrl || "#"}
+                        src={p.signed_url || "#"}
                         alt={p.file_name}
                         style={thumbSt}
-                        onError={async (e) => {
-                          // If public URL fails, try signed URL
-                          const url = await getDownloadUrl(p.file_path);
-                          if (url) e.target.src = url;
-                        }}
                       />
                       <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 4, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {p.file_name}
