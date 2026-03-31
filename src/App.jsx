@@ -2839,8 +2839,10 @@ function MicrositeView() {
     const addons = selectedBooking?.selected_addons || [];
     micrositeAddonApproved = Array.isArray(addons) && addons.some(a => a.id === "microsite" || a === "microsite");
   }
-  // Admin always has access
-  micrositeAccessible = isAdmin || micrositeIncluded || micrositeAddonApproved;
+  // Invoice paid check — agents must pay before creating a microsite
+  const invoicePaid = sourceType === "booking" ? !!selectedBooking?.invoice_paid : true;
+  // Admin always has access; agents need package/addon AND paid invoice
+  micrositeAccessible = isAdmin || ((micrositeIncluded || micrositeAddonApproved) && invoicePaid);
   const hasSourceSelection = sourceType === "listing" ? !!selectedListingId : !!selectedBookingId;
 
   const handleRequestAddon = async () => {
@@ -3416,12 +3418,29 @@ function MicrositeView() {
             {isAdmin && <span style={{ color: "#4ade80", marginLeft: 8 }}>— Admin access</span>}
             {!isAdmin && micrositeIncluded && <span style={{ color: "rgba(201,168,76,0.7)", marginLeft: 8 }}>— Microsite included</span>}
             {!isAdmin && !micrositeIncluded && micrositeAddonApproved && <span style={{ color: "#4ade80", marginLeft: 8 }}>— Microsite add-on active</span>}
+            {!isAdmin && (micrositeIncluded || micrositeAddonApproved) && !invoicePaid && <span style={{ color: "#f59e0b", marginLeft: 8 }}>— Invoice unpaid</span>}
           </div>
         )}
       </div>
 
+      {/* Invoice not paid gate — agent has package but hasn't paid yet */}
+      {hasSourceSelection && !isAdmin && (micrositeIncluded || micrositeAddonApproved) && !invoicePaid && (
+        <div style={{
+          background: "rgba(255,255,255,0.03)", border: "1px solid rgba(239,168,76,0.25)",
+          borderRadius: 14, padding: 28, textAlign: "center",
+        }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🔒</div>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#fff", marginBottom: 8 }}>
+            Invoice Payment Required
+          </div>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.6, maxWidth: 420, margin: "0 auto" }}>
+            Your {activePackage} package includes a microsite, but it will be available once your invoice has been paid. Please complete payment to unlock this feature.
+          </div>
+        </div>
+      )}
+
       {/* Package tier gate — non-admin without microsite access */}
-      {hasSourceSelection && !micrositeAccessible && (
+      {hasSourceSelection && !micrositeAccessible && !(!invoicePaid && (micrositeIncluded || micrositeAddonApproved)) && (
         <div style={{
           background: "rgba(255,255,255,0.03)", border: "1px solid rgba(201,168,76,0.2)",
           borderRadius: 14, padding: 28, textAlign: "center",
