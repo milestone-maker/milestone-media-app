@@ -620,7 +620,7 @@ function BookView() {
   const STEPS = ["Address", "Services", "Add-ons", "Schedule", "Review & Pay"];
 
   // Fetch Google Calendar busy slots when date changes
-  React.useEffect(() => {
+  useEffect(() => {
     if (!selectedDate) { setBusySlots([]); return; }
     let cancelled = false;
     setLoadingSlots(true);
