@@ -721,6 +721,7 @@ function BookView() {
         if (selectedAddons[a.id]) selAddons.push({ id: a.id, qty: typeof selectedAddons[a.id] === "number" ? selectedAddons[a.id] : 1 });
       });
       const bookingData = {
+        source: "app",
         agent_id: user?.id,
         client_name: clientName,
         client_email: clientEmail,
@@ -5233,7 +5234,12 @@ function BookingsManagerView() {
         }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
             <div>
-              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#fff" }}>{b.client_name}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#fff" }}>{b.client_name}</div>
+                {b.source === "website" && (
+                  <span style={{ background: "rgba(90,160,255,0.12)", color: "#5aa0ff", padding: "2px 8px", borderRadius: 8, fontFamily: "'Jost', sans-serif", fontSize: 10, letterSpacing: "0.08em", textTransform: "uppercase" }}>website</span>
+                )}
+              </div>
               <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>{b.client_email} {b.client_phone ? `· ${b.client_phone}` : ""}</div>
             </div>
             <span style={{
