@@ -189,16 +189,29 @@ export default async function handler(req, res) {
 
     const transporter = await createTransporter();
 
-    // Send both emails concurrently
-    const [ownerResult, clientResult] = await Promise.all([
+    // Send owner + client emails concurrently
+    const emailJobs = [
       transporter.sendMail(buildOwnerEmail(booking)),
       transporter.sendMail(buildClientEmail(booking)),
-    ]);
+    ];
+
+    // Also notify the booking agent if their email differs from the client email
+    if (booking.agentEmail && booking.agentEmail !== booking.clientEmail) {
+      const agentConfirmation = buildClientEmail({
+        ...booking,
+        clientEmail: booking.agentEmail,
+        clientName: booking.agentName || booking.agentEmail,
+      });
+      agentConfirmation.subject = `Booking Confirmed (Your Request) — ${booking.date} — Milestone Media`;
+      emailJobs.push(transporter.sendMail(agentConfirmation));
+    }
+
+    const results = await Promise.all(emailJobs);
 
     return res.status(200).json({
       success: true,
-      ownerMessageId: ownerResult.messageId,
-      clientMessageId: clientResult.messageId,
+      ownerMessageId: results[0].messageId,
+      clientMessageId: results[1].messageId,
     });
   } catch (err) {
     console.error("Email send error:", err);

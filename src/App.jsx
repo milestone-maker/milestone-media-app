@@ -721,6 +721,7 @@ function BookView() {
         if (selectedAddons[a.id]) selAddons.push({ id: a.id, qty: typeof selectedAddons[a.id] === "number" ? selectedAddons[a.id] : 1 });
       });
       const bookingData = {
+        agent_id: user?.id,
         client_name: clientName,
         client_email: clientEmail,
         client_phone: clientPhone || null,
@@ -736,7 +737,7 @@ function BookView() {
         subtotal: calcTotal(),
       };
       const { data: inserted, error } = await supabase.from("bookings").insert(bookingData).select("id").single();
-      if (error) console.error("Booking error:", error);
+      if (error) { console.error("Booking insert error:", error); throw new Error("Booking insert failed: " + error.message); }
 
       // Create Google Calendar event
       try {
@@ -768,6 +769,8 @@ function BookView() {
         const emailPayload = {
           booking: {
             clientName, clientEmail, clientPhone,
+            agentEmail: user?.email,
+            agentName: user?.user_metadata?.name || user?.email,
             address: `${address}, ${city}, ${st} ${zip}`,
             sqftTier, accessMethod,
             date: selectedDate, time: selectedTime,
@@ -4513,9 +4516,9 @@ function BookingsManagerView() {
   const fetchBookings = async () => {
     setLoading(true);
     let query = supabase.from("bookings").select("*").order("created_at", { ascending: false });
-    // Agents only see their own bookings (matched by email)
-    if (!isAdmin && user?.email) {
-      query = query.eq("client_email", user.email);
+    // Agents only see their own bookings
+    if (!isAdmin && user?.id) {
+      query = query.eq("agent_id", user.id);
     }
     const { data, error } = await query;
     if (data) setBookings(data);
