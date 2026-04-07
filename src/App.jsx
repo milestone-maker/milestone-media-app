@@ -1930,68 +1930,36 @@ function MicrositePreview({ data, theme }) {
       </div>
 
       {/* Photo Gallery Section */}
-      <div
-        ref={photoRef}
-        style={{
-          background: "#fafafa",
-          padding: "80px 40px",
-          "@media (maxWidth: 768px)": { padding: "40px 20px" },
-        }}
-      >
-        <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+      <div ref={photoRef} style={{ background: "#fafafa", padding: "80px 0" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", paddingBottom: 40, padding: "0 40px 40px" }}>
           <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
             Photography
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-            <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>
-              Photo Gallery
-            </h2>
+            <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>Photo Gallery</h2>
             <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
           </div>
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-            gap: 16,
-            "@media (minWidth: 1024px)": {
-              gridTemplateColumns: "repeat(4, 1fr)",
-            },
-          }}>
-            {photos.map((photo, idx) => (
+        </div>
+        <div className="ms-gallery-outer" style={{ overflow: "hidden", cursor: "pointer", userSelect: "none" }}>
+          <div className="ms-gallery-track" style={{ display: "flex", gap: 4, width: "max-content", willChange: "transform" }}>
+            {[...photos, ...photos].map((photo, idx) => (
               <div
                 key={idx}
-                onClick={() => {
-                  setLightboxIndex(idx);
-                  setLightboxOpen(true);
-                }}
-                style={{
-                  cursor: "pointer",
-                  borderRadius: 8,
-                  overflow: "hidden",
-                  height: 280,
-                  gridColumn: idx === 0 ? "span 2" : "span 1",
-                  gridRow: idx === 0 ? "span 2" : "span 1",
-                  "@media (maxWidth: 768px)": {
-                    gridColumn: "span 1",
-                    gridRow: "span 1",
-                    height: 200,
-                  },
-                }}
+                onClick={() => { setLightboxIndex(idx % photos.length); setLightboxOpen(true); }}
+                style={{ height: 420, flexShrink: 0, overflow: "hidden" }}
               >
-                <img
-                  src={photo}
-                  alt={`Gallery ${idx}`}
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    objectFit: "cover",
-                    transition: "transform 0.3s",
-                  }}
-                  onMouseEnter={(e) => (e.target.style.transform = "scale(1.05)")}
-                  onMouseLeave={(e) => (e.target.style.transform = "scale(1)")}
-                />
+                <img src={photo} alt={`Gallery ${idx}`} style={{ height: "100%", width: "auto", objectFit: "cover", display: "block", pointerEvents: "none" }} />
               </div>
             ))}
           </div>
+        </div>
+        <div style={{ padding: "20px 40px 0", display: "flex", justifyContent: "flex-end", maxWidth: 1200, margin: "0 auto" }}>
+          <button onClick={() => { setLightboxIndex(0); setLightboxOpen(true); }} style={{
+            background: "transparent", border: "1px solid rgba(201,168,76,0.4)",
+            color: "#C9A84C", padding: "8px 20px", borderRadius: 6,
+            fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.1em",
+            textTransform: "uppercase", cursor: "pointer",
+          }}>View All {photos.length} Photos ↗</button>
         </div>
       </div>
 
@@ -4217,43 +4185,51 @@ function PublicMicrosite() {
       </div>
 
       {/* Photo Gallery Section */}
-      <div ref={photoRef} style={{ background: photoSecBg, padding: "80px 40px" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>
-            Photography
+      <style>{`
+        @keyframes msGalleryMarquee {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
+        .ms-gallery-track { animation: msGalleryMarquee 55s linear infinite; }
+        .ms-gallery-outer:hover .ms-gallery-track { animation-play-state: paused; }
+      `}</style>
+      <div ref={photoRef} style={{ background: photoSecBg, padding: "80px 0" }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", paddingBottom: 40 }}>
+          <div style={{ padding: "0 40px" }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>
+              Photography
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
+              <h2 style={{ fontSize: 42, margin: 0, color: photoSecText, fontWeight: 600 }}>Photo Gallery</h2>
+              <div style={{ width: 60, height: 1, background: pubT.accent }} />
+            </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-            <h2 style={{ fontSize: 42, margin: 0, color: photoSecText, fontWeight: 600 }}>Photo Gallery</h2>
-            <div style={{ width: 60, height: 1, background: pubT.accent }} />
-          </div>
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-            gap: 16,
-          }}>
-            {galleryPhotos.map((photo, idx) => (
+        </div>
+        {/* Infinite scroll strip — full bleed */}
+        <div className="ms-gallery-outer" style={{ overflow: "hidden", cursor: "pointer", userSelect: "none" }}>
+          <div className="ms-gallery-track" style={{ display: "flex", gap: 4, width: "max-content", willChange: "transform" }}>
+            {[...galleryPhotos, ...galleryPhotos].map((photo, idx) => (
               <div
                 key={idx}
-                onClick={() => { setLightboxIndex(idx); setLightboxOpen(true); }}
-                style={{
-                  cursor: "pointer",
-                  borderRadius: 8,
-                  overflow: "hidden",
-                  height: 280,
-                  gridColumn: idx === 0 ? "span 2" : "span 1",
-                  gridRow: idx === 0 ? "span 2" : "span 1",
-                }}
+                onClick={() => { setLightboxIndex(idx % galleryPhotos.length); setLightboxOpen(true); }}
+                style={{ height: 420, flexShrink: 0, overflow: "hidden", position: "relative" }}
               >
                 <img
                   src={photo}
                   alt={`Gallery ${idx}`}
-                  style={{ width: "100%", height: "100%", objectFit: "cover", transition: "transform 0.3s" }}
-                  onMouseEnter={(e) => (e.target.style.transform = "scale(1.05)")}
-                  onMouseLeave={(e) => (e.target.style.transform = "scale(1)")}
+                  style={{ height: "100%", width: "auto", objectFit: "cover", display: "block", pointerEvents: "none" }}
                 />
               </div>
             ))}
           </div>
+        </div>
+        <div style={{ padding: "20px 40px 0", display: "flex", justifyContent: "flex-end", maxWidth: 1200, margin: "0 auto" }}>
+          <button onClick={() => { setLightboxIndex(0); setLightboxOpen(true); }} style={{
+            background: "transparent", border: `1px solid ${pubT.accent}60`,
+            color: pubT.accent, padding: "8px 20px", borderRadius: 6,
+            fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.1em",
+            textTransform: "uppercase", cursor: "pointer",
+          }}>View All {galleryPhotos.length} Photos ↗</button>
         </div>
       </div>
 
