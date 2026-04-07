@@ -3839,6 +3839,26 @@ function MicrositeView() {
         </div>
       </div>
 
+      {/* Media URLs */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: "rgba(255,255,255,0.6)" }}>Media Links</div>
+        <div>
+          <label style={labelStyle}>Matterport / 3D Tour URL</label>
+          <input style={inputStyle} placeholder="https://my.matterport.com/show/?m=..." value={data.matterportUrl || ""} onChange={e => setField("matterportUrl", e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Drone / Video URL <span style={{ color: "rgba(255,255,255,0.25)", fontWeight: 400 }}>(YouTube, Vimeo, or direct .mp4)</span></label>
+          <input style={inputStyle} placeholder="https://youtube.com/watch?v=..." value={data.videoUrl || ""} onChange={e => setField("videoUrl", e.target.value)} />
+        </div>
+        {(data.matterportUrl || data.videoUrl || listingVideo || listingFloorplan) && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 2 }}>
+            {(data.matterportUrl) && <span style={{ background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.25)", color: "#c9a84c", padding: "3px 10px", borderRadius: 20, fontFamily: "'Jost', sans-serif", fontSize: 10, letterSpacing: "0.06em" }}>🔮 3D Tour</span>}
+            {(data.videoUrl || listingVideo) && <span style={{ background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.25)", color: "#c9a84c", padding: "3px 10px", borderRadius: 20, fontFamily: "'Jost', sans-serif", fontSize: 10, letterSpacing: "0.06em" }}>🚁 Drone Video</span>}
+            {listingFloorplan && <span style={{ background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.25)", color: "#c9a84c", padding: "3px 10px", borderRadius: 20, fontFamily: "'Jost', sans-serif", fontSize: 10, letterSpacing: "0.06em" }}>📐 Floorplan</span>}
+          </div>
+        )}
+      </div>
+
       {/* Generate CTA */}
       <button onClick={handleGenerate} disabled={generating} style={{
         background: generating ? "rgba(201,168,76,0.3)" : "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
@@ -4186,39 +4206,47 @@ function PublicMicrosite() {
 
       {/* Photo Gallery Section */}
       <style>{`
-        @keyframes msGalleryMarquee {
+        @keyframes msGalleryLeft {
           from { transform: translateX(0); }
           to { transform: translateX(-50%); }
         }
-        .ms-gallery-track { animation: msGalleryMarquee 55s linear infinite; }
-        .ms-gallery-outer:hover .ms-gallery-track { animation-play-state: paused; }
+        @keyframes msGalleryRight {
+          from { transform: translateX(-50%); }
+          to { transform: translateX(0); }
+        }
+        .ms-gallery-track-fwd { animation: msGalleryLeft 90s linear infinite; }
+        .ms-gallery-track-rev { animation: msGalleryRight 75s linear infinite; }
+        .ms-gallery-outer:hover .ms-gallery-track-fwd,
+        .ms-gallery-outer:hover .ms-gallery-track-rev { animation-play-state: paused; }
       `}</style>
       <div ref={photoRef} style={{ background: photoSecBg, padding: "80px 0" }}>
-        <div style={{ maxWidth: 1200, margin: "0 auto", paddingBottom: 40 }}>
-          <div style={{ padding: "0 40px" }}>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>
-              Photography
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-              <h2 style={{ fontSize: 42, margin: 0, color: photoSecText, fontWeight: 600 }}>Photo Gallery</h2>
-              <div style={{ width: 60, height: 1, background: pubT.accent }} />
-            </div>
+        <div style={{ padding: "0 40px 40px", maxWidth: 1200, margin: "0 auto" }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>
+            Photography
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
+            <h2 style={{ fontSize: 42, margin: 0, color: photoSecText, fontWeight: 600 }}>Photo Gallery</h2>
+            <div style={{ width: 60, height: 1, background: pubT.accent }} />
           </div>
         </div>
-        {/* Infinite scroll strip — full bleed */}
-        <div className="ms-gallery-outer" style={{ overflow: "hidden", cursor: "pointer", userSelect: "none" }}>
-          <div className="ms-gallery-track" style={{ display: "flex", gap: 4, width: "max-content", willChange: "transform" }}>
+        {/* Row 1 — scrolls left */}
+        <div className="ms-gallery-outer" style={{ overflow: "hidden", cursor: "pointer", userSelect: "none", marginBottom: 4 }}>
+          <div className="ms-gallery-track-fwd" style={{ display: "flex", gap: 4, width: "max-content", willChange: "transform" }}>
             {[...galleryPhotos, ...galleryPhotos].map((photo, idx) => (
-              <div
-                key={idx}
-                onClick={() => { setLightboxIndex(idx % galleryPhotos.length); setLightboxOpen(true); }}
-                style={{ height: 420, flexShrink: 0, overflow: "hidden", position: "relative" }}
-              >
-                <img
-                  src={photo}
-                  alt={`Gallery ${idx}`}
-                  style={{ height: "100%", width: "auto", objectFit: "cover", display: "block", pointerEvents: "none" }}
-                />
+              <div key={idx} onClick={() => { setLightboxIndex(idx % galleryPhotos.length); setLightboxOpen(true); }}
+                style={{ height: 380, flexShrink: 0, overflow: "hidden" }}>
+                <img src={photo} alt="" style={{ height: "100%", width: "auto", objectFit: "cover", display: "block", pointerEvents: "none" }} />
+              </div>
+            ))}
+          </div>
+        </div>
+        {/* Row 2 — scrolls right */}
+        <div className="ms-gallery-outer" style={{ overflow: "hidden", cursor: "pointer", userSelect: "none" }}>
+          <div className="ms-gallery-track-rev" style={{ display: "flex", gap: 4, width: "max-content", willChange: "transform" }}>
+            {[...galleryPhotos, ...galleryPhotos].map((photo, idx) => (
+              <div key={idx} onClick={() => { setLightboxIndex(idx % galleryPhotos.length); setLightboxOpen(true); }}
+                style={{ height: 280, flexShrink: 0, overflow: "hidden" }}>
+                <img src={photo} alt="" style={{ height: "100%", width: "auto", objectFit: "cover", display: "block", pointerEvents: "none" }} />
               </div>
             ))}
           </div>
@@ -4297,10 +4325,19 @@ function PublicMicrosite() {
               <div style={{ width: 60, height: 1, background: pubT.accent }} />
             </div>
             <div style={{ display: "flex", justifyContent: "center" }}>
-              <video controls poster={data.hero_img} style={{ maxWidth: 960, width: "100%", borderRadius: 8 }}>
-                <source src={finalVideo} type="video/mp4" />
-                Your browser does not support the video tag.
-              </video>
+              {/youtube\.com|youtu\.be|vimeo\.com/.test(finalVideo) ? (
+                <iframe
+                  src={finalVideo.replace("watch?v=", "embed/").replace("youtu.be/", "youtube.com/embed/").replace("vimeo.com/", "player.vimeo.com/video/")}
+                  title="Drone Video"
+                  style={{ width: "100%", maxWidth: 960, height: 540, borderRadius: 8, border: "none" }}
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              ) : (
+                <video controls poster={data.hero_img} style={{ maxWidth: 960, width: "100%", borderRadius: 8 }}>
+                  <source src={finalVideo} type="video/mp4" />
+                </video>
+              )}
             </div>
           </div>
         </div>
