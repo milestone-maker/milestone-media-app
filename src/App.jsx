@@ -3960,6 +3960,14 @@ function AnalyticsView() {
   );
 }
 
+// Layout variant assigned to each theme
+const THEME_LAYOUT = {
+  Prestige: "cinematic", Dusk: "cinematic", Obsidian: "cinematic", Ember: "cinematic",
+  Noir: "split", Loft: "split", Slate: "split",
+  Blanc: "minimal", Ivory: "minimal", Classic: "minimal", Maison: "minimal",
+  Coastal: "editorial", Grove: "editorial", Sage: "editorial",
+};
+
 // ============================================================
 // PUBLIC MICROSITE PAGE (no authentication required)
 // ============================================================
@@ -4121,6 +4129,7 @@ function PublicMicrosite() {
   const photoSecText = isDarkTheme ? "#fff" : "#0f0f1a";
   const darkSecBg = isDarkTheme ? pubT.bg : "#f0ede6";
   const stickyNavBg = isDarkTheme ? (pubT.bg === "#0f0f1a" ? "#181826" : pubT.bg) : "#f5f2ed";
+  const layout = THEME_LAYOUT[microsite?.theme] || "cinematic";
   const footerBg = isDarkTheme ? pubT.bg : "#0f0f1a";
 
   return (
@@ -4156,34 +4165,121 @@ function PublicMicrosite() {
       </div>
 
       {/* Hero Section */}
-      <div style={{
-        position: "relative",
-        height: "75vh",
-        marginTop: 60,
-        background: "#000",
-        overflow: "hidden",
-      }}>
-        <img
-          src={data.hero_img || (galleryPhotos[0] || "")}
-          alt="Property"
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
-        <div style={{
-          position: "absolute", inset: 0,
-          background: "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 60%)",
-        }} />
-        <div style={{ position: "absolute", bottom: 40, left: 40, color: "#fff" }}>
-          <div style={{ fontSize: 56, fontWeight: 700, lineHeight: 1.1, marginBottom: 8 }}>
-            {data.address || "Luxury Property"}
+      {layout === "split" ? (
+        /* SPLIT: image left 55%, text panel right 45% */
+        <div style={{ display: "grid", gridTemplateColumns: "55fr 45fr", minHeight: "85vh", marginTop: 60 }}>
+          <div style={{ position: "relative", overflow: "hidden" }}>
+            <img src={data.hero_img || galleryPhotos[0] || ""} alt="Property"
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
           </div>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 18, letterSpacing: "0.08em", marginBottom: 16 }}>
-            {data.city || ""}
-          </div>
-          <div style={{ fontSize: 40, fontWeight: 700, color: pubT.accent }}>
-            {data.price || ""}
+          <div style={{
+            background: pubT.bg, display: "flex", flexDirection: "column",
+            justifyContent: "center", padding: "60px 48px", gap: 24,
+          }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.15em", textTransform: "uppercase", color: pubT.accent }}>
+              Property Listing
+            </div>
+            <div style={{ fontSize: 48, fontWeight: 700, lineHeight: 1.1, color: pubT.text }}>
+              {data.address || "Luxury Property"}
+            </div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 15, color: pubT.sub }}>
+              {data.city || ""}
+            </div>
+            <div style={{ fontSize: 38, fontWeight: 700, color: pubT.accent }}>
+              {data.price || ""}
+            </div>
+            <div style={{ display: "flex", gap: 24, borderTop: `1px solid ${pubT.border}`, paddingTop: 24 }}>
+              {[["Beds", data.beds], ["Baths", data.baths], ["Sq Ft", data.sqft]].filter(([,v]) => v).map(([label, val]) => (
+                <div key={label}>
+                  <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, fontWeight: 700, color: pubT.text }}>{val}</div>
+                  <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: pubT.sub, letterSpacing: "0.1em", textTransform: "uppercase" }}>{label}</div>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => scrollToSection("contact")} style={{
+              alignSelf: "flex-start", background: pubT.accent, border: "none", padding: "14px 32px",
+              fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 700, letterSpacing: "0.12em",
+              textTransform: "uppercase", color: "#0a1628", cursor: "pointer", borderRadius: 4,
+            }}>Schedule Showing</button>
           </div>
         </div>
-      </div>
+      ) : layout === "minimal" ? (
+        /* MINIMAL: full-bleed with centered text overlay, light feel */
+        <div style={{ position: "relative", height: "80vh", marginTop: 60, overflow: "hidden" }}>
+          <img src={data.hero_img || galleryPhotos[0] || ""} alt="Property"
+            style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <div style={{ position: "absolute", inset: 0, background: isDarkTheme ? "rgba(0,0,0,0.45)" : "rgba(255,255,255,0.35)" }} />
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", gap: 16, padding: "0 40px" }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: pubT.accent }}>
+              {data.city || ""}
+            </div>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 64, fontWeight: 400, lineHeight: 1.05, color: "#fff", textShadow: "0 2px 20px rgba(0,0,0,0.5)", maxWidth: 800 }}>
+              {data.address || "Luxury Property"}
+            </div>
+            <div style={{ width: 60, height: 1, background: pubT.accent }} />
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 36, color: pubT.accent, fontWeight: 400 }}>
+              {data.price || ""}
+            </div>
+            <button onClick={() => scrollToSection("photos")} style={{
+              marginTop: 8, background: "transparent", border: `1px solid rgba(255,255,255,0.6)`,
+              color: "#fff", padding: "12px 32px", fontFamily: "'Jost', sans-serif", fontSize: 11,
+              letterSpacing: "0.14em", textTransform: "uppercase", cursor: "pointer", backdropFilter: "blur(4px)",
+            }}>View Gallery ↓</button>
+          </div>
+        </div>
+      ) : layout === "editorial" ? (
+        /* EDITORIAL: full-bleed with bottom-split text, zoom animation, nature tones */
+        <div style={{ position: "relative", height: "90vh", marginTop: 60, overflow: "hidden" }}>
+          <style>{`@keyframes heroZoom { from { transform: scale(1); } to { transform: scale(1.06); } }`}</style>
+          <img src={data.hero_img || galleryPhotos[0] || ""} alt="Property"
+            style={{ width: "100%", height: "100%", objectFit: "cover", animation: "heroZoom 12s ease-out forwards" }} />
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 55%)" }} />
+          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "40px 48px", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+            <div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase", color: pubT.accent, marginBottom: 10 }}>
+                Featured Property
+              </div>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 52, fontWeight: 700, color: "#fff", lineHeight: 1.1, marginBottom: 8 }}>
+                {data.address || "Luxury Property"}
+              </div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "rgba(255,255,255,0.7)" }}>
+                {data.city || ""}
+              </div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 44, fontWeight: 700, color: pubT.accent }}>
+                {data.price || ""}
+              </div>
+              <div style={{ display: "flex", gap: 20, marginTop: 8, justifyContent: "flex-end" }}>
+                {[["Beds", data.beds], ["Baths", data.baths], ["Sq Ft", data.sqft]].filter(([,v]) => v).map(([label, val]) => (
+                  <div key={label} style={{ textAlign: "center" }}>
+                    <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#fff", fontWeight: 700 }}>{val}</div>
+                    <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 9, color: "rgba(255,255,255,0.5)", letterSpacing: "0.1em", textTransform: "uppercase" }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* CINEMATIC (default): full-bleed 90vh, bottom-left, large serif */
+        <div style={{ position: "relative", height: "90vh", marginTop: 60, background: "#000", overflow: "hidden" }}>
+          <img src={data.hero_img || galleryPhotos[0] || ""} alt="Property"
+            style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} />
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 55%)" }} />
+          <div style={{ position: "absolute", bottom: 48, left: 48 }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: pubT.accent, marginBottom: 12 }}>
+              {data.city || ""}
+            </div>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 64, fontWeight: 700, color: "#fff", lineHeight: 1.05, marginBottom: 12, maxWidth: 700 }}>
+              {data.address || "Luxury Property"}
+            </div>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 44, fontWeight: 400, color: pubT.accent }}>
+              {data.price || ""}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Sticky Section Nav */}
       <div style={{
@@ -4203,6 +4299,24 @@ function PublicMicrosite() {
           </div>
         ))}
       </div>
+
+      {/* Stats Bar */}
+      {(data.beds || data.baths || data.sqft) && layout !== "split" && layout !== "editorial" && (
+        <div style={{
+          background: layout === "minimal" ? (isDarkTheme ? pubT.bg : "#fff") : pubT.bg,
+          borderBottom: `1px solid ${pubT.border}`,
+          padding: layout === "minimal" ? "28px 40px" : "24px 48px",
+        }}>
+          <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", gap: layout === "minimal" ? 48 : 40, justifyContent: layout === "minimal" ? "center" : "flex-start" }}>
+            {[["Bedrooms", data.beds], ["Bathrooms", data.baths], ["Square Feet", data.sqft], ["Price", data.price]].filter(([,v]) => v).map(([label, val]) => (
+              <div key={label} style={{ textAlign: layout === "minimal" ? "center" : "left" }}>
+                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: layout === "minimal" ? 32 : 28, fontWeight: 700, color: pubT.accent }}>{val}</div>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: pubT.sub, letterSpacing: "0.1em", textTransform: "uppercase", marginTop: 2 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Photo Gallery Section */}
       <style>{`
@@ -4371,8 +4485,8 @@ function PublicMicrosite() {
       {/* Property Details Section */}
       <div ref={detailsRef} style={{ background: darkSecBg, padding: "80px 40px" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>
-            Property Info
+          <div style={{ fontFamily: layout === "editorial" ? "'Cormorant Garamond', serif" : "'Jost', sans-serif", fontSize: layout === "editorial" ? 14 : 12, letterSpacing: "0.12em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8, fontStyle: layout === "editorial" ? "italic" : "normal" }}>
+            {layout === "split" ? "— Property Info" : "Property Info"}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
             <h2 style={{ fontSize: 42, margin: 0, color: isDarkTheme ? "#fff" : pubT.text, fontWeight: 600 }}>Property Details</h2>
