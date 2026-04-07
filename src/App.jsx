@@ -2553,6 +2553,7 @@ function LeadCaptureForm({ theme: t, onSubmit }) {
 function MicrositeView() {
   const { user, profile } = useAuth();
   const isAdmin = profile?.role === "admin";
+  const editLoadRef = useRef(false); // skip sourceType reset when loading for edit
   const [step, setStep] = useState("build");
   const [themeIdx, setThemeIdx] = useState(0);
   const [generating, setGenerating] = useState(false);
@@ -2813,6 +2814,7 @@ function MicrositeView() {
   // Reset state when switching source type
   useEffect(() => {
     setSelectedListingId(null);
+    if (editLoadRef.current) { editLoadRef.current = false; return; }
     setSelectedBookingId(null);
     setListingPhotos([]);
     setListingVideo(null);
@@ -2897,6 +2899,8 @@ function MicrositeView() {
 
   const loadMicrositeForEdit = (ms) => {
     const pd = ms.property_data || {};
+
+    // Populate all form fields from saved property_data
     setData({
       address: pd.address || "",
       city: pd.city || "",
@@ -2916,8 +2920,25 @@ function MicrositeView() {
       matterportUrl: pd.matterport_url || "",
       videoUrl: pd.video_url || "",
     });
+
+    // Load gallery photos directly from published URLs — avoids re-fetching from
+    // the booking media bucket (which would overwrite the saved hero selection)
+    if (pd.gallery_photos?.length) {
+      setListingPhotos(pd.gallery_photos);
+    }
+    if (pd.video_url) setListingVideo(pd.video_url);
+    if (pd.floorplan_url) setListingFloorplan(pd.floorplan_url);
+
+    // Restore source context — set the ref first so the sourceType reset effect skips
+    if (pd.source_type && pd.source_type !== sourceType) {
+      editLoadRef.current = true;
+      setSourceType(pd.source_type);
+    }
+
+    // Restore theme
     const themeIndex = THEMES.findIndex(t => t.name === ms.theme);
     if (themeIndex >= 0) setThemeIdx(themeIndex);
+
     setPublishedSlug(ms.slug);
     setPublished(true);
     setStep("build");
