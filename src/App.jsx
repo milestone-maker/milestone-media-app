@@ -2558,6 +2558,9 @@ function MicrositeView() {
   const [generating, setGenerating] = useState(false);
   const [published, setPublished] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [publishedSlug, setPublishedSlug] = useState(null);
+  const [myMicrosites, setMyMicrosites] = useState([]);
+  const [loadingMicrosites, setLoadingMicrosites] = useState(false);
   const [toast, setToast] = useState(null);
   const [showNotifSettings, setShowNotifSettings] = useState(false);
   const [notifSettings, setNotifSettings] = useState({
@@ -2610,14 +2613,30 @@ function MicrositeView() {
   useEffect(() => {
     const fetchBookings = async () => {
       let query = supabase.from("bookings").select("*").order("created_at", { ascending: false });
-      if (!isAdmin && user?.email) {
-        query = query.eq("client_email", user.email);
+      if (!isAdmin && user?.id) {
+        query = query.eq("agent_id", user.id);
       }
       const { data: rows, error } = await query;
       if (!error && rows) setBookings(rows);
     };
     fetchBookings();
-  }, [isAdmin, user?.email]);
+  }, [isAdmin, user?.id]);
+
+  // Fetch this user's published microsites
+  useEffect(() => {
+    if (!user?.id) return;
+    const fetchMyMicrosites = async () => {
+      setLoadingMicrosites(true);
+      const { data: rows } = await supabase
+        .from("microsites")
+        .select("id, slug, theme, published, property_data, agent_name, agent_phone, created_at")
+        .eq("agent_id", user.id)
+        .order("created_at", { ascending: false });
+      if (rows) setMyMicrosites(rows);
+      setLoadingMicrosites(false);
+    };
+    fetchMyMicrosites();
+  }, [user?.id]);
 
   // Check microsite addon request status when listing changes
   useEffect(() => {
@@ -2876,6 +2895,34 @@ function MicrositeView() {
     }
   };
 
+  const loadMicrositeForEdit = (ms) => {
+    const pd = ms.property_data || {};
+    setData({
+      address: pd.address || "",
+      city: pd.city || "",
+      price: pd.price || "",
+      beds: pd.beds || "",
+      baths: pd.baths || "",
+      sqft: pd.sqft || "",
+      description: pd.description || "",
+      agentName: pd.agent_name || ms.agent_name || "",
+      agentPhone: pd.agent_phone || ms.agent_phone || "",
+      agentEmail: pd.agent_email || "",
+      heroImg: pd.hero_img || "",
+      features: pd.features?.length
+        ? [...pd.features, ...Array(Math.max(0, 4 - pd.features.length)).fill("")]
+        : ["", "", "", ""],
+      mediaTypes: pd.media_types || ["Photos"],
+      matterportUrl: pd.matterport_url || "",
+      videoUrl: pd.video_url || "",
+    });
+    const themeIndex = THEMES.findIndex(t => t.name === ms.theme);
+    if (themeIndex >= 0) setThemeIdx(themeIndex);
+    setPublishedSlug(ms.slug);
+    setPublished(true);
+    setStep("build");
+  };
+
   const handleGenerate = () => {
     setGenerating(true);
     setTimeout(() => { setGenerating(false); setStep("preview"); }, 1800);
@@ -3002,7 +3049,15 @@ function MicrositeView() {
       } else {
         console.log("Microsite published successfully:", result[0]);
         setPublished(true);
+        setPublishedSlug(slug);
         setStep("published");
+        // Refresh the microsites list so it's up to date
+        const { data: refreshed } = await supabase
+          .from("microsites")
+          .select("id, slug, theme, published, property_data, agent_name, agent_phone, created_at")
+          .eq("agent_id", user?.id)
+          .order("created_at", { ascending: false });
+        if (refreshed) setMyMicrosites(refreshed);
       }
     } catch (err) {
       console.error("Publish error:", err);
@@ -3282,7 +3337,12 @@ function MicrositeView() {
             padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
             letterSpacing: "0.06em", cursor: "pointer",
           }}>🔔 Alerts</button>
-          <button onClick={() => { setStep("build"); setPublished(false); setLeads([]); setData({ address: "", city: "", price: "", beds: "", baths: "", sqft: "", description: "", agentName: "", agentPhone: "", heroImg: "", features: ["","","",""], mediaTypes: ["Photos","Drone","3D Tour"] }); }} style={{
+          <button onClick={() => setStep("build")} style={{
+            background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.3)", color: "#c9a84c",
+            padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
+            letterSpacing: "0.06em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600,
+          }}>✏️ Edit</button>
+          <button onClick={() => { setStep("build"); setPublished(false); setPublishedSlug(null); setLeads([]); setData({ address: "", city: "", price: "", beds: "", baths: "", sqft: "", description: "", agentName: "", agentPhone: "", heroImg: "", features: ["","","",""], mediaTypes: ["Photos","Drone","3D Tour"] }); }} style={{
             background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.35)",
             padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
             letterSpacing: "0.06em", textTransform: "uppercase", cursor: "pointer",
@@ -3454,7 +3514,7 @@ function MicrositeView() {
         border: "none", borderRadius: 10, padding: "15px",
         fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 13,
         letterSpacing: "0.12em", textTransform: "uppercase", color: "#0a1628", cursor: "pointer",
-      }}>🚀 Publish Microsite</button>
+      }}>{publishedSlug ? "✅ Save & Republish" : "🚀 Publish Microsite"}</button>
     </div>
   );
 
@@ -3465,6 +3525,61 @@ function MicrositeView() {
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 32, color: "#fff", marginBottom: 4 }}>Microsite Generator</div>
         <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Build a branded property page in 60 seconds.</div>
       </div>
+
+      {/* My Published Microsites */}
+      {myMicrosites.length > 0 && (
+        <div>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 10 }}>
+            My Published Microsites
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {myMicrosites.map(ms => {
+              const pd = ms.property_data || {};
+              const th = THEMES.find(t => t.name === ms.theme) || THEMES[0];
+              const isEditing = publishedSlug === ms.slug;
+              return (
+                <div key={ms.id} style={{
+                  background: isEditing ? "rgba(201,168,76,0.07)" : "rgba(255,255,255,0.03)",
+                  border: `1px solid ${isEditing ? "rgba(201,168,76,0.3)" : "rgba(255,255,255,0.08)"}`,
+                  borderRadius: 12, padding: "13px 16px",
+                  display: "flex", alignItems: "center", gap: 12,
+                }}>
+                  {/* Theme color dot */}
+                  <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+                    {(th.swatches || [th.bg, th.accent]).slice(0, 3).map((s, i) => (
+                      <div key={i} style={{ width: 10, height: 10, borderRadius: "50%", background: s, border: "1px solid rgba(255,255,255,0.15)" }} />
+                    ))}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {pd.address || ms.slug}
+                    </div>
+                    <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>
+                      {ms.theme} · /p/{ms.slug}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <button onClick={() => loadMicrositeForEdit(ms)} style={{
+                      background: isEditing ? "rgba(201,168,76,0.2)" : "rgba(255,255,255,0.06)",
+                      border: `1px solid ${isEditing ? "rgba(201,168,76,0.4)" : "rgba(255,255,255,0.12)"}`,
+                      color: isEditing ? "#c9a84c" : "rgba(255,255,255,0.6)",
+                      padding: "6px 12px", borderRadius: 7,
+                      fontFamily: "'Jost', sans-serif", fontSize: 10,
+                      letterSpacing: "0.08em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600,
+                    }}>{isEditing ? "Editing" : "✏️ Edit"}</button>
+                    <a href={`/p/${ms.slug}`} target="_blank" rel="noreferrer" style={{
+                      background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)",
+                      color: "rgba(255,255,255,0.4)", padding: "6px 10px", borderRadius: 7,
+                      fontFamily: "'Jost', sans-serif", fontSize: 10,
+                      letterSpacing: "0.06em", textDecoration: "none", display: "flex", alignItems: "center",
+                    }}>↗</a>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Source Toggle: Admin only — agents always use bookings */}
       {isAdmin && (
@@ -3744,7 +3859,7 @@ function MicrositeView() {
         color: generating ? "rgba(255,255,255,0.5)" : "#0a1628", cursor: generating ? "default" : "pointer",
         transition: "all 0.3s",
       }}>
-        {generating ? "✨ Generating your microsite..." : "Preview Microsite →"}
+        {generating ? "✨ Generating..." : publishedSlug ? "Preview Changes →" : "Preview Microsite →"}
       </button>
 
       </>}
