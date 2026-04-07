@@ -1718,10 +1718,24 @@ function MediaView() {
 }
 
 const THEMES = [
-  { name: "Obsidian", bg: "#0a0a0a", accent: "#c9a84c", text: "#fff", sub: "rgba(255,255,255,0.5)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)" },
-  { name: "Ivory", bg: "#f7f4ef", accent: "#8b6914", text: "#1a1a1a", sub: "rgba(0,0,0,0.45)", card: "rgba(0,0,0,0.04)", border: "rgba(0,0,0,0.1)" },
-  { name: "Slate", bg: "#0d1f2d", accent: "#5fb0d8", text: "#fff", sub: "rgba(255,255,255,0.5)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)" },
-  { name: "Blush", bg: "#1c1014", accent: "#d4807a", text: "#fff", sub: "rgba(255,255,255,0.5)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)" },
+  // ── Luxury ──
+  { name: "Prestige",  label: "Milestone Signature", slug: "prestige",  bg: "#0f0f1a", accent: "#C9A84C", text: "#fff",    sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",  swatches: ["#0f0f1a","#C9A84C","#F5ECD7"] },
+  { name: "Dusk",      label: "Dramatic & Rich",     slug: "dusk",      bg: "#1A1525", accent: "#9B8EC4", text: "#fff",    sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",  swatches: ["#1A1525","#9B8EC4","#E8C97A","#F0E6D3"] },
+  { name: "Noir",      label: "Bold Contrast",       slug: "noir",      bg: "#0A0A0A", accent: "#C41E3A", text: "#fff",    sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",  swatches: ["#0A0A0A","#fff","#C41E3A","#888"] },
+  { name: "Obsidian",  label: "Deep & Minimal",      slug: "obsidian",  bg: "#050508", accent: "#6EC6C6", text: "#fff",    sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",  swatches: ["#050508","#6EC6C6","#3A3A5C","#E8E8E8"] },
+  // ── Modern ──
+  { name: "Slate",     label: "Modern Professional", slug: "slate",     bg: "#2C3E50", accent: "#5D8AA8", text: "#fff",    sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",  swatches: ["#F2F4F6","#2C3E50","#5D8AA8","#95A5A6"] },
+  { name: "Loft",      label: "Urban Edge",          slug: "loft",      bg: "#1A1A1A", accent: "#C8B400", text: "#fff",    sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",  swatches: ["#F0EFED","#1A1A1A","#C8B400","#8C8C8C"] },
+  { name: "Ember",     label: "Warm & Bold",         slug: "ember",     bg: "#3D2B1F", accent: "#D4956A", text: "#fff",    sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",  swatches: ["#FAF7F2","#3D2B1F","#8B3A2A","#D4956A"] },
+  { name: "Maison",    label: "French Modern",       slug: "maison",    bg: "#2C2416", accent: "#D4A853", text: "#fff",    sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",  swatches: ["#FAF7F4","#2C2416","#D4A853"] },
+  // ── Classic ──
+  { name: "Classic",   label: "Timeless Elegance",   slug: "classic",   bg: "#1B2A4A", accent: "#C9A84C", text: "#fff",    sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",  swatches: ["#fff","#1B2A4A","#C9A84C","#F5F5F0"] },
+  { name: "Ivory",     label: "Soft Luxury",         slug: "ivory",     bg: "#FAF8F5", accent: "#C9A84C", text: "#1A1A1A", sub: "rgba(0,0,0,0.5)",        card: "rgba(0,0,0,0.04)",       border: "rgba(0,0,0,0.1)",        swatches: ["#FAF8F5","#1A1A1A","#C9A84C","#E8E0D0"] },
+  { name: "Blanc",     label: "Clean & Minimal",     slug: "blanc",     bg: "#fff",    accent: "#D4AF37", text: "#111",    sub: "rgba(0,0,0,0.5)",        card: "rgba(0,0,0,0.03)",       border: "rgba(0,0,0,0.1)",        swatches: ["#fff","#111","#D4AF37"] },
+  // ── Natural ──
+  { name: "Coastal",   label: "Light & Airy",        slug: "coastal",   bg: "#F8F5F0", accent: "#2A4A5E", text: "#2A4A5E", sub: "rgba(0,0,0,0.45)",       card: "rgba(0,0,0,0.04)",       border: "rgba(0,0,0,0.1)",        swatches: ["#F8F5F0","#2A4A5E","#B5C4C1","#8B6F47"] },
+  { name: "Grove",     label: "Natural Warmth",      slug: "grove",     bg: "#F5F0E8", accent: "#2D4A2D", text: "#2D4A2D", sub: "rgba(0,0,0,0.45)",       card: "rgba(0,0,0,0.04)",       border: "rgba(0,0,0,0.1)",        swatches: ["#F5F0E8","#2D4A2D","#8B7355","#C8B89A"] },
+  { name: "Sage",      label: "Organic & Fresh",     slug: "sage",      bg: "#2D3D30", accent: "#5B7B6A", text: "#fff",    sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",  swatches: ["#F4F6F4","#2D3D30","#5B7B6A","#A8B8A8"] },
 ];
 
 function MicrositePreview({ data, theme }) {
@@ -3391,23 +3405,41 @@ function MicrositeView() {
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#fff", flex: 1 }}>Preview</div>
       </div>
 
-      {/* Theme switcher */}
+      {/* Theme picker */}
       <div>
-        <div style={labelStyle}>Theme</div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <span style={labelStyle}>Choose Theme</span>
+          <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "#c9a84c", letterSpacing: "0.06em" }}>
+            {THEMES[themeIdx].name} — {THEMES[themeIdx].label}
+          </span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
           {THEMES.map((t, i) => (
             <div key={t.name} onClick={() => setThemeIdx(i)} style={{
-              flex: 1, height: 32, borderRadius: 8, cursor: "pointer", background: t.bg,
-              border: themeIdx === i ? `2px solid #c9a84c` : "2px solid rgba(255,255,255,0.1)",
-              display: "flex", alignItems: "center", justifyContent: "center", position: "relative",
-              transition: "border-color 0.2s",
+              borderRadius: 10, cursor: "pointer", overflow: "hidden",
+              border: themeIdx === i ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.08)",
+              transition: "border-color 0.2s", background: t.bg,
             }}>
-              <div style={{ width: 10, height: 10, borderRadius: "50%", background: t.accent }} />
+              {/* Color swatch bar */}
+              <div style={{ display: "flex", height: 28 }}>
+                {t.swatches.map((s, si) => (
+                  <div key={si} style={{ flex: 1, background: s, borderRight: si < t.swatches.length - 1 ? "1px solid rgba(0,0,0,0.08)" : "none" }} />
+                ))}
+              </div>
+              {/* Name row */}
+              <div style={{ padding: "7px 10px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 13, color: t.text, fontWeight: 600 }}>{t.name}</div>
+                  <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 9, color: t.sub, letterSpacing: "0.06em" }}>{t.label}</div>
+                </div>
+                {themeIdx === i && (
+                  <div style={{ width: 16, height: 16, borderRadius: "50%", background: "#c9a84c", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <span style={{ fontSize: 8, color: "#0a1628", fontWeight: 900 }}>✓</span>
+                  </div>
+                )}
+              </div>
             </div>
           ))}
-        </div>
-        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 6, letterSpacing: "0.08em" }}>
-          {THEMES[themeIdx].name}
         </div>
       </div>
 
@@ -3569,26 +3601,52 @@ function MicrositeView() {
 
       {/* Hero Image from uploaded photos */}
       <div>
-        <div style={labelStyle}>Hero Image</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+          <span style={labelStyle}>Hero Photo</span>
+          {listingPhotos.length > 0 && (
+            <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
+              Tap a photo to set as hero
+            </span>
+          )}
+        </div>
         {mediaLoading ? (
           <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)", padding: "20px 0" }}>
-            Loading media...
+            Loading photos...
           </div>
         ) : listingPhotos.length > 0 ? (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {listingPhotos.map((url, i) => (
-              <div key={i} onClick={() => setField("heroImg", url)} style={{
-                width: 80, height: 60, borderRadius: 8, overflow: "hidden", cursor: "pointer",
-                border: data.heroImg === url ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.1)",
-                transition: "border-color 0.2s", flexShrink: 0,
-              }}>
-                <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <>
+            {/* Selected hero preview */}
+            {data.heroImg && (
+              <div style={{ position: "relative", width: "100%", height: 180, borderRadius: 10, overflow: "hidden", marginBottom: 10, border: "2px solid #c9a84c" }}>
+                <img src={data.heroImg} alt="Hero" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <div style={{ position: "absolute", top: 10, left: 10, background: "rgba(201,168,76,0.9)", color: "#0a1628", fontFamily: "'Jost', sans-serif", fontSize: 9, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", padding: "3px 9px", borderRadius: 4 }}>
+                  Hero Photo
+                </div>
               </div>
-            ))}
-          </div>
+            )}
+            {/* Photo strip picker */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+              {listingPhotos.map((url, i) => (
+                <div key={i} onClick={() => setField("heroImg", url)} style={{
+                  position: "relative", height: 72, borderRadius: 7, overflow: "hidden", cursor: "pointer",
+                  border: data.heroImg === url ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.08)",
+                  transition: "border-color 0.2s",
+                }}>
+                  <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  {data.heroImg === url && (
+                    <div style={{ position: "absolute", inset: 0, background: "rgba(201,168,76,0.25)" }} />
+                  )}
+                  <div style={{ position: "absolute", bottom: 4, right: 5, fontFamily: "'Jost', sans-serif", fontSize: 8, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em" }}>{String(i + 1).padStart(2, "0")}</div>
+                </div>
+              ))}
+            </div>
+          </>
         ) : hasSourceSelection ? (
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.35)", padding: "12px 0" }}>
-            No photos uploaded yet. Upload photos in the Admin panel first.
+          <div style={{ background: "rgba(255,255,255,0.03)", border: "1px dashed rgba(255,255,255,0.12)", borderRadius: 10, padding: "24px 16px", textAlign: "center" }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>📷</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+              No photos uploaded yet.<br />Upload photos in the Bookings Manager first.
+            </div>
           </div>
         ) : (
           <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.35)", padding: "12px 0" }}>
@@ -3797,6 +3855,8 @@ function PublicMicrosite() {
   const contactRef = useRef(null);
 
   const slug = window.location.pathname.replace("/p/", "").split("/")[0];
+  // pubT is resolved below after microsite loads — declare a mutable ref here
+  // so navLinkStyle can reference it (will be set in render path below)
 
   useEffect(() => {
     const fetchMicrosite = async () => {
@@ -3870,16 +3930,18 @@ function PublicMicrosite() {
     }
   };
 
+  // pubT is resolved after microsite loads in the render path below
+  const resolvedTheme = THEMES.find(th => th.name === microsite?.theme) || THEMES[0];
   const navLinkStyle = (sectionId) => ({
     fontFamily: "'Jost', sans-serif",
     fontSize: 11,
     letterSpacing: "0.08em",
     textTransform: "uppercase",
-    color: activeSection === sectionId ? "#C9A84C" : "#888",
+    color: activeSection === sectionId ? resolvedTheme.accent : "#888",
     cursor: "pointer",
     transition: "color 0.3s",
     paddingBottom: 6,
-    borderBottom: activeSection === sectionId ? "2px solid #C9A84C" : "2px solid transparent",
+    borderBottom: activeSection === sectionId ? `2px solid ${resolvedTheme.accent}` : "2px solid transparent",
   });
 
   if (loading) {
@@ -3920,6 +3982,19 @@ function PublicMicrosite() {
   const finalFloorplan = floorplanUrl || data.floorplan_url;
   const galleryPhotos = photos.length > 0 ? photos : (data.hero_img ? [data.hero_img] : []);
 
+  // Resolve theme colors based on the saved theme name
+  const pubT = THEMES.find(th => th.name === microsite?.theme) || THEMES[0];
+  const isDarkTheme = pubT.text === "#fff";
+  const navBg = isDarkTheme
+    ? `rgba(${parseInt(pubT.bg.slice(1,3),16)},${parseInt(pubT.bg.slice(3,5),16)},${parseInt(pubT.bg.slice(5,7),16)},0.96)`
+    : "rgba(255,255,255,0.97)";
+  const navText = isDarkTheme ? "#fff" : pubT.text;
+  const photoSecBg = isDarkTheme ? "#0f0f1a" : "#fafafa";
+  const photoSecText = isDarkTheme ? "#fff" : "#0f0f1a";
+  const darkSecBg = isDarkTheme ? pubT.bg : "#f0ede6";
+  const stickyNavBg = isDarkTheme ? (pubT.bg === "#0f0f1a" ? "#181826" : pubT.bg) : "#f5f2ed";
+  const footerBg = isDarkTheme ? pubT.bg : "#0f0f1a";
+
   return (
     <div style={{ fontFamily: "'Cormorant Garamond', serif", overflow: "hidden" }}>
       {/* Fixed Top Nav Bar */}
@@ -3927,19 +4002,19 @@ function PublicMicrosite() {
         position: "fixed",
         top: 0, left: 0, right: 0,
         zIndex: 1000,
-        background: "rgba(15,15,26,0.95)",
+        background: navBg,
         backdropFilter: "blur(10px)",
-        borderBottom: "1px solid rgba(201,168,76,0.2)",
+        borderBottom: `1px solid ${pubT.accent}33`,
         padding: "16px 24px",
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#C9A84C", letterSpacing: "0.06em" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: pubT.accent, letterSpacing: "0.06em" }}>
             MILESTONE MEDIA
           </div>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "#888", letterSpacing: "0.08em" }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: isDarkTheme ? "#888" : "#666", letterSpacing: "0.08em" }}>
             Photography & Media
           </div>
         </div>
@@ -3967,7 +4042,7 @@ function PublicMicrosite() {
         />
         <div style={{
           position: "absolute", inset: 0,
-          background: "linear-gradient(to top, rgba(15,15,26,0.7) 0%, transparent 60%)",
+          background: "linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 60%)",
         }} />
         <div style={{ position: "absolute", bottom: 40, left: 40, color: "#fff" }}>
           <div style={{ fontSize: 56, fontWeight: 700, lineHeight: 1.1, marginBottom: 8 }}>
@@ -3976,7 +4051,7 @@ function PublicMicrosite() {
           <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 18, letterSpacing: "0.08em", marginBottom: 16 }}>
             {data.city || ""}
           </div>
-          <div style={{ fontSize: 40, fontWeight: 700, color: "#C9A84C" }}>
+          <div style={{ fontSize: 40, fontWeight: 700, color: pubT.accent }}>
             {data.price || ""}
           </div>
         </div>
@@ -3987,8 +4062,8 @@ function PublicMicrosite() {
         position: "sticky",
         top: 60,
         zIndex: 100,
-        background: "#181826",
-        borderBottom: "1px solid rgba(201,168,76,0.2)",
+        background: stickyNavBg,
+        borderBottom: `1px solid ${pubT.accent}33`,
         padding: "0 40px",
         display: "flex",
         gap: 40,
@@ -4002,14 +4077,14 @@ function PublicMicrosite() {
       </div>
 
       {/* Photo Gallery Section */}
-      <div ref={photoRef} style={{ background: "#fafafa", padding: "80px 40px" }}>
+      <div ref={photoRef} style={{ background: photoSecBg, padding: "80px 40px" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>
             Photography
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-            <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>Photo Gallery</h2>
-            <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+            <h2 style={{ fontSize: 42, margin: 0, color: photoSecText, fontWeight: 600 }}>Photo Gallery</h2>
+            <div style={{ width: 60, height: 1, background: pubT.accent }} />
           </div>
           <div style={{
             display: "grid",
@@ -4074,14 +4149,14 @@ function PublicMicrosite() {
 
       {/* Floorplan Section */}
       {finalFloorplan && (
-        <div ref={floorplanRef} style={{ background: "#faf6ee", padding: "80px 40px" }}>
+        <div ref={floorplanRef} style={{ background: isDarkTheme ? "#181826" : "#f5f2ed", padding: "80px 40px" }}>
           <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>
               Floorplan
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-              <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>Interactive Floorplan</h2>
-              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+              <h2 style={{ fontSize: 42, margin: 0, color: isDarkTheme ? "#fff" : pubT.text, fontWeight: 600 }}>Interactive Floorplan</h2>
+              <div style={{ width: 60, height: 1, background: pubT.accent }} />
             </div>
             <div style={{ display: "flex", justifyContent: "center" }}>
               <img
@@ -4096,14 +4171,14 @@ function PublicMicrosite() {
 
       {/* Drone Video Section */}
       {finalVideo && (
-        <div ref={droneRef} style={{ background: "#0f0f1a", padding: "80px 40px" }}>
+        <div ref={droneRef} style={{ background: darkSecBg, padding: "80px 40px" }}>
           <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>
               Aerial
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-              <h2 style={{ fontSize: 42, margin: 0, color: "#fff", fontWeight: 600 }}>Drone Video</h2>
-              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+              <h2 style={{ fontSize: 42, margin: 0, color: isDarkTheme ? "#fff" : pubT.text, fontWeight: 600 }}>Drone Video</h2>
+              <div style={{ width: 60, height: 1, background: pubT.accent }} />
             </div>
             <div style={{ display: "flex", justifyContent: "center" }}>
               <video controls poster={data.hero_img} style={{ maxWidth: 960, width: "100%", borderRadius: 8 }}>
@@ -4117,14 +4192,14 @@ function PublicMicrosite() {
 
       {/* 3D Tour Section */}
       {data.matterport_url && (
-        <div ref={tourRef} style={{ background: "#fafafa", padding: "80px 40px" }}>
+        <div ref={tourRef} style={{ background: photoSecBg, padding: "80px 40px" }}>
           <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>
               Virtual Tour
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-              <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>3D Walkthrough</h2>
-              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+              <h2 style={{ fontSize: 42, margin: 0, color: photoSecText, fontWeight: 600 }}>3D Walkthrough</h2>
+              <div style={{ width: 60, height: 1, background: pubT.accent }} />
             </div>
             <div style={{ display: "flex", justifyContent: "center" }}>
               <iframe
@@ -4133,7 +4208,7 @@ function PublicMicrosite() {
                 style={{ width: "100%", maxWidth: 960, height: 600, borderRadius: 8, border: "none" }}
               />
             </div>
-            <p style={{ textAlign: "center", fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#666", marginTop: 20 }}>
+            <p style={{ textAlign: "center", fontFamily: "'Jost', sans-serif", fontSize: 14, color: pubT.sub, marginTop: 20 }}>
               Use your mouse or touch to walk through the home in full 3D
             </p>
           </div>
@@ -4141,40 +4216,30 @@ function PublicMicrosite() {
       )}
 
       {/* Property Details Section */}
-      <div ref={detailsRef} style={{ background: "#0f0f1a", padding: "80px 40px" }}>
+      <div ref={detailsRef} style={{ background: darkSecBg, padding: "80px 40px" }}>
         <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>
             Property Info
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-            <h2 style={{ fontSize: 42, margin: 0, color: "#fff", fontWeight: 600 }}>Property Details</h2>
-            <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+            <h2 style={{ fontSize: 42, margin: 0, color: isDarkTheme ? "#fff" : pubT.text, fontWeight: 600 }}>Property Details</h2>
+            <div style={{ width: 60, height: 1, background: pubT.accent }} />
           </div>
 
           {/* Stats Grid */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 24, marginBottom: 60 }}>
-            <div style={{ background: "#181826", padding: 32, borderRadius: 8, textAlign: "center" }}>
-              <div style={{ fontSize: 48, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>{data.beds || "—"}</div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: "0.08em" }}>Bedrooms</div>
-            </div>
-            <div style={{ background: "#181826", padding: 32, borderRadius: 8, textAlign: "center" }}>
-              <div style={{ fontSize: 48, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>{data.baths || "—"}</div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: "0.08em" }}>Bathrooms</div>
-            </div>
-            <div style={{ background: "#181826", padding: 32, borderRadius: 8, textAlign: "center" }}>
-              <div style={{ fontSize: 48, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>{data.sqft || "—"}</div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: "0.08em" }}>Sq. Ft.</div>
-            </div>
-            <div style={{ background: "#181826", padding: 32, borderRadius: 8, textAlign: "center" }}>
-              <div style={{ fontSize: 36, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>{data.price || "—"}</div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: "0.08em" }}>Price</div>
-            </div>
+            {[{ val: data.beds, label: "Bedrooms" }, { val: data.baths, label: "Bathrooms" }, { val: data.sqft, label: "Sq. Ft." }, { val: data.price, label: "Price" }].map(s => (
+              <div key={s.label} style={{ background: isDarkTheme ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.04)", padding: 32, borderRadius: 8, textAlign: "center", border: `1px solid ${pubT.accent}22` }}>
+                <div style={{ fontSize: s.label === "Price" ? 36 : 48, fontWeight: 700, color: pubT.accent, marginBottom: 8 }}>{s.val || "—"}</div>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: isDarkTheme ? "#888" : "#666", letterSpacing: "0.08em" }}>{s.label}</div>
+              </div>
+            ))}
           </div>
 
           {/* Description */}
           {data.description && (
-            <div style={{ background: "#181826", padding: 32, borderRadius: 8, marginBottom: 40, borderLeft: "4px solid #C9A84C" }}>
-              <p style={{ fontFamily: "'Jost', sans-serif", fontSize: 15, lineHeight: 1.8, color: "#ddd", margin: 0 }}>
+            <div style={{ background: isDarkTheme ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.03)", padding: 32, borderRadius: 8, marginBottom: 40, borderLeft: `4px solid ${pubT.accent}` }}>
+              <p style={{ fontFamily: "'Jost', sans-serif", fontSize: 15, lineHeight: 1.8, color: isDarkTheme ? "#ddd" : pubT.text, margin: 0 }}>
                 {data.description}
               </p>
             </div>
@@ -4183,12 +4248,12 @@ function PublicMicrosite() {
           {/* Features */}
           {data.features && data.features.filter(f => f).length > 0 && (
             <div>
-              <h3 style={{ fontSize: 24, color: "#fff", marginBottom: 24, fontWeight: 600 }}>Key Features</h3>
+              <h3 style={{ fontSize: 24, color: isDarkTheme ? "#fff" : pubT.text, marginBottom: 24, fontWeight: 600 }}>Key Features</h3>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16 }}>
                 {data.features.filter(f => f).map((feature, idx) => (
                   <div key={idx} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                    <div style={{ color: "#C9A84C", fontSize: 18, flexShrink: 0 }}>•</div>
-                    <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#ccc" }}>{feature}</div>
+                    <div style={{ color: pubT.accent, fontSize: 18, flexShrink: 0 }}>•</div>
+                    <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: isDarkTheme ? "#ccc" : pubT.text }}>{feature}</div>
                   </div>
                 ))}
               </div>
@@ -4198,43 +4263,44 @@ function PublicMicrosite() {
       </div>
 
       {/* Request a Showing Section */}
-      <div ref={contactRef} style={{ background: "#faf6ee", padding: "80px 40px" }}>
+      <div ref={contactRef} style={{ background: isDarkTheme ? "#181826" : "#faf6ee", padding: "80px 40px" }}>
         <div style={{ maxWidth: 800, margin: "0 auto" }}>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>
             Schedule a Visit
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-            <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>Request a Showing</h2>
-            <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+            <h2 style={{ fontSize: 42, margin: 0, color: isDarkTheme ? "#fff" : pubT.text, fontWeight: 600 }}>Request a Showing</h2>
+            <div style={{ width: 60, height: 1, background: pubT.accent }} />
           </div>
 
           {/* Agent Card */}
           {agentName && (
             <div style={{
-              background: "#fff", padding: 32, borderRadius: 8,
+              background: isDarkTheme ? "rgba(255,255,255,0.05)" : "#fff", padding: 32, borderRadius: 8,
               display: "flex", alignItems: "center", gap: 20, marginBottom: 40,
-              boxShadow: "0 4px 15px rgba(0,0,0,0.08)",
+              boxShadow: isDarkTheme ? "none" : "0 4px 15px rgba(0,0,0,0.08)",
+              border: isDarkTheme ? `1px solid ${pubT.accent}22` : "none",
             }}>
               <div style={{
                 width: 80, height: 80, borderRadius: "50%",
-                background: "linear-gradient(135deg, #C9A84C, #e8c97a)",
+                background: `linear-gradient(135deg, ${pubT.accent}, ${pubT.accent}bb)`,
                 display: "flex", alignItems: "center", justifyContent: "center",
                 fontSize: 32, fontWeight: 700, color: "#fff", flexShrink: 0,
               }}>
                 {agentName.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 24, color: "#0f0f1a", marginBottom: 4, fontWeight: 600 }}>{agentName}</div>
+                <div style={{ fontSize: 24, color: isDarkTheme ? "#fff" : pubT.text, marginBottom: 4, fontWeight: 600 }}>{agentName}</div>
                 {agentPhone && (
-                  <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#666" }}>{agentPhone}</div>
+                  <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: isDarkTheme ? "#aaa" : "#666" }}>{agentPhone}</div>
                 )}
               </div>
               {agentPhone && (
                 <a href={`tel:${agentPhone}`} style={{
-                  background: "#C9A84C", color: "#0f0f1a", border: "none",
+                  background: pubT.accent, color: isDarkTheme ? "#0a1628" : "#fff", border: "none",
                   padding: "12px 28px", borderRadius: 6, fontFamily: "'Jost', sans-serif",
                   fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase",
-                  cursor: "pointer", textDecoration: "none", transition: "background 0.3s",
+                  cursor: "pointer", textDecoration: "none",
                 }}>Call</a>
               )}
             </div>
@@ -4242,7 +4308,14 @@ function PublicMicrosite() {
 
           {/* Lead Capture Form */}
           <PublicLeadCaptureForm
-            theme={{ bg: "#fff", text: "#0f0f1a", sub: "#666", accent: "#C9A84C", border: "#e0e0e0", card: "#f5f5f5" }}
+            theme={{
+              bg: isDarkTheme ? "#0f0f1a" : "#fff",
+              text: isDarkTheme ? "#fff" : pubT.text,
+              sub: isDarkTheme ? "#aaa" : "#666",
+              accent: pubT.accent,
+              border: isDarkTheme ? "rgba(255,255,255,0.12)" : "#e0e0e0",
+              card: isDarkTheme ? "rgba(255,255,255,0.05)" : "#f5f5f5",
+            }}
             micrositeId={microsite.id}
             listingId={microsite.property_data?.listing_id || microsite.listing_id}
           />
@@ -4251,14 +4324,14 @@ function PublicMicrosite() {
 
       {/* Footer */}
       <div style={{
-        background: "#0f0f1a",
-        borderTop: "1px solid #C9A84C",
+        background: footerBg,
+        borderTop: `1px solid ${pubT.accent}`,
         padding: 40,
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
       }}>
-        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#C9A84C", fontWeight: 700, letterSpacing: "0.08em" }}>
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: pubT.accent, fontWeight: 700, letterSpacing: "0.08em" }}>
           MILESTONE MEDIA
         </div>
         <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#666" }}>
