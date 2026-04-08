@@ -4195,12 +4195,12 @@ function PublicMicrosite() {
           backgroundSize: "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat",
         }} />
 
-        {/* Animation CSS — Prestige only */}
+        {/* Animation CSS — Prestige only. Duration scales with photo count for consistent px/sec speed */}
         <style>{`
           @keyframes msGalleryLeft  { from { transform: translateX(0);    } to { transform: translateX(-50%); } }
           @keyframes msGalleryRight { from { transform: translateX(-50%); } to { transform: translateX(0);    } }
-          .ms-gallery-track-fwd { animation: msGalleryLeft  90s linear infinite; }
-          .ms-gallery-track-rev { animation: msGalleryRight 75s linear infinite; }
+          .ms-gallery-track-fwd { animation: msGalleryLeft  ${Math.max(presGallery.length * 22, 120)}s linear infinite; }
+          .ms-gallery-track-rev { animation: msGalleryRight ${Math.max(presGallery.length * 18, 100)}s linear infinite; }
           .ms-gallery-outer:hover .ms-gallery-track-fwd,
           .ms-gallery-outer:hover .ms-gallery-track-rev { animation-play-state: paused; }
         `}</style>
@@ -5057,6 +5057,9 @@ function BookingsManagerView() {
   const [dragOver, setDragOver] = useState(false);
   const [zipProgress, setZipProgress] = useState(null); // null | { done, total }
   const fileInputRef = useRef(null);
+  // Photo reorder drag state
+  const dragPhotoIdx = useRef(null);
+  const dragOverPhotoIdx = useRef(null);
 
   useEffect(() => { fetchBookings(); }, []);
 
@@ -5126,7 +5129,8 @@ function BookingsManagerView() {
       .from("booking_media")
       .select("*")
       .eq("booking_id", bookingId)
-      .order("created_at", { ascending: false });
+      .order("sort_order", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true });
     if (error) { console.error("Error loading media:", error); setMediaLoading(false); return; }
     // Generate signed URLs for photos/videos (private bucket)
     if (data && data.length > 0) {
@@ -5315,6 +5319,29 @@ function BookingsManagerView() {
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(a.href), 30000);
     setZipProgress(null);
+  };
+
+  // Drag-and-drop photo reorder handlers
+  const handlePhotoDragStart = (idx) => { dragPhotoIdx.current = idx; };
+  const handlePhotoDragEnter = (idx) => { dragOverPhotoIdx.current = idx; };
+  const handlePhotoDrop = async () => {
+    const from = dragPhotoIdx.current;
+    const to   = dragOverPhotoIdx.current;
+    if (from === null || to === null || from === to) return;
+    const photos  = mediaFiles.filter(m => m.file_type === "photo");
+    const others  = mediaFiles.filter(m => m.file_type !== "photo");
+    const reordered = [...photos];
+    const [moved]   = reordered.splice(from, 1);
+    reordered.splice(to, 0, moved);
+    // Reassign sort_order values sequentially
+    const withOrder = reordered.map((p, i) => ({ ...p, sort_order: i }));
+    setMediaFiles([...withOrder, ...others]);
+    dragPhotoIdx.current = null;
+    dragOverPhotoIdx.current = null;
+    // Persist to DB
+    await Promise.all(withOrder.map(p =>
+      supabase.from("booking_media").update({ sort_order: p.sort_order }).eq("id", p.id)
+    ));
   };
 
   const toggleInvoicePaid = async (bookingId, currentVal) => {
@@ -5573,20 +5600,45 @@ function BookingsManagerView() {
             {/* Spinner keyframe */}
             <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
-            {/* Photos Section */}
+            {/* Photos Section — drag to reorder */}
             {photos.length > 0 && (
               <div style={{
                 background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
                 borderRadius: 12, padding: 20, marginBottom: 16,
               }}>
-                <div style={sectionHeader()}>Photos ({photos.length})</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <div style={sectionHeader()}>Photos ({photos.length})</div>
+                  <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)", letterSpacing: "0.06em" }}>
+                    ⠿ Drag to reorder
+                  </div>
+                </div>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  {photos.map(p => (
-                    <div key={p.id} style={{ position: "relative", display: "inline-block" }}>
+                  {photos.map((p, idx) => (
+                    <div
+                      key={p.id}
+                      draggable
+                      onDragStart={() => handlePhotoDragStart(idx)}
+                      onDragEnter={() => handlePhotoDragEnter(idx)}
+                      onDragOver={e => e.preventDefault()}
+                      onDrop={handlePhotoDrop}
+                      onDragEnd={() => { dragPhotoIdx.current = null; dragOverPhotoIdx.current = null; }}
+                      style={{
+                        position: "relative", display: "inline-block",
+                        cursor: "grab", transition: "opacity 0.15s",
+                      }}
+                    >
+                      {/* Order badge */}
+                      <div style={{
+                        position: "absolute", top: 4, left: 4, zIndex: 2,
+                        background: "rgba(0,0,0,0.7)", color: "#C9A84C",
+                        fontFamily: "'Jost', sans-serif", fontSize: 9, fontWeight: 700,
+                        padding: "1px 5px", borderRadius: 3, letterSpacing: "0.04em",
+                      }}>{idx + 1}</div>
                       <img
                         src={p.signed_url || "#"}
                         alt={p.file_name}
-                        style={thumbSt}
+                        style={{ ...thumbSt, display: "block" }}
+                        draggable={false}
                       />
                       <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 4, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {p.file_name}
