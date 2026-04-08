@@ -2812,7 +2812,11 @@ function MicrositeView() {
   }, [sourceType]);
 
   const theme = THEMES[themeIdx];
-  const slug = (data.address || "your-listing").split(" ").slice(0, 2).join("-").toLowerCase().replace(/[^a-z0-9-]/g, "");
+  // Slug: if editing reuse the saved slug; for new microsites append the last 8 chars
+  // of the agent's UUID so two agents with the same address never collide globally.
+  const baseSlug = (data.address || "your-listing").split(" ").slice(0, 2).join("-").toLowerCase().replace(/[^a-z0-9-]/g, "");
+  const agentSuffix = (user?.id || "").slice(-8);
+  const slug = publishedSlug || (agentSuffix ? `${baseSlug}-${agentSuffix}` : baseSlug);
   const liveUrl = `https://app.milestonemediaphotography.com/p/${slug}`;
 
   const setField = (key, val) => setData(d => ({ ...d, [key]: val }));
@@ -3030,15 +3034,25 @@ function MicrositeView() {
         agent_phone: data.agentPhone,
       };
 
-      console.log("Publishing microsite:", JSON.stringify(micrositeData, null, 2));
-      console.log("User ID:", user?.id);
-
-      const { data: result, error } = await supabase
-        .from("microsites")
-        .upsert(micrositeData, { onConflict: "slug" })
-        .select();
-
-      console.log("Upsert result:", JSON.stringify({ data: result, error }));
+      // Use INSERT for new microsites, UPDATE for existing ones.
+      // Never use upsert-on-slug — if the slug exists and belongs to a different
+      // agent the USING policy on the UPDATE path throws an RLS error.
+      let result, error;
+      if (publishedSlug) {
+        // Agent is re-publishing / editing their own microsite — targeted UPDATE
+        ({ data: result, error } = await supabase
+          .from("microsites")
+          .update(micrositeData)
+          .eq("slug", publishedSlug)
+          .eq("agent_id", user?.id)
+          .select());
+      } else {
+        // Brand-new microsite — INSERT (slug already includes agent suffix)
+        ({ data: result, error } = await supabase
+          .from("microsites")
+          .insert(micrositeData)
+          .select());
+      }
 
       if (error) {
         console.error("Publish error:", error);
