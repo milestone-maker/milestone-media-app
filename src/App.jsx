@@ -719,6 +719,7 @@ function BookView() {
   const [clientPhone, setClientPhone] = useState("");
   // Booking complete
   const [booked, setBooked] = useState(false);
+  const [bookingError, setBookingError] = useState(null);
   const [processing, setProcessing] = useState(false);
 
   const STEPS = ["Address", "Services", "Add-ons", "Schedule", "Review & Pay"];
@@ -925,11 +926,13 @@ function BookView() {
       } catch (invoiceErr) {
         console.error("Stripe invoice error (non-blocking):", invoiceErr);
       }
+      setProcessing(false);
+      setBooked(true);
     } catch (err) {
       console.error("Booking error:", err);
+      setProcessing(false);
+      setBookingError(err.message || "Something went wrong. Please try again.");
     }
-    setProcessing(false);
-    setBooked(true);
   };
 
   const resetBooking = () => {
@@ -1379,8 +1382,18 @@ function BookView() {
 
       {/* ═══════════ NAV BUTTONS ═══════════ */}
       <div style={{ display: "flex", gap: 12 }}>
+        {bookingError && (
+          <div style={{
+            width: "100%", marginBottom: 8, padding: "12px 16px",
+            background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+            borderRadius: 8, color: "#f87171",
+            fontFamily: "'Jost', sans-serif", fontSize: 13,
+          }}>
+            ⚠ {bookingError}
+          </div>
+        )}
         {step > 1 && (
-          <button onClick={() => setStep(s => s - 1)} style={{
+          <button onClick={() => { setBookingError(null); setStep(s => s - 1); }} style={{
             flex: 1, background: "transparent", border: "1px solid rgba(255,255,255,0.15)",
             color: "rgba(255,255,255,0.6)", padding: "14px", borderRadius: 8,
             fontFamily: "'Jost', sans-serif", fontSize: 13, letterSpacing: "0.08em",
@@ -5212,7 +5225,35 @@ function BookingsManagerView() {
   const dragPhotoIdx = useRef(null);
   const dragOverPhotoIdx = useRef(null);
 
-  useEffect(() => { fetchBookings(); }, []);
+  // Re-fetch whenever isAdmin or user resolves (profile loads async — empty [] misses admin flag)
+  useEffect(() => {
+    if (user?.id) fetchBookings();
+  }, [isAdmin, user?.id]);
+
+  // Request browser notification permission for admin (so they get alerted on new bookings)
+  useEffect(() => {
+    if (isAdmin && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, [isAdmin]);
+
+  // Real-time subscription: notify admin when a new booking arrives
+  useEffect(() => {
+    if (!isAdmin) return;
+    const channel = supabase
+      .channel("new-bookings")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "bookings" }, (payload) => {
+        const b = payload.new;
+        const msg = `New booking from ${b.client_name || "an agent"} — ${b.address || ""}`;
+        // Use browser notification if permitted, otherwise alert via title flash
+        if (Notification.permission === "granted") {
+          new Notification("📋 New Booking — Milestone Media", { body: msg, icon: "/icons/icon-192.png" });
+        }
+        fetchBookings(); // refresh list
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [isAdmin]);
 
   const fetchBookings = async () => {
     setLoading(true);
@@ -5504,8 +5545,10 @@ function BookingsManagerView() {
   const filtered = filter === "all" ? bookings : bookings.filter(b => b.status === filter);
 
   const statusColors = {
+    pending: "#e8a838",
     confirmed: "#c9a84c",
     in_progress: "#4ecdc4",
+    delivered: "#27ae60",
     completed: "#27ae60",
     cancelled: "#e74c3c",
   };
