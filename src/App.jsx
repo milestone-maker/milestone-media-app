@@ -4779,14 +4779,37 @@ function BookingsManagerView() {
 
   const fetchBookings = async () => {
     setLoading(true);
-    let query = supabase.from("bookings").select("*").order("created_at", { ascending: false });
-    // Agents only see their own bookings
-    if (!isAdmin && user?.id) {
-      query = query.eq("agent_id", user.id);
+    let allBookings = [];
+
+    if (isAdmin) {
+      // Admin sees everything
+      const { data, error } = await supabase.from("bookings").select("*").order("created_at", { ascending: false });
+      if (data) allBookings = data;
+      if (error) console.error("Error loading bookings:", error);
+    } else if (user?.id) {
+      // Fetch bookings by agent_id
+      const { data: ownData } = await supabase.from("bookings").select("*")
+        .eq("agent_id", user.id).order("created_at", { ascending: false });
+
+      // Fetch unclaimed website bookings that match this agent's email
+      const { data: emailData } = await supabase.from("bookings").select("*")
+        .eq("client_email", user.email).is("agent_id", null)
+        .order("created_at", { ascending: false });
+
+      // Merge and deduplicate
+      const combined = [...(ownData || []), ...(emailData || [])];
+      allBookings = combined.filter((b, i, arr) => arr.findIndex(x => x.id === b.id) === i);
+
+      // Auto-claim unclaimed email-matched bookings (link agent_id silently)
+      const unclaimed = (emailData || []).filter(b => !b.agent_id);
+      if (unclaimed.length > 0) {
+        await supabase.from("bookings")
+          .update({ agent_id: user.id })
+          .in("id", unclaimed.map(b => b.id));
+      }
     }
-    const { data, error } = await query;
-    if (data) setBookings(data);
-    if (error) console.error("Error loading bookings:", error);
+
+    setBookings(allBookings);
     setLoading(false);
   };
 
