@@ -8124,8 +8124,8 @@ function AppShell() {
             {views[tab]}
           </div>
         </div>
-      </div>
       {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
+    </div>
     );
   }
 
