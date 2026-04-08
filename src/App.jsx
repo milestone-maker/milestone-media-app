@@ -1744,6 +1744,10 @@ const THEMES = [
 
 function MicrositePreview({ data, theme }) {
   const t = theme;
+  // Derived theme helpers so every section reacts to the selected theme
+  const isLight = t.text !== "#fff";
+  const cardBg = isLight ? "rgba(0,0,0,0.05)" : "rgba(255,255,255,0.07)";
+  const agentCardBg = isLight ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.08)";
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -1803,11 +1807,11 @@ function MicrositePreview({ data, theme }) {
     fontSize: 11,
     letterSpacing: "0.08em",
     textTransform: "uppercase",
-    color: activeSection === sectionId ? "#C9A84C" : "#888",
+    color: activeSection === sectionId ? t.accent : t.sub,
     cursor: "pointer",
     transition: "color 0.3s",
     paddingBottom: 6,
-    borderBottom: activeSection === sectionId ? "2px solid #C9A84C" : "2px solid transparent",
+    borderBottom: activeSection === sectionId ? `2px solid ${t.accent}` : "2px solid transparent",
   });
 
   return (
@@ -1819,19 +1823,19 @@ function MicrositePreview({ data, theme }) {
         left: 0,
         right: 0,
         zIndex: 1000,
-        background: "rgba(15,15,26,0.95)",
+        background: t.bg,
         backdropFilter: "blur(10px)",
-        borderBottom: "1px solid rgba(201,168,76,0.2)",
+        borderBottom: `1px solid ${t.border}`,
         padding: "16px 24px",
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: "#C9A84C", letterSpacing: "0.06em" }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: t.accent, letterSpacing: "0.06em" }}>
             MILESTONE MEDIA
           </div>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "#888", letterSpacing: "0.08em" }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: t.sub, letterSpacing: "0.08em" }}>
             Photography & Media
           </div>
         </div>
@@ -1841,7 +1845,7 @@ function MicrositePreview({ data, theme }) {
             display: "none",
             background: "none",
             border: "none",
-            color: "#C9A84C",
+            color: t.accent,
             fontSize: 24,
             cursor: "pointer",
             "@media (maxWidth: 768px)": { display: "block" },
@@ -1900,7 +1904,7 @@ function MicrositePreview({ data, theme }) {
           <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 18, letterSpacing: "0.08em", marginBottom: 16 }}>
             {data.city || "Dallas, TX"}
           </div>
-          <div style={{ fontSize: 40, fontWeight: 700, color: "#C9A84C" }}>
+          <div style={{ fontSize: 40, fontWeight: 700, color: t.accent }}>
             {data.price || "$1,250,000"}
           </div>
         </div>
@@ -1911,8 +1915,8 @@ function MicrositePreview({ data, theme }) {
         position: "sticky",
         top: 60,
         zIndex: 100,
-        background: "#181826",
-        borderBottom: "1px solid rgba(201,168,76,0.2)",
+        background: t.bg,
+        borderBottom: `1px solid ${t.border}`,
         padding: "0 40px",
         display: "flex",
         gap: 40,
@@ -1930,14 +1934,14 @@ function MicrositePreview({ data, theme }) {
       </div>
 
       {/* Photo Gallery Section */}
-      <div ref={photoRef} style={{ background: "#fafafa", padding: "80px 0" }}>
+      <div ref={photoRef} style={{ background: t.bg, padding: "80px 0", borderTop: `1px solid ${t.border}` }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", paddingBottom: 40, padding: "0 40px 40px" }}>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: t.sub, marginBottom: 8 }}>
             Photography
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-            <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>Photo Gallery</h2>
-            <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+            <h2 style={{ fontSize: 42, margin: 0, color: t.text, fontWeight: 600 }}>Photo Gallery</h2>
+            <div style={{ width: 60, height: 1, background: t.accent }} />
           </div>
         </div>
         <div className="ms-gallery-outer" style={{ overflow: "hidden", cursor: "pointer", userSelect: "none" }}>
@@ -1955,8 +1959,8 @@ function MicrositePreview({ data, theme }) {
         </div>
         <div style={{ padding: "20px 40px 0", display: "flex", justifyContent: "flex-end", maxWidth: 1200, margin: "0 auto" }}>
           <button onClick={() => { setLightboxIndex(0); setLightboxOpen(true); }} style={{
-            background: "transparent", border: "1px solid rgba(201,168,76,0.4)",
-            color: "#C9A84C", padding: "8px 20px", borderRadius: 6,
+            background: "transparent", border: `1px solid ${t.accent}66`,
+            color: t.accent, padding: "8px 20px", borderRadius: 6,
             fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.1em",
             textTransform: "uppercase", cursor: "pointer",
           }}>View All {photos.length} Photos ↗</button>
@@ -2053,20 +2057,21 @@ function MicrositePreview({ data, theme }) {
         <div
           ref={floorplanRef}
           style={{
-            background: "#faf6ee",
+            background: cardBg,
             padding: "80px 40px",
+            borderTop: `1px solid ${t.border}`,
             "@media (maxWidth: 768px)": { padding: "40px 20px" },
           }}
         >
           <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: t.sub, marginBottom: 8 }}>
               Floorplan
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-              <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>
+              <h2 style={{ fontSize: 42, margin: 0, color: t.text, fontWeight: 600 }}>
                 Interactive Floorplan
               </h2>
-              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+              <div style={{ width: 60, height: 1, background: t.accent }} />
             </div>
             <div style={{ display: "flex", justifyContent: "center" }}>
               <img
@@ -2089,20 +2094,21 @@ function MicrositePreview({ data, theme }) {
         <div
           ref={droneRef}
           style={{
-            background: "#0f0f1a",
+            background: t.bg,
             padding: "80px 40px",
+            borderTop: `1px solid ${t.border}`,
             "@media (maxWidth: 768px)": { padding: "40px 20px" },
           }}
         >
           <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: t.sub, marginBottom: 8 }}>
               Aerial
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-              <h2 style={{ fontSize: 42, margin: 0, color: "#fff", fontWeight: 600 }}>
+              <h2 style={{ fontSize: 42, margin: 0, color: t.text, fontWeight: 600 }}>
                 Drone Video
               </h2>
-              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+              <div style={{ width: 60, height: 1, background: t.accent }} />
             </div>
             <div style={{ display: "flex", justifyContent: "center" }}>
               <video
@@ -2127,20 +2133,21 @@ function MicrositePreview({ data, theme }) {
         <div
           ref={tourRef}
           style={{
-            background: "#fafafa",
+            background: cardBg,
             padding: "80px 40px",
+            borderTop: `1px solid ${t.border}`,
             "@media (maxWidth: 768px)": { padding: "40px 20px" },
           }}
         >
           <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: t.sub, marginBottom: 8 }}>
               Virtual Tour
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-              <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>
+              <h2 style={{ fontSize: 42, margin: 0, color: t.text, fontWeight: 600 }}>
                 3D Walkthrough
               </h2>
-              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+              <div style={{ width: 60, height: 1, background: t.accent }} />
             </div>
             <div style={{ display: "flex", justifyContent: "center" }}>
               <iframe
@@ -2159,7 +2166,7 @@ function MicrositePreview({ data, theme }) {
               textAlign: "center",
               fontFamily: "'Jost', sans-serif",
               fontSize: 14,
-              color: "#666",
+              color: t.sub,
               marginTop: 20,
             }}>
               Use your mouse or touch to walk through the home in full 3D
@@ -2172,20 +2179,21 @@ function MicrositePreview({ data, theme }) {
       <div
         ref={detailsRef}
         style={{
-          background: "#0f0f1a",
+          background: t.bg,
           padding: "80px 40px",
+          borderTop: `1px solid ${t.border}`,
           "@media (maxWidth: 768px)": { padding: "40px 20px" },
         }}
       >
         <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: t.sub, marginBottom: 8 }}>
             Property Info
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-            <h2 style={{ fontSize: 42, margin: 0, color: "#fff", fontWeight: 600 }}>
+            <h2 style={{ fontSize: 42, margin: 0, color: t.text, fontWeight: 600 }}>
               Property Details
             </h2>
-            <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+            <div style={{ width: 60, height: 1, background: t.accent }} />
           </div>
 
           {/* Stats Grid */}
@@ -2196,35 +2204,35 @@ function MicrositePreview({ data, theme }) {
             marginBottom: 60,
             "@media (maxWidth: 768px)": { gridTemplateColumns: "repeat(2, 1fr)" },
           }}>
-            <div style={{ background: "#181826", padding: 32, borderRadius: 8, textAlign: "center" }}>
-              <div style={{ fontSize: 48, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>
+            <div style={{ background: cardBg, padding: 32, borderRadius: 8, textAlign: "center", border: `1px solid ${t.border}` }}>
+              <div style={{ fontSize: 48, fontWeight: 700, color: t.accent, marginBottom: 8 }}>
                 {data.beds || "—"}
               </div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: "0.08em" }}>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: t.sub, letterSpacing: "0.08em" }}>
                 Bedrooms
               </div>
             </div>
-            <div style={{ background: "#181826", padding: 32, borderRadius: 8, textAlign: "center" }}>
-              <div style={{ fontSize: 48, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>
+            <div style={{ background: cardBg, padding: 32, borderRadius: 8, textAlign: "center", border: `1px solid ${t.border}` }}>
+              <div style={{ fontSize: 48, fontWeight: 700, color: t.accent, marginBottom: 8 }}>
                 {data.baths || "—"}
               </div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: "0.08em" }}>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: t.sub, letterSpacing: "0.08em" }}>
                 Bathrooms
               </div>
             </div>
-            <div style={{ background: "#181826", padding: 32, borderRadius: 8, textAlign: "center" }}>
-              <div style={{ fontSize: 48, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>
+            <div style={{ background: cardBg, padding: 32, borderRadius: 8, textAlign: "center", border: `1px solid ${t.border}` }}>
+              <div style={{ fontSize: 48, fontWeight: 700, color: t.accent, marginBottom: 8 }}>
                 {data.sqft || "—"}
               </div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: "0.08em" }}>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: t.sub, letterSpacing: "0.08em" }}>
                 Sq. Ft.
               </div>
             </div>
-            <div style={{ background: "#181826", padding: 32, borderRadius: 8, textAlign: "center" }}>
-              <div style={{ fontSize: 36, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>
+            <div style={{ background: cardBg, padding: 32, borderRadius: 8, textAlign: "center", border: `1px solid ${t.border}` }}>
+              <div style={{ fontSize: 36, fontWeight: 700, color: t.accent, marginBottom: 8 }}>
                 {data.price || "—"}
               </div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "#888", letterSpacing: "0.08em" }}>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: t.sub, letterSpacing: "0.08em" }}>
                 Price
               </div>
             </div>
@@ -2233,17 +2241,19 @@ function MicrositePreview({ data, theme }) {
           {/* Description */}
           {data.description && (
             <div style={{
-              background: "#181826",
+              background: cardBg,
               padding: 32,
               borderRadius: 8,
               marginBottom: 40,
-              borderLeft: "4px solid #C9A84C",
+              borderLeft: `4px solid ${t.accent}`,
+              border: `1px solid ${t.border}`,
+              borderLeft: `4px solid ${t.accent}`,
             }}>
               <p style={{
                 fontFamily: "'Jost', sans-serif",
                 fontSize: 15,
                 lineHeight: 1.8,
-                color: "#ddd",
+                color: t.sub,
                 margin: 0,
               }}>
                 {data.description}
@@ -2254,7 +2264,7 @@ function MicrositePreview({ data, theme }) {
           {/* Features */}
           {data.features && data.features.filter(f => f).length > 0 && (
             <div>
-              <h3 style={{ fontSize: 24, color: "#fff", marginBottom: 24, fontWeight: 600 }}>
+              <h3 style={{ fontSize: 24, color: t.text, marginBottom: 24, fontWeight: 600 }}>
                 Key Features
               </h3>
               <div style={{
@@ -2269,11 +2279,11 @@ function MicrositePreview({ data, theme }) {
                     gap: 12,
                     alignItems: "flex-start",
                   }}>
-                    <div style={{ color: "#C9A84C", fontSize: 18, flexShrink: 0 }}>•</div>
+                    <div style={{ color: t.accent, fontSize: 18, flexShrink: 0 }}>•</div>
                     <div style={{
                       fontFamily: "'Jost', sans-serif",
                       fontSize: 14,
-                      color: "#ccc",
+                      color: t.sub,
                     }}>
                       {feature}
                     </div>
@@ -2289,60 +2299,61 @@ function MicrositePreview({ data, theme }) {
       <div
         ref={contactRef}
         style={{
-          background: "#faf6ee",
+          background: cardBg,
           padding: "80px 40px",
+          borderTop: `1px solid ${t.border}`,
           "@media (maxWidth: 768px)": { padding: "40px 20px" },
         }}
       >
         <div style={{ maxWidth: 800, margin: "0 auto" }}>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: "#888", marginBottom: 8 }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: t.sub, marginBottom: 8 }}>
             Schedule a Visit
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
-            <h2 style={{ fontSize: 42, margin: 0, color: "#0f0f1a", fontWeight: 600 }}>
+            <h2 style={{ fontSize: 42, margin: 0, color: t.text, fontWeight: 600 }}>
               Request a Showing
             </h2>
-            <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+            <div style={{ width: 60, height: 1, background: t.accent }} />
           </div>
 
           {/* Agent Card */}
           <div style={{
-            background: "#fff",
+            background: agentCardBg,
             padding: 32,
             borderRadius: 8,
+            border: `1px solid ${t.border}`,
             display: "flex",
             alignItems: "center",
             gap: 20,
             marginBottom: 40,
-            boxShadow: "0 4px 15px rgba(0,0,0,0.08)",
             "@media (maxWidth: 768px)": { flexDirection: "column", textAlign: "center" },
           }}>
             <div style={{
               width: 80,
               height: 80,
               borderRadius: "50%",
-              background: "linear-gradient(135deg, #C9A84C, #e8c97a)",
+              background: `linear-gradient(135deg, ${t.accent}, ${t.accent}99)`,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               fontSize: 32,
               fontWeight: 700,
-              color: "#fff",
+              color: isLight ? "#fff" : t.bg,
               flexShrink: 0,
             }}>
               {(data.agentName || "JD").split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 24, color: "#0f0f1a", marginBottom: 4, fontWeight: 600 }}>
+              <div style={{ fontSize: 24, color: t.text, marginBottom: 4, fontWeight: 600 }}>
                 {data.agentName || "Jane Doe"}
               </div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#666" }}>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: t.sub }}>
                 {data.agentPhone || "(214) 000-0000"}
               </div>
             </div>
             <button style={{
-              background: "#C9A84C",
-              color: "#0f0f1a",
+              background: t.accent,
+              color: isLight ? "#fff" : t.bg,
               border: "none",
               padding: "12px 28px",
               borderRadius: 6,
@@ -2352,24 +2363,24 @@ function MicrositePreview({ data, theme }) {
               letterSpacing: "0.08em",
               textTransform: "uppercase",
               cursor: "pointer",
-              transition: "background 0.3s",
+              transition: "opacity 0.2s",
             }}
-            onMouseEnter={(e) => (e.target.style.background = "#e8c97a")}
-            onMouseLeave={(e) => (e.target.style.background = "#C9A84C")}
+            onMouseEnter={(e) => (e.target.style.opacity = "0.85")}
+            onMouseLeave={(e) => (e.target.style.opacity = "1")}
             >
               Call
             </button>
           </div>
 
           {/* Lead Capture Form */}
-          <LeadCaptureForm theme={{ bg: "#fff", text: "#0f0f1a", sub: "#666", accent: "#C9A84C", border: "#e0e0e0", card: "#f5f5f5" }} onSubmit={data.onLeadSubmit} />
+          <LeadCaptureForm theme={t} onSubmit={data.onLeadSubmit} />
         </div>
       </div>
 
       {/* Footer */}
       <div style={{
-        background: "#0f0f1a",
-        borderTop: "1px solid #C9A84C",
+        background: t.bg,
+        borderTop: `1px solid ${t.accent}`,
         padding: "40px",
         display: "flex",
         justifyContent: "space-between",
@@ -2379,7 +2390,7 @@ function MicrositePreview({ data, theme }) {
         <div style={{
           fontFamily: "'Jost', sans-serif",
           fontSize: 14,
-          color: "#C9A84C",
+          color: t.accent,
           fontWeight: 700,
           letterSpacing: "0.08em",
         }}>
@@ -2388,7 +2399,7 @@ function MicrositePreview({ data, theme }) {
         <div style={{
           fontFamily: "'Jost', sans-serif",
           fontSize: 12,
-          color: "#666",
+          color: t.sub,
         }}>
           © 2026 Milestone Media. All rights reserved.
         </div>
