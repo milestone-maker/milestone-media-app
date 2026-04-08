@@ -5330,22 +5330,40 @@ function BookingsManagerView() {
     if (error) { console.error("Error loading media:", error); setMediaLoading(false); return; }
 
     if (data && data.length > 0) {
-      // Batch-generate all signed URLs in ONE API call instead of one per file
-      const filePaths = data
-        .filter(item => item.file_path && item.file_type !== "3d_tour")
+      // Photo file paths (need signed URLs for display + thumbnails)
+      const photoPaths = data
+        .filter(item => item.file_path && item.file_type === "photo")
+        .map(item => item.file_path);
+      // Video file paths (need full-size signed URL for display; no thumb transform)
+      const videoPaths = data
+        .filter(item => item.file_path && item.file_type === "video")
         .map(item => item.file_path);
 
-      let urlMap = {};
-      if (filePaths.length > 0) {
-        const { data: signedList } = await supabase.storage
-          .from("booking-media")
-          .createSignedUrls(filePaths, 3600); // 1 hour — single request for all files
-        signedList?.forEach(s => { if (s.signedUrl) urlMap[s.path] = s.signedUrl; });
-      }
+      const allFilePaths = [...photoPaths, ...videoPaths];
+
+      // Two batch calls in parallel:
+      // 1. Thumbnail signed URLs (160×160 cover crop) — for photo grid display
+      // 2. Full-size signed URLs — stored so downloads work without a second round-trip
+      const [thumbResult, fullResult] = await Promise.all([
+        photoPaths.length > 0
+          ? supabase.storage.from("booking-media").createSignedUrls(photoPaths, 3600, {
+              transform: { width: 160, height: 160, resize: "cover" },
+            })
+          : { data: [] },
+        allFilePaths.length > 0
+          ? supabase.storage.from("booking-media").createSignedUrls(allFilePaths, 3600)
+          : { data: [] },
+      ]);
+
+      const thumbMap = {};
+      thumbResult.data?.forEach(s => { if (s.signedUrl) thumbMap[s.path] = s.signedUrl; });
+      const fullMap = {};
+      fullResult.data?.forEach(s => { if (s.signedUrl) fullMap[s.path] = s.signedUrl; });
 
       setMediaFiles(data.map(item => ({
         ...item,
-        signed_url: item.file_path ? (urlMap[item.file_path] || null) : null,
+        signed_url: item.file_path ? (fullMap[item.file_path] || null) : null,
+        thumb_url:  item.file_path ? (thumbMap[item.file_path] || fullMap[item.file_path] || null) : null,
       })));
     } else {
       setMediaFiles(data || []);
@@ -5631,19 +5649,6 @@ function BookingsManagerView() {
       backgroundColor: "rgba(255,255,255,0.05)", // placeholder color while loading
     };
 
-    // Build a thumbnail URL: request a 160×160 resized version via Supabase image transforms.
-    // This cuts thumbnail payload from ~5-8 MB per photo down to ~15-30 KB — far less to download.
-    // Falls back to the original signed URL if transforms aren't available on this plan.
-    const thumbUrl = (signedUrl) => {
-      if (!signedUrl) return "#";
-      try {
-        const url = new URL(signedUrl);
-        url.searchParams.set("width", "160");
-        url.searchParams.set("height", "160");
-        url.searchParams.set("resize", "cover");
-        return url.toString();
-      } catch { return signedUrl; }
-    };
     const inputSt = {
       width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
       borderRadius: 8, padding: "10px 12px", color: "#fff", fontFamily: "'Jost', sans-serif", fontSize: 13,
@@ -5923,7 +5928,7 @@ function BookingsManagerView() {
                         padding: "1px 5px", borderRadius: 3, letterSpacing: "0.04em",
                       }}>{idx + 1}</div>
                       <img
-                        src={thumbUrl(p.signed_url)}
+                        src={p.thumb_url || p.signed_url || "#"}
                         alt={p.file_name}
                         loading="lazy"
                         decoding="async"
