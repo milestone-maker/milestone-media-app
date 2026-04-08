@@ -391,12 +391,15 @@ function PackageBadge({ pkg }) {
 }
 
 function ShowcaseView({ onBook }) {
+  const { user } = useAuth();
   const [active, setActive] = useState(0);
   const [heroPhoto, setHeroPhoto] = useState(0);
   const [listings, setListings] = useState([]);
   const [listingPhotos, setListingPhotos] = useState({});
   const [mediaHover, setMediaHover] = useState(null);
   const [loadingListings, setLoadingListings] = useState(true);
+  const [microsites, setMicrosites] = useState([]);
+  const [msHover, setMsHover] = useState(null);
 
   useEffect(() => {
     const fetchListings = async () => {
@@ -424,6 +427,18 @@ function ShowcaseView({ onBook }) {
     };
     fetchListings();
   }, []);
+
+  // Fetch this agent's published microsites
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from("microsites")
+      .select("id, slug, theme, data, created_at")
+      .eq("agent_id", user.id)
+      .eq("published", true)
+      .order("created_at", { ascending: false })
+      .then(({ data }) => { if (data) setMicrosites(data); });
+  }, [user?.id]);
 
   const listing = listings[active] || {};
   const photos = listingPhotos[listing.id] || (listing.hero_img ? [listing.hero_img] : []);
@@ -584,6 +599,95 @@ function ShowcaseView({ onBook }) {
       }}>
         Book Your Next Listing →
       </button>
+
+      {/* ── My Microsites ── */}
+      {microsites.length > 0 && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: "#fff", fontWeight: 600 }}>
+              My Property Microsites
+            </div>
+            <div style={{ flex: 1, height: 1, background: "rgba(201,168,76,0.25)" }} />
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.35)", letterSpacing: "0.08em" }}>
+              {microsites.length} Published
+            </div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
+            {microsites.map(ms => {
+              const msData = ms.data || {};
+              const heroImg = msData.hero_img || "";
+              const address = msData.address || "Property";
+              const city    = msData.city || "";
+              const price   = msData.price || "";
+              const liveUrl = `https://app.milestonemediaphotography.com/p/${ms.slug}`;
+              const isHovered = msHover === ms.id;
+              return (
+                <div
+                  key={ms.id}
+                  onMouseEnter={() => setMsHover(ms.id)}
+                  onMouseLeave={() => setMsHover(null)}
+                  onClick={() => window.open(liveUrl, "_blank", "noopener,noreferrer")}
+                  style={{
+                    position: "relative", borderRadius: 14, overflow: "hidden",
+                    cursor: "pointer", height: 220,
+                    border: isHovered ? "1px solid rgba(201,168,76,0.5)" : "1px solid rgba(255,255,255,0.08)",
+                    transform: isHovered ? "translateY(-3px)" : "translateY(0)",
+                    transition: "all 0.22s ease",
+                    boxShadow: isHovered ? "0 12px 40px rgba(0,0,0,0.5)" : "0 2px 12px rgba(0,0,0,0.3)",
+                  }}
+                >
+                  {/* Hero image */}
+                  {heroImg ? (
+                    <img src={heroImg} alt={address} style={{
+                      position: "absolute", inset: 0, width: "100%", height: "100%",
+                      objectFit: "cover", transition: "transform 0.4s ease",
+                      transform: isHovered ? "scale(1.04)" : "scale(1)",
+                    }} />
+                  ) : (
+                    <div style={{ position: "absolute", inset: 0, background: "linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 100%)" }} />
+                  )}
+                  {/* Dark gradient overlay */}
+                  <div style={{
+                    position: "absolute", inset: 0,
+                    background: "linear-gradient(to top, rgba(8,12,24,0.95) 0%, rgba(8,12,24,0.5) 55%, rgba(8,12,24,0.15) 100%)",
+                  }} />
+                  {/* Theme badge — top right */}
+                  <div style={{
+                    position: "absolute", top: 12, right: 12,
+                    background: "rgba(201,168,76,0.18)", border: "1px solid rgba(201,168,76,0.4)",
+                    borderRadius: 20, padding: "3px 10px",
+                    fontFamily: "'Jost', sans-serif", fontSize: 9, color: "#C9A84C",
+                    letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 600,
+                  }}>{ms.theme || "Classic"}</div>
+                  {/* Content — bottom */}
+                  <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "16px 18px" }}>
+                    <div style={{
+                      fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#fff",
+                      fontWeight: 600, lineHeight: 1.2, marginBottom: 2,
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                    }}>{address}</div>
+                    {(city || price) && (
+                      <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.55)", marginBottom: 12 }}>
+                        {[city, price].filter(Boolean).join(" · ")}
+                      </div>
+                    )}
+                    <div style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      background: isHovered ? "rgba(201,168,76,0.2)" : "rgba(255,255,255,0.08)",
+                      border: `1px solid ${isHovered ? "rgba(201,168,76,0.5)" : "rgba(255,255,255,0.15)"}`,
+                      borderRadius: 6, padding: "5px 12px",
+                      fontFamily: "'Jost', sans-serif", fontSize: 10, color: isHovered ? "#C9A84C" : "rgba(255,255,255,0.7)",
+                      letterSpacing: "0.08em", textTransform: "uppercase", transition: "all 0.2s",
+                    }}>
+                      View Live ↗
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
