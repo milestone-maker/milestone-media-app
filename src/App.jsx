@@ -3993,6 +3993,7 @@ function PublicMicrosite() {
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeSection, setActiveSection] = useState("photos");
+  const [prestigeMediaTab, setPrestigeMediaTab] = useState(null);
 
   const photoRef = useRef(null);
   const floorplanRef = useRef(null);
@@ -4000,6 +4001,7 @@ function PublicMicrosite() {
   const tourRef = useRef(null);
   const detailsRef = useRef(null);
   const contactRef = useRef(null);
+  const mediaRef = useRef(null);
 
   const slug = window.location.pathname.replace("/p/", "").split("/")[0];
   // pubT is resolved below after microsite loads — declare a mutable ref here
@@ -4046,14 +4048,20 @@ function PublicMicrosite() {
   const hasFloorplan = !!(floorplanUrl || data.floorplan_url);
   const hasVideo = !!(videoUrl || data.video_url);
   const hasTour = !!data.matterport_url;
+  const isPrestige = microsite?.theme === "Prestige";
 
-  const sections = [
-    { id: "photos", label: "Photos", ref: photoRef, show: true },
-    { id: "floorplan", label: "Floorplan", ref: floorplanRef, show: hasFloorplan },
-    { id: "drone", label: "Drone", ref: droneRef, show: hasVideo },
-    { id: "tour", label: "3D Tour", ref: tourRef, show: hasTour },
+  const sections = isPrestige ? [
+    { id: "photos",  label: "Gallery", ref: photoRef,   show: true },
+    { id: "media",   label: "Media",   ref: mediaRef,   show: hasVideo || hasTour || hasFloorplan },
     { id: "details", label: "Details", ref: detailsRef, show: true },
     { id: "contact", label: "Contact", ref: contactRef, show: true },
+  ].filter(s => s.show) : [
+    { id: "photos",   label: "Photos",   ref: photoRef,    show: true },
+    { id: "floorplan",label: "Floorplan",ref: floorplanRef, show: hasFloorplan },
+    { id: "drone",    label: "Drone",    ref: droneRef,    show: hasVideo },
+    { id: "tour",     label: "3D Tour",  ref: tourRef,     show: hasTour },
+    { id: "details",  label: "Details",  ref: detailsRef,  show: true },
+    { id: "contact",  label: "Contact",  ref: contactRef,  show: true },
   ].filter(s => s.show);
 
   useEffect(() => {
@@ -4142,6 +4150,283 @@ function PublicMicrosite() {
   const stickyNavBg = isDarkTheme ? (pubT.bg === "#0f0f1a" ? "#181826" : pubT.bg) : "#f5f2ed";
   const layout = THEME_LAYOUT[microsite?.theme] || "cinematic";
   const footerBg = isDarkTheme ? pubT.bg : "#0f0f1a";
+
+  // ─────────────────────────────────────────────────────────────────
+  // PRESTIGE LAYOUT — fixed hero background, prosperity-style design
+  // ─────────────────────────────────────────────────────────────────
+  if (isPrestige) {
+    const mediaTabs = [
+      ...(hasVideo     ? [{ id: "film",      label: "Cinematic Film" }] : []),
+      ...(hasTour      ? [{ id: "tour",      label: "Virtual Tour"   }] : []),
+      ...(hasFloorplan ? [{ id: "floorplan", label: "Floor Plan"     }] : []),
+    ];
+    const activeTab = prestigeMediaTab || (mediaTabs[0]?.id ?? null);
+    const finalVideo   = videoUrl || data.video_url;
+    const finalFloor   = floorplanUrl || data.floorplan_url;
+    const presGallery  = photos.length > 0 ? photos : (data.hero_img ? [data.hero_img] : []);
+    const pNavStyle = (id) => ({
+      fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.08em",
+      textTransform: "uppercase", whiteSpace: "nowrap", cursor: "pointer",
+      paddingBottom: 10, paddingTop: 10, transition: "color 0.2s",
+      color: activeSection === id ? "#C9A84C" : "rgba(255,255,255,0.5)",
+      borderBottom: activeSection === id ? "2px solid #C9A84C" : "2px solid transparent",
+    });
+
+    return (
+      <div style={{ fontFamily: "'Cormorant Garamond', serif", minHeight: "100vh" }}>
+        {/* Fixed hero background — agent's selected hero image */}
+        <div style={{
+          position: "fixed", inset: 0, zIndex: -1,
+          backgroundImage: `url(${data.hero_img || presGallery[0] || ""})`,
+          backgroundSize: "cover", backgroundPosition: "center", backgroundRepeat: "no-repeat",
+        }} />
+
+        {/* Animation CSS — Prestige only */}
+        <style>{`
+          @keyframes msGalleryLeft  { from { transform: translateX(0);    } to { transform: translateX(-50%); } }
+          @keyframes msGalleryRight { from { transform: translateX(-50%); } to { transform: translateX(0);    } }
+          .ms-gallery-track-fwd { animation: msGalleryLeft  90s linear infinite; }
+          .ms-gallery-track-rev { animation: msGalleryRight 75s linear infinite; }
+          .ms-gallery-outer:hover .ms-gallery-track-fwd,
+          .ms-gallery-outer:hover .ms-gallery-track-rev { animation-play-state: paused; }
+        `}</style>
+
+        {/* Top nav */}
+        <div style={{
+          position: "fixed", top: 0, left: 0, right: 0, zIndex: 1000,
+          background: "rgba(15,15,26,0.92)", backdropFilter: "blur(12px)",
+          borderBottom: "1px solid rgba(201,168,76,0.2)",
+          padding: "16px 32px", display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 15, fontWeight: 700, color: "#C9A84C", letterSpacing: "0.08em" }}>MILESTONE MEDIA</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.35)", letterSpacing: "0.06em" }}>& Photography</div>
+          </div>
+          <div style={{ display: "flex", gap: 32 }}>
+            {sections.map(s => (
+              <div key={s.id} onClick={() => { s.ref?.current?.scrollIntoView({ behavior: "smooth" }); setActiveSection(s.id); }} style={pNavStyle(s.id)}>
+                {s.label}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Hero — address left, stats right, over semi-transparent gradient */}
+        <div style={{ position: "relative", height: "90vh", marginTop: 60 }}>
+          <div style={{
+            position: "absolute", inset: 0,
+            background: "linear-gradient(to top, rgba(15,15,26,0.92) 0%, rgba(15,15,26,0.45) 55%, rgba(15,15,26,0.12) 100%)",
+          }} />
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-end", padding: "0 48px 52px" }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: "#C9A84C", marginBottom: 12 }}>
+                {data.city || "Dallas, TX"}
+              </div>
+              <div style={{ fontSize: 60, fontWeight: 700, color: "#fff", lineHeight: 1.05, marginBottom: 14, maxWidth: 680 }}>
+                {data.address || "Luxury Property"}
+              </div>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 42, fontWeight: 400, color: "#C9A84C" }}>
+                {data.price || ""}
+              </div>
+            </div>
+            {(data.beds || data.baths || data.sqft) && (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 20, paddingBottom: 4 }}>
+                {[["Beds", data.beds], ["Baths", data.baths], ["Sq Ft", data.sqft]].filter(([, v]) => v).map(([label, val]) => (
+                  <div key={label} style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 34, fontWeight: 700, color: "#fff", lineHeight: 1 }}>{val}</div>
+                    <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 9, color: "rgba(255,255,255,0.45)", letterSpacing: "0.12em", textTransform: "uppercase", marginTop: 3 }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Sticky section nav */}
+        <div style={{
+          position: "sticky", top: 60, zIndex: 100,
+          background: "rgba(15,15,26,0.88)", backdropFilter: "blur(8px)",
+          borderBottom: "1px solid rgba(201,168,76,0.15)",
+          padding: "0 48px", display: "flex", gap: 40, overflowX: "auto",
+        }}>
+          {sections.map(s => (
+            <div key={s.id} onClick={() => { s.ref?.current?.scrollIntoView({ behavior: "smooth" }); setActiveSection(s.id); }} style={pNavStyle(s.id)}>
+              {s.label}
+            </div>
+          ))}
+        </div>
+
+        {/* Media Showcase — tabbed (Cinematic Film / Virtual Tour / Floor Plan) */}
+        {mediaTabs.length > 0 && (
+          <div ref={mediaRef} style={{ background: "rgba(15,15,26,0.72)", backdropFilter: "blur(4px)", padding: "72px 48px 80px", borderTop: "1px solid rgba(201,168,76,0.1)" }}>
+            <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#C9A84C", marginBottom: 8 }}>Media Showcase</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 28 }}>
+                <h2 style={{ fontSize: 40, margin: 0, color: "#fff", fontWeight: 600 }}>Property Media</h2>
+                <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+              </div>
+              {mediaTabs.length > 1 && (
+                <div style={{ display: "flex", marginBottom: 32, border: "1px solid rgba(201,168,76,0.25)", borderRadius: 8, overflow: "hidden", width: "fit-content" }}>
+                  {mediaTabs.map((tab, i) => (
+                    <div key={tab.id} onClick={() => setPrestigeMediaTab(tab.id)} style={{
+                      padding: "10px 28px", cursor: "pointer",
+                      fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase",
+                      background: activeTab === tab.id ? "#C9A84C" : "transparent",
+                      color: activeTab === tab.id ? "#0f0f1a" : "rgba(255,255,255,0.55)",
+                      fontWeight: activeTab === tab.id ? 700 : 400,
+                      borderRight: i < mediaTabs.length - 1 ? "1px solid rgba(201,168,76,0.25)" : "none",
+                      transition: "all 0.2s",
+                    }}>{tab.label}</div>
+                  ))}
+                </div>
+              )}
+              {activeTab === "film" && finalVideo && (
+                /youtube\.com|youtu\.be|vimeo\.com/.test(finalVideo) ? (
+                  <iframe src={finalVideo.replace("watch?v=","embed/").replace("youtu.be/","youtube.com/embed/").replace("vimeo.com/","player.vimeo.com/video/")}
+                    title="Cinematic Film" style={{ width: "100%", height: 560, borderRadius: 8, border: "none" }}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen />
+                ) : (
+                  <video controls poster={data.hero_img} style={{ width: "100%", borderRadius: 8, maxHeight: 560, display: "block" }}>
+                    <source src={finalVideo} type="video/mp4" />
+                  </video>
+                )
+              )}
+              {activeTab === "tour" && data.matterport_url && (
+                <iframe src={data.matterport_url} title="3D Tour" style={{ width: "100%", height: 560, borderRadius: 8, border: "none" }} />
+              )}
+              {activeTab === "floorplan" && finalFloor && (
+                <div style={{ display: "flex", justifyContent: "center" }}>
+                  <img src={finalFloor} alt="Floorplan" style={{ maxWidth: 900, width: "100%", borderRadius: 8 }} />
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Photo Gallery — solid dark background, dual-row auto-scroll */}
+        <div ref={photoRef} style={{ background: "#0f0f1a", padding: "80px 0", borderTop: "1px solid rgba(201,168,76,0.12)" }}>
+          <div style={{ padding: "0 48px 40px", maxWidth: 1200, margin: "0 auto" }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#C9A84C", marginBottom: 8 }}>Photography</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
+              <h2 style={{ fontSize: 42, margin: 0, color: "#fff", fontWeight: 600 }}>Photo Gallery</h2>
+              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+            </div>
+          </div>
+          <div className="ms-gallery-outer" style={{ overflow: "hidden", cursor: "pointer", userSelect: "none", marginBottom: 4 }}>
+            <div className="ms-gallery-track-fwd" style={{ display: "flex", gap: 4, width: "max-content", willChange: "transform" }}>
+              {[...presGallery, ...presGallery].map((photo, idx) => (
+                <div key={idx} onClick={() => { setLightboxIndex(idx % presGallery.length); setLightboxOpen(true); }}
+                  style={{ height: 380, flexShrink: 0, overflow: "hidden" }}>
+                  <img src={photo} alt="" style={{ height: "100%", width: "auto", objectFit: "cover", display: "block", pointerEvents: "none" }} />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="ms-gallery-outer" style={{ overflow: "hidden", cursor: "pointer", userSelect: "none" }}>
+            <div className="ms-gallery-track-rev" style={{ display: "flex", gap: 4, width: "max-content", willChange: "transform" }}>
+              {[...presGallery, ...presGallery].map((photo, idx) => (
+                <div key={idx} onClick={() => { setLightboxIndex(idx % presGallery.length); setLightboxOpen(true); }}
+                  style={{ height: 280, flexShrink: 0, overflow: "hidden" }}>
+                  <img src={photo} alt="" style={{ height: "100%", width: "auto", objectFit: "cover", display: "block", pointerEvents: "none" }} />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ padding: "20px 48px 0", display: "flex", justifyContent: "flex-end", maxWidth: 1200, margin: "0 auto" }}>
+            <button onClick={() => { setLightboxIndex(0); setLightboxOpen(true); }} style={{
+              background: "transparent", border: "1px solid rgba(201,168,76,0.4)", color: "#C9A84C",
+              padding: "8px 20px", borderRadius: 6, fontFamily: "'Jost', sans-serif",
+              fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer",
+            }}>View All {presGallery.length} Photos ↗</button>
+          </div>
+        </div>
+
+        {/* Property Details — semi-transparent */}
+        <div ref={detailsRef} style={{ background: "rgba(15,15,26,0.88)", backdropFilter: "blur(4px)", padding: "80px 40px", borderTop: "1px solid rgba(201,168,76,0.1)" }}>
+          <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#C9A84C", marginBottom: 8 }}>Property Info</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
+              <h2 style={{ fontSize: 42, margin: 0, color: "#fff", fontWeight: 600 }}>Property Details</h2>
+              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 24, marginBottom: 60 }}>
+              {[{ val: data.beds, label: "Bedrooms" }, { val: data.baths, label: "Bathrooms" }, { val: data.sqft, label: "Sq. Ft." }, { val: data.price, label: "Price" }].map(s => (
+                <div key={s.label} style={{ background: "rgba(255,255,255,0.06)", padding: 32, borderRadius: 8, textAlign: "center", border: "1px solid rgba(201,168,76,0.15)" }}>
+                  <div style={{ fontSize: s.label === "Price" ? 34 : 48, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>{s.val || "—"}</div>
+                  <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "rgba(255,255,255,0.45)", letterSpacing: "0.08em" }}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+            {data.description && (
+              <div style={{ background: "rgba(255,255,255,0.04)", padding: 32, borderRadius: 8, marginBottom: 40, borderLeft: "4px solid #C9A84C" }}>
+                <p style={{ fontFamily: "'Jost', sans-serif", fontSize: 15, lineHeight: 1.8, color: "rgba(255,255,255,0.75)", margin: 0 }}>{data.description}</p>
+              </div>
+            )}
+            {data.features && data.features.filter(f => f).length > 0 && (
+              <div>
+                <h3 style={{ fontSize: 24, color: "#fff", marginBottom: 24, fontWeight: 600 }}>Key Features</h3>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16 }}>
+                  {data.features.filter(f => f).map((feature, idx) => (
+                    <div key={idx} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                      <div style={{ color: "#C9A84C", fontSize: 18, flexShrink: 0 }}>•</div>
+                      <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "rgba(255,255,255,0.7)" }}>{feature}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Contact — semi-transparent */}
+        <div ref={contactRef} style={{ background: "rgba(15,15,26,0.88)", backdropFilter: "blur(4px)", padding: "80px 40px", borderTop: "1px solid rgba(201,168,76,0.1)" }}>
+          <div style={{ maxWidth: 800, margin: "0 auto" }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#C9A84C", marginBottom: 8 }}>Schedule a Visit</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
+              <h2 style={{ fontSize: 42, margin: 0, color: "#fff", fontWeight: 600 }}>Request a Showing</h2>
+              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+            </div>
+            {agentName && (
+              <div style={{ background: "rgba(255,255,255,0.05)", padding: 32, borderRadius: 8, border: "1px solid rgba(201,168,76,0.15)", display: "flex", alignItems: "center", gap: 20, marginBottom: 40 }}>
+                <div style={{ width: 80, height: 80, borderRadius: "50%", background: "linear-gradient(135deg, #C9A84C, #C9A84Caa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, fontWeight: 700, color: "#0f0f1a", flexShrink: 0 }}>
+                  {agentName.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 24, color: "#fff", marginBottom: 4, fontWeight: 600 }}>{agentName}</div>
+                  {agentPhone && <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "rgba(255,255,255,0.5)" }}>{agentPhone}</div>}
+                </div>
+                {agentPhone && (
+                  <a href={`tel:${agentPhone}`} style={{ background: "#C9A84C", color: "#0f0f1a", border: "none", padding: "12px 28px", borderRadius: 6, fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", cursor: "pointer", textDecoration: "none" }}>Call</a>
+                )}
+              </div>
+            )}
+            <PublicLeadCaptureForm
+              theme={{ bg: "rgba(255,255,255,0.04)", text: "#fff", sub: "rgba(255,255,255,0.5)", accent: "#C9A84C", border: "rgba(255,255,255,0.12)", card: "rgba(255,255,255,0.05)" }}
+              micrositeId={microsite.id}
+              listingId={microsite.property_data?.listing_id || microsite.listing_id}
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ background: "#0f0f1a", borderTop: "1px solid #C9A84C", padding: "40px 48px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#C9A84C", fontWeight: 700, letterSpacing: "0.08em" }}>MILESTONE MEDIA</div>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.35)" }}>© 2026 Milestone Media. All rights reserved.</div>
+        </div>
+
+        {/* Lightbox */}
+        {lightboxOpen && (
+          <div onClick={() => setLightboxOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.96)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <button onClick={() => setLightboxOpen(false)} style={{ position: "absolute", top: 20, right: 30, background: "none", border: "none", color: "#fff", fontSize: 36, cursor: "pointer" }}>✕</button>
+            <button onClick={(e) => { e.stopPropagation(); setLightboxIndex((p) => (p - 1 + presGallery.length) % presGallery.length); }} style={{ position: "absolute", left: 30, background: "none", border: "none", color: "#fff", fontSize: 48, cursor: "pointer" }}>‹</button>
+            <img src={presGallery[lightboxIndex]} alt="" style={{ maxWidth: "90%", maxHeight: "90%", objectFit: "contain" }} onClick={(e) => e.stopPropagation()} />
+            <button onClick={(e) => { e.stopPropagation(); setLightboxIndex((p) => (p + 1) % presGallery.length); }} style={{ position: "absolute", right: 30, background: "none", border: "none", color: "#fff", fontSize: 48, cursor: "pointer" }}>›</button>
+            <div style={{ position: "absolute", bottom: 30, color: "#fff", fontFamily: "'Jost', sans-serif", fontSize: 14 }}>{lightboxIndex + 1} / {presGallery.length}</div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={{ fontFamily: "'Cormorant Garamond', serif", overflow: "hidden" }}>
@@ -4330,20 +4615,6 @@ function PublicMicrosite() {
       )}
 
       {/* Photo Gallery Section */}
-      <style>{`
-        @keyframes msGalleryLeft {
-          from { transform: translateX(0); }
-          to { transform: translateX(-50%); }
-        }
-        @keyframes msGalleryRight {
-          from { transform: translateX(-50%); }
-          to { transform: translateX(0); }
-        }
-        .ms-gallery-track-fwd { animation: msGalleryLeft 90s linear infinite; }
-        .ms-gallery-track-rev { animation: msGalleryRight 75s linear infinite; }
-        .ms-gallery-outer:hover .ms-gallery-track-fwd,
-        .ms-gallery-outer:hover .ms-gallery-track-rev { animation-play-state: paused; }
-      `}</style>
       <div ref={photoRef} style={{ background: photoSecBg, padding: "80px 0" }}>
         <div style={{ padding: "0 40px 40px", maxWidth: 1200, margin: "0 auto" }}>
           <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>
@@ -4354,27 +4625,13 @@ function PublicMicrosite() {
             <div style={{ width: 60, height: 1, background: pubT.accent }} />
           </div>
         </div>
-        {/* Row 1 — scrolls left */}
-        <div className="ms-gallery-outer" style={{ overflow: "hidden", cursor: "pointer", userSelect: "none", marginBottom: 4 }}>
-          <div className="ms-gallery-track-fwd" style={{ display: "flex", gap: 4, width: "max-content", willChange: "transform" }}>
-            {[...galleryPhotos, ...galleryPhotos].map((photo, idx) => (
-              <div key={idx} onClick={() => { setLightboxIndex(idx % galleryPhotos.length); setLightboxOpen(true); }}
-                style={{ height: 380, flexShrink: 0, overflow: "hidden" }}>
-                <img src={photo} alt="" style={{ height: "100%", width: "auto", objectFit: "cover", display: "block", pointerEvents: "none" }} />
-              </div>
-            ))}
-          </div>
-        </div>
-        {/* Row 2 — scrolls right */}
-        <div className="ms-gallery-outer" style={{ overflow: "hidden", cursor: "pointer", userSelect: "none" }}>
-          <div className="ms-gallery-track-rev" style={{ display: "flex", gap: 4, width: "max-content", willChange: "transform" }}>
-            {[...galleryPhotos, ...galleryPhotos].map((photo, idx) => (
-              <div key={idx} onClick={() => { setLightboxIndex(idx % galleryPhotos.length); setLightboxOpen(true); }}
-                style={{ height: 280, flexShrink: 0, overflow: "hidden" }}>
-                <img src={photo} alt="" style={{ height: "100%", width: "auto", objectFit: "cover", display: "block", pointerEvents: "none" }} />
-              </div>
-            ))}
-          </div>
+        <div style={{ overflowX: "auto", display: "flex", gap: 4, padding: "0 40px" }}>
+          {galleryPhotos.map((photo, idx) => (
+            <div key={idx} onClick={() => { setLightboxIndex(idx); setLightboxOpen(true); }}
+              style={{ height: 360, flexShrink: 0, overflow: "hidden", borderRadius: 4, cursor: "pointer" }}>
+              <img src={photo} alt="" style={{ height: "100%", width: "auto", objectFit: "cover", display: "block" }} />
+            </div>
+          ))}
         </div>
         <div style={{ padding: "20px 40px 0", display: "flex", justifyContent: "flex-end", maxWidth: 1200, margin: "0 auto" }}>
           <button onClick={() => { setLightboxIndex(0); setLightboxOpen(true); }} style={{
