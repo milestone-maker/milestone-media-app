@@ -5220,6 +5220,8 @@ function BookingsManagerView() {
   const [tourLabel, setTourLabel] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [zipProgress, setZipProgress] = useState(null); // null | { done, total }
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedMedia, setSelectedMedia] = useState(new Set());
   const fileInputRef = useRef(null);
   // Photo reorder drag state
   const dragPhotoIdx = useRef(null);
@@ -5316,6 +5318,8 @@ function BookingsManagerView() {
   };
 
   const loadMedia = async (bookingId) => {
+    setSelectMode(false);
+    setSelectedMedia(new Set());
     setMediaLoading(true);
     const { data, error } = await supabase
       .from("booking_media")
@@ -5402,6 +5406,29 @@ function BookingsManagerView() {
     }
     await supabase.from("booking_media").delete().eq("id", media.id);
     await loadMedia(mediaModal.id);
+  };
+
+  const deleteSelectedMedia = async () => {
+    if (selectedMedia.size === 0) return;
+    if (!confirm(`Delete ${selectedMedia.size} selected file${selectedMedia.size !== 1 ? "s" : ""}? This cannot be undone.`)) return;
+    const toDelete = mediaFiles.filter(m => selectedMedia.has(m.id));
+    const storagePaths = toDelete.filter(m => m.file_path).map(m => m.file_path);
+    if (storagePaths.length > 0) {
+      await supabase.storage.from("booking-media").remove(storagePaths);
+    }
+    const ids = toDelete.map(m => m.id);
+    await supabase.from("booking_media").delete().in("id", ids);
+    setSelectedMedia(new Set());
+    setSelectMode(false);
+    await loadMedia(mediaModal.id);
+  };
+
+  const toggleSelectItem = (id) => {
+    setSelectedMedia(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   };
 
   const getDownloadUrl = async (filePath) => {
@@ -5765,6 +5792,39 @@ function BookingsManagerView() {
           </div>
         ) : (
           <>
+            {/* Admin: Bulk Select Toolbar */}
+            {isAdmin && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+                {!selectMode ? (
+                  <button onClick={() => { setSelectMode(true); setSelectedMedia(new Set()); }} style={{
+                    ...btnBase, padding: "6px 14px", fontSize: 11,
+                    background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.7)",
+                  }}>☑ Select</button>
+                ) : (
+                  <>
+                    <button onClick={() => setSelectedMedia(new Set(mediaFiles.map(m => m.id)))} style={{
+                      ...btnBase, padding: "6px 14px", fontSize: 11,
+                      background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.7)",
+                    }}>Select All ({mediaFiles.length})</button>
+                    <button onClick={() => setSelectedMedia(new Set())} style={{
+                      ...btnBase, padding: "6px 14px", fontSize: 11,
+                      background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.5)",
+                    }}>Deselect All</button>
+                    {selectedMedia.size > 0 && (
+                      <button onClick={deleteSelectedMedia} style={{
+                        ...btnBase, padding: "6px 14px", fontSize: 11,
+                        background: "rgba(231,76,60,0.15)", border: "1px solid rgba(231,76,60,0.4)", color: "#e74c3c", fontWeight: 600,
+                      }}>🗑 Delete Selected ({selectedMedia.size})</button>
+                    )}
+                    <button onClick={() => { setSelectMode(false); setSelectedMedia(new Set()); }} style={{
+                      ...btnBase, padding: "6px 14px", fontSize: 11,
+                      background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.4)",
+                    }}>Cancel</button>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Download All ZIP button (for agents with paid invoice, or admin) */}
             {canDownload && mediaFiles.some(m => m.file_path || m.file_type === "3d_tour") && (
               <button
@@ -5810,17 +5870,31 @@ function BookingsManagerView() {
                   {photos.map((p, idx) => (
                     <div
                       key={p.id}
-                      draggable
-                      onDragStart={() => handlePhotoDragStart(idx)}
-                      onDragEnter={() => handlePhotoDragEnter(idx)}
+                      draggable={!selectMode}
+                      onDragStart={() => !selectMode && handlePhotoDragStart(idx)}
+                      onDragEnter={() => !selectMode && handlePhotoDragEnter(idx)}
                       onDragOver={e => e.preventDefault()}
                       onDrop={handlePhotoDrop}
                       onDragEnd={() => { dragPhotoIdx.current = null; dragOverPhotoIdx.current = null; }}
+                      onClick={() => selectMode && toggleSelectItem(p.id)}
                       style={{
                         position: "relative", display: "inline-block",
-                        cursor: "grab", transition: "opacity 0.15s",
+                        cursor: selectMode ? "pointer" : "grab", transition: "opacity 0.15s",
+                        outline: selectMode && selectedMedia.has(p.id) ? "2px solid #c9a84c" : "none",
+                        borderRadius: 9,
                       }}
                     >
+                      {/* Select mode checkbox */}
+                      {selectMode && (
+                        <div style={{
+                          position: "absolute", top: 4, right: 4, zIndex: 3,
+                          width: 18, height: 18, borderRadius: 4,
+                          background: selectedMedia.has(p.id) ? "#c9a84c" : "rgba(0,0,0,0.6)",
+                          border: selectedMedia.has(p.id) ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.4)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 11, color: "#0a1628", fontWeight: 700,
+                        }}>{selectedMedia.has(p.id) ? "✓" : ""}</div>
+                      )}
                       {/* Order badge */}
                       <div style={{
                         position: "absolute", top: 4, left: 4, zIndex: 2,
@@ -5831,26 +5905,28 @@ function BookingsManagerView() {
                       <img
                         src={p.signed_url || "#"}
                         alt={p.file_name}
-                        style={{ ...thumbSt, display: "block" }}
+                        style={{ ...thumbSt, display: "block", opacity: selectMode && selectedMedia.has(p.id) ? 0.75 : 1 }}
                         draggable={false}
                       />
                       <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 4, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {p.file_name}
                       </div>
-                      <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
-                        {canDownload && (
-                          <button onClick={() => downloadSingleFile(p)} style={{
-                            ...btnBase, padding: "2px 8px", fontSize: 9,
-                            background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.2)", color: "#c9a84c",
-                          }}>Download</button>
-                        )}
-                        {isAdmin && (
-                          <button onClick={() => deleteMedia(p)} style={{
-                            ...btnBase, padding: "2px 8px", fontSize: 9,
-                            background: "rgba(231,76,60,0.08)", border: "1px solid rgba(231,76,60,0.15)", color: "#e74c3c",
-                          }}>×</button>
-                        )}
-                      </div>
+                      {!selectMode && (
+                        <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                          {canDownload && (
+                            <button onClick={() => downloadSingleFile(p)} style={{
+                              ...btnBase, padding: "2px 8px", fontSize: 9,
+                              background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.2)", color: "#c9a84c",
+                            }}>Download</button>
+                          )}
+                          {isAdmin && (
+                            <button onClick={() => deleteMedia(p)} style={{
+                              ...btnBase, padding: "2px 8px", fontSize: 9,
+                              background: "rgba(231,76,60,0.08)", border: "1px solid rgba(231,76,60,0.15)", color: "#e74c3c",
+                            }}>×</button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -5865,11 +5941,25 @@ function BookingsManagerView() {
               }}>
                 <div style={sectionHeader()}>Videos ({videos.length})</div>
                 {videos.map(v => (
-                  <div key={v.id} style={{
-                    display: "flex", justifyContent: "space-between", alignItems: "center",
-                    padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.05)",
-                  }}>
+                  <div key={v.id}
+                    onClick={() => selectMode && toggleSelectItem(v.id)}
+                    style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.05)",
+                      cursor: selectMode ? "pointer" : "default",
+                      background: selectMode && selectedMedia.has(v.id) ? "rgba(201,168,76,0.06)" : "transparent",
+                      borderRadius: 6, paddingLeft: selectMode ? 6 : 0,
+                    }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      {selectMode && (
+                        <div style={{
+                          width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                          background: selectedMedia.has(v.id) ? "#c9a84c" : "rgba(0,0,0,0.4)",
+                          border: selectedMedia.has(v.id) ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.3)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 11, color: "#0a1628", fontWeight: 700,
+                        }}>{selectedMedia.has(v.id) ? "✓" : ""}</div>
+                      )}
                       <div style={{
                         width: 40, height: 40, borderRadius: 8, background: "rgba(78,205,196,0.1)",
                         display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
@@ -5881,20 +5971,22 @@ function BookingsManagerView() {
                         </div>
                       </div>
                     </div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      {canDownload && (
-                        <button onClick={() => downloadSingleFile(v)} style={{
-                          ...btnBase,
-                          background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.2)", color: "#c9a84c",
-                        }}>Download</button>
-                      )}
-                      {isAdmin && (
-                        <button onClick={() => deleteMedia(v)} style={{
-                          ...btnBase,
-                          background: "rgba(231,76,60,0.08)", border: "1px solid rgba(231,76,60,0.15)", color: "#e74c3c",
-                        }}>Delete</button>
-                      )}
-                    </div>
+                    {!selectMode && (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        {canDownload && (
+                          <button onClick={() => downloadSingleFile(v)} style={{
+                            ...btnBase,
+                            background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.2)", color: "#c9a84c",
+                          }}>Download</button>
+                        )}
+                        {isAdmin && (
+                          <button onClick={() => deleteMedia(v)} style={{
+                            ...btnBase,
+                            background: "rgba(231,76,60,0.08)", border: "1px solid rgba(231,76,60,0.15)", color: "#e74c3c",
+                          }}>Delete</button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -5908,11 +6000,25 @@ function BookingsManagerView() {
               }}>
                 <div style={sectionHeader()}>3D Tours ({tours.length})</div>
                 {tours.map(t => (
-                  <div key={t.id} style={{
-                    display: "flex", justifyContent: "space-between", alignItems: "center",
-                    padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.05)",
-                  }}>
+                  <div key={t.id}
+                    onClick={() => selectMode && toggleSelectItem(t.id)}
+                    style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.05)",
+                      cursor: selectMode ? "pointer" : "default",
+                      background: selectMode && selectedMedia.has(t.id) ? "rgba(201,168,76,0.06)" : "transparent",
+                      borderRadius: 6, paddingLeft: selectMode ? 6 : 0,
+                    }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      {selectMode && (
+                        <div style={{
+                          width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                          background: selectedMedia.has(t.id) ? "#c9a84c" : "rgba(0,0,0,0.4)",
+                          border: selectedMedia.has(t.id) ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.3)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 11, color: "#0a1628", fontWeight: 700,
+                        }}>{selectedMedia.has(t.id) ? "✓" : ""}</div>
+                      )}
                       <div style={{
                         width: 40, height: 40, borderRadius: 8, background: "rgba(201,168,76,0.1)",
                         display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
@@ -5924,20 +6030,22 @@ function BookingsManagerView() {
                         </div>
                       </div>
                     </div>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      {canDownload && (
-                        <button onClick={() => window.open(t.tour_url, "_blank")} style={{
-                          ...btnBase,
-                          background: "rgba(78,205,196,0.12)", border: "1px solid rgba(78,205,196,0.3)", color: "#4ecdc4",
-                        }}>Open Tour</button>
-                      )}
-                      {isAdmin && (
-                        <button onClick={() => deleteMedia(t)} style={{
-                          ...btnBase,
-                          background: "rgba(231,76,60,0.08)", border: "1px solid rgba(231,76,60,0.15)", color: "#e74c3c",
-                        }}>Delete</button>
-                      )}
-                    </div>
+                    {!selectMode && (
+                      <div style={{ display: "flex", gap: 6 }}>
+                        {canDownload && (
+                          <button onClick={() => window.open(t.tour_url, "_blank")} style={{
+                            ...btnBase,
+                            background: "rgba(78,205,196,0.12)", border: "1px solid rgba(78,205,196,0.3)", color: "#4ecdc4",
+                          }}>Open Tour</button>
+                        )}
+                        {isAdmin && (
+                          <button onClick={() => deleteMedia(t)} style={{
+                            ...btnBase,
+                            background: "rgba(231,76,60,0.08)", border: "1px solid rgba(231,76,60,0.15)", color: "#e74c3c",
+                          }}>Delete</button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
