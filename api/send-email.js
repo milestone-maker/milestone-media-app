@@ -11,8 +11,9 @@
 
 import nodemailer from "nodemailer";
 
-const BUSINESS_EMAIL = "smiles@milestonemediaphoto.com";
-const BUSINESS_NAME = "Milestone Media & Photography";
+const BUSINESS_EMAIL = "smiles@milestonemediaphoto.com";   // owner inbox — receives notifications
+const FROM_EMAIL     = "info@milestonemediaphoto.com";      // public-facing sender address
+const BUSINESS_NAME  = "Milestone Media & Photography";
 
 // ── OAuth2 token refresh ──
 async function refreshAccessToken() {
@@ -96,7 +97,7 @@ function buildOwnerEmail(b) {
   </div>`;
 
   return {
-    from: `"${BUSINESS_NAME}" <${BUSINESS_EMAIL}>`,
+    from: `"${BUSINESS_NAME}" <${FROM_EMAIL}>`,
     to: BUSINESS_EMAIL,
     subject: `New Booking — ${b.clientName} — ${b.address}`,
     html,
@@ -164,7 +165,7 @@ function buildClientEmail(b) {
   </div>`;
 
   return {
-    from: `"${BUSINESS_NAME}" <${BUSINESS_EMAIL}>`,
+    from: `"${BUSINESS_NAME}" <${FROM_EMAIL}>`,
     to: b.clientEmail,
     replyTo: BUSINESS_EMAIL,
     subject: `Booking Confirmed — ${b.date} at ${b.time} — Milestone Media`,
