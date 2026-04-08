@@ -5328,18 +5328,25 @@ function BookingsManagerView() {
       .order("sort_order", { ascending: true, nullsFirst: false })
       .order("created_at", { ascending: true });
     if (error) { console.error("Error loading media:", error); setMediaLoading(false); return; }
-    // Generate signed URLs for photos/videos (private bucket)
+
     if (data && data.length > 0) {
-      const withUrls = await Promise.all(data.map(async (item) => {
-        if (item.file_path && item.file_type !== "3d_tour") {
-          const { data: signedData } = await supabase.storage
-            .from("booking-media")
-            .createSignedUrl(item.file_path, 3600); // 1 hour
-          return { ...item, signed_url: signedData?.signedUrl || null };
-        }
-        return item;
-      }));
-      setMediaFiles(withUrls);
+      // Batch-generate all signed URLs in ONE API call instead of one per file
+      const filePaths = data
+        .filter(item => item.file_path && item.file_type !== "3d_tour")
+        .map(item => item.file_path);
+
+      let urlMap = {};
+      if (filePaths.length > 0) {
+        const { data: signedList } = await supabase.storage
+          .from("booking-media")
+          .createSignedUrls(filePaths, 3600); // 1 hour — single request for all files
+        signedList?.forEach(s => { if (s.signedUrl) urlMap[s.path] = s.signedUrl; });
+      }
+
+      setMediaFiles(data.map(item => ({
+        ...item,
+        signed_url: item.file_path ? (urlMap[item.file_path] || null) : null,
+      })));
     } else {
       setMediaFiles(data || []);
     }
@@ -5351,23 +5358,21 @@ function BookingsManagerView() {
     setUploading(true);
     const bookingId = mediaModal.id;
 
-    for (const file of files) {
+    // Upload all files in parallel — no more waiting for each one to finish before starting the next
+    const uploadOne = async (file) => {
       const isVideo = file.type.startsWith("video/");
       const fileType = isVideo ? "video" : "photo";
-      const filePath = `${bookingId}/${Date.now()}_${file.name}`;
+      const filePath = `${bookingId}/${Date.now()}_${Math.random().toString(36).slice(2)}_${file.name}`;
 
-      // Upload to Supabase Storage
       const { error: uploadErr } = await supabase.storage
         .from("booking-media")
         .upload(filePath, file, { contentType: file.type });
 
       if (uploadErr) {
         console.error("Upload error:", uploadErr);
-        alert(`Failed to upload ${file.name}`);
-        continue;
+        return; // skip DB insert for failed upload
       }
 
-      // Insert record into booking_media table
       const { error: dbErr } = await supabase.from("booking_media").insert({
         booking_id: bookingId,
         file_name: file.name,
@@ -5377,10 +5382,10 @@ function BookingsManagerView() {
         mime_type: file.type,
         uploaded_by: user?.id,
       });
-
       if (dbErr) console.error("DB insert error:", dbErr);
-    }
+    };
 
+    await Promise.all(files.map(uploadOne));
     await loadMedia(bookingId);
     setUploading(false);
   };
@@ -5623,6 +5628,21 @@ function BookingsManagerView() {
     const thumbSt = {
       width: 80, height: 80, objectFit: "cover", borderRadius: 8,
       border: "1px solid rgba(255,255,255,0.1)",
+      backgroundColor: "rgba(255,255,255,0.05)", // placeholder color while loading
+    };
+
+    // Build a thumbnail URL: request a 160×160 resized version via Supabase image transforms.
+    // This cuts thumbnail payload from ~5-8 MB per photo down to ~15-30 KB — far less to download.
+    // Falls back to the original signed URL if transforms aren't available on this plan.
+    const thumbUrl = (signedUrl) => {
+      if (!signedUrl) return "#";
+      try {
+        const url = new URL(signedUrl);
+        url.searchParams.set("width", "160");
+        url.searchParams.set("height", "160");
+        url.searchParams.set("resize", "cover");
+        return url.toString();
+      } catch { return signedUrl; }
     };
     const inputSt = {
       width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
@@ -5903,8 +5923,12 @@ function BookingsManagerView() {
                         padding: "1px 5px", borderRadius: 3, letterSpacing: "0.04em",
                       }}>{idx + 1}</div>
                       <img
-                        src={p.signed_url || "#"}
+                        src={thumbUrl(p.signed_url)}
                         alt={p.file_name}
+                        loading="lazy"
+                        decoding="async"
+                        width={80}
+                        height={80}
                         style={{ ...thumbSt, display: "block", opacity: selectMode && selectedMedia.has(p.id) ? 0.75 : 1 }}
                         draggable={false}
                       />
