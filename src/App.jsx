@@ -5055,6 +5055,7 @@ function BookingsManagerView() {
   const [tourUrl, setTourUrl] = useState("");
   const [tourLabel, setTourLabel] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  const [zipProgress, setZipProgress] = useState(null); // null | { done, total }
   const fileInputRef = useRef(null);
 
   useEffect(() => { fetchBookings(); }, []);
@@ -5216,23 +5217,104 @@ function BookingsManagerView() {
 
   const downloadSingleFile = async (media) => {
     const url = await getDownloadUrl(media.file_path);
-    if (url) {
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = media.file_name;
-      a.click();
-    }
+    if (!url) return alert("Could not get download link. Please try again.");
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = media.file_name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  };
+
+  // Build a slug from the booking address for MLS file naming
+  const buildAddressSlug = (booking) => {
+    const parts = [booking?.address, booking?.city].filter(Boolean).join(" ");
+    return parts
+      .replace(/[^a-zA-Z0-9\s]/g, "")
+      .trim()
+      .split(/\s+/)
+      .slice(0, 4)
+      .join("-");
   };
 
   const downloadAllMedia = async () => {
-    const downloadable = mediaFiles.filter(m => m.file_path);
-    if (!downloadable.length) return alert("No files to download.");
-    // Download each file sequentially (browser will handle multiple downloads)
-    for (const media of downloadable) {
-      await downloadSingleFile(media);
-      // Small delay between downloads so browser doesn't block them
-      await new Promise(r => setTimeout(r, 500));
+    const JSZip = window.JSZip;
+    if (!JSZip) return alert("ZIP library not loaded. Please refresh and try again.");
+
+    const photos = mediaFiles.filter(m => m.file_type === "photo" && m.file_path);
+    const videos = mediaFiles.filter(m => m.file_type === "video" && m.file_path);
+    const tours  = mediaFiles.filter(m => m.file_type === "3d_tour");
+
+    const totalFiles = photos.length + videos.length;
+    if (totalFiles === 0 && tours.length === 0) return alert("No files to download.");
+
+    setZipProgress({ done: 0, total: totalFiles });
+    const zip = new JSZip();
+    const addressSlug = buildAddressSlug(mediaModal);
+
+    // ── Photos → Photos_MLS/ with sequential MLS naming ──────────────────
+    if (photos.length > 0) {
+      const photoFolder = zip.folder("Photos_MLS");
+      for (let i = 0; i < photos.length; i++) {
+        const photo = photos[i];
+        try {
+          const url = await getDownloadUrl(photo.file_path);
+          if (!url) continue;
+          const res = await fetch(url);
+          const blob = await res.blob();
+          // Determine extension from original filename or MIME
+          const origExt = photo.file_name.split(".").pop().toLowerCase() || "jpg";
+          const ext = ["jpg","jpeg","png","webp","tiff","heic"].includes(origExt) ? origExt : "jpg";
+          const paddedNum = String(i + 1).padStart(2, "0");
+          const mlsName = `${paddedNum}_${addressSlug}.${ext}`;
+          photoFolder.file(mlsName, blob);
+          setZipProgress({ done: i + 1, total: totalFiles });
+        } catch (err) {
+          console.error("Failed to fetch photo:", photo.file_name, err);
+        }
+      }
     }
+
+    // ── Videos → Videos/ ─────────────────────────────────────────────────
+    if (videos.length > 0) {
+      const videoFolder = zip.folder("Videos");
+      for (let i = 0; i < videos.length; i++) {
+        const video = videos[i];
+        try {
+          const url = await getDownloadUrl(video.file_path);
+          if (!url) continue;
+          const res = await fetch(url);
+          const blob = await res.blob();
+          videoFolder.file(video.file_name, blob);
+          setZipProgress({ done: photos.length + i + 1, total: totalFiles });
+        } catch (err) {
+          console.error("Failed to fetch video:", video.file_name, err);
+        }
+      }
+    }
+
+    // ── 3D Tour URLs → 3D_Tour_Links.txt ─────────────────────────────────
+    if (tours.length > 0) {
+      const tourLines = tours.map(t =>
+        `${t.file_name || "3D Tour"}: ${t.tour_url || "(no URL)"}`
+      ).join("\n");
+      zip.file("3D_Tour_Links.txt", tourLines);
+    }
+
+    // ── Generate & trigger download ───────────────────────────────────────
+    const zipBlob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+    const zipName = `${addressSlug}_Media.zip`;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(zipBlob);
+    a.download = zipName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+    setZipProgress(null);
   };
 
   const toggleInvoicePaid = async (bookingId, currentVal) => {
@@ -5462,14 +5544,34 @@ function BookingsManagerView() {
           </div>
         ) : (
           <>
-            {/* Download All button (for agents with paid invoice, or admin) */}
-            {canDownload && mediaFiles.some(m => m.file_path) && (
-              <button onClick={downloadAllMedia} style={{
-                ...btnBase, padding: "10px 20px", marginBottom: 16,
-                background: "linear-gradient(135deg, #C9A84C 0%, #e8c97a 100%)",
-                border: "none", color: "#0a1628", fontWeight: 600,
-              }}>Download All Files</button>
+            {/* Download All ZIP button (for agents with paid invoice, or admin) */}
+            {canDownload && mediaFiles.some(m => m.file_path || m.file_type === "3d_tour") && (
+              <button
+                onClick={downloadAllMedia}
+                disabled={!!zipProgress}
+                style={{
+                  ...btnBase, padding: "10px 22px", marginBottom: 16,
+                  background: zipProgress
+                    ? "rgba(201,168,76,0.25)"
+                    : "linear-gradient(135deg, #C9A84C 0%, #e8c97a 100%)",
+                  border: zipProgress ? "1px solid rgba(201,168,76,0.3)" : "none",
+                  color: zipProgress ? "#c9a84c" : "#0a1628",
+                  fontWeight: 600, cursor: zipProgress ? "not-allowed" : "pointer",
+                  display: "flex", alignItems: "center", gap: 8,
+                }}
+              >
+                {zipProgress ? (
+                  <>
+                    <span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>⟳</span>
+                    Packaging {zipProgress.done}/{zipProgress.total} files…
+                  </>
+                ) : (
+                  <>⬇ Download ZIP (MLS Ready)</>
+                )}
+              </button>
             )}
+            {/* Spinner keyframe */}
+            <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
             {/* Photos Section */}
             {photos.length > 0 && (
