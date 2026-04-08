@@ -7608,11 +7608,21 @@ function AdminView() {
 // ============================================================
 function EditProfileModal({ onClose }) {
   const { user, profile, fetchProfile } = useAuth();
+
+  // ── Personal info
+  const [fullName, setFullName] = useState(profile?.full_name || "");
+  const [phone, setPhone] = useState(profile?.phone || "");
+  const [businessAddress, setBusinessAddress] = useState(profile?.business_address || "");
+
+  // ── Agency branding
   const [agencyName, setAgencyName] = useState(profile?.agency_name || "");
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState(profile?.agency_logo_url || null);
+
+  // ── Profile photo
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(profile?.profile_photo_url || profile?.avatar_url || null);
+
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const logoInputRef = useRef(null);
@@ -7629,7 +7639,6 @@ function EditProfileModal({ onClose }) {
   const uploadBranding = async (file, fileName) => {
     const ext = file.name.split(".").pop().toLowerCase();
     const path = `${user.id}/${fileName}.${ext}`;
-    // Upsert (overwrite if exists)
     await supabase.storage.from("agent-branding").remove([path]).catch(() => {});
     const { error } = await supabase.storage.from("agent-branding").upload(path, file, { contentType: file.type, upsert: true });
     if (error) { console.error("Upload error:", error); return null; }
@@ -7639,8 +7648,12 @@ function EditProfileModal({ onClose }) {
 
   const handleSave = async () => {
     setSaving(true);
-    const updates = { agency_name: agencyName.trim() || null };
-
+    const updates = {
+      full_name: fullName.trim() || null,
+      phone: phone.trim() || null,
+      business_address: businessAddress.trim() || null,
+      agency_name: agencyName.trim() || null,
+    };
     if (logoFile) {
       const url = await uploadBranding(logoFile, "logo");
       if (url) updates.agency_logo_url = url;
@@ -7649,13 +7662,12 @@ function EditProfileModal({ onClose }) {
       const url = await uploadBranding(photoFile, "photo");
       if (url) { updates.profile_photo_url = url; updates.avatar_url = url; }
     }
-
     const { error } = await supabase.from("agents").update(updates).eq("id", user.id);
     if (error) { alert("Save failed: " + error.message); setSaving(false); return; }
     await fetchProfile(user.id);
     setSaving(false);
     setSaved(true);
-    setTimeout(() => { setSaved(false); onClose(); }, 1200);
+    setTimeout(() => { setSaved(false); onClose(); }, 1400);
   };
 
   const clearLogo = async () => {
@@ -7665,130 +7677,209 @@ function EditProfileModal({ onClose }) {
   };
 
   const inputSt = {
-    width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
-    borderRadius: 8, padding: "12px 14px", color: "#fff",
+    width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+    borderRadius: 8, padding: "11px 14px", color: "#fff",
     fontFamily: "'Jost', sans-serif", fontSize: 13, outline: "none", boxSizing: "border-box",
+    transition: "border-color 0.2s",
   };
   const labelSt = {
-    fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.45)",
-    letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8, display: "block",
+    fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)",
+    letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 7, display: "block",
   };
+  const sectionTitle = (icon, text) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: "#C9A84C", fontWeight: 600 }}>{icon} {text}</div>
+      <div style={{ flex: 1, height: 1, background: "rgba(201,168,76,0.2)" }} />
+    </div>
+  );
+  const divider = <div style={{ height: 1, background: "rgba(255,255,255,0.06)", margin: "24px 0" }} />;
 
   return (
     <div style={{
-      position: "fixed", inset: 0, zIndex: 1000,
-      background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)",
-      display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+      position: "fixed", inset: 0, zIndex: 2000,
+      background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
     }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{
-        background: "#111520", border: "1px solid rgba(201,168,76,0.2)",
-        borderRadius: 16, padding: 32, width: "100%", maxWidth: 480,
-        boxShadow: "0 32px 80px rgba(0,0,0,0.8)",
-        maxHeight: "90vh", overflowY: "auto",
+        background: "#0e1220", border: "1px solid rgba(201,168,76,0.18)",
+        borderRadius: 18, width: "100%", maxWidth: 520,
+        boxShadow: "0 40px 100px rgba(0,0,0,0.9)",
+        maxHeight: "92vh", display: "flex", flexDirection: "column",
+        overflow: "hidden",
       }}>
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
-          <div>
-            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: "#fff", fontWeight: 600 }}>Profile & Branding</div>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>Your branding replaces Milestone Media on your microsites</div>
-          </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", fontSize: 22, cursor: "pointer", lineHeight: 1 }}>✕</button>
-        </div>
-
-        {/* Profile Photo */}
-        <div style={{ marginBottom: 24 }}>
-          <label style={labelSt}>Profile Photo</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+        {/* ── Modal header ── */}
+        <div style={{
+          padding: "24px 28px 20px", borderBottom: "1px solid rgba(255,255,255,0.07)",
+          display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            {/* Avatar preview */}
             <div style={{
-              width: 72, height: 72, borderRadius: "50%", overflow: "hidden", flexShrink: 0,
-              background: "rgba(201,168,76,0.12)", border: "2px solid rgba(201,168,76,0.3)",
+              width: 52, height: 52, borderRadius: "50%", overflow: "hidden", flexShrink: 0,
+              background: "rgba(201,168,76,0.12)", border: "2px solid rgba(201,168,76,0.35)",
               display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
+              cursor: "pointer",
+            }} onClick={() => photoInputRef.current?.click()}>
               {photoPreview
                 ? <img src={photoPreview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                : <span style={{ fontSize: 28, color: "#c9a84c" }}>👤</span>
+                : <span style={{ fontSize: 22, color: "#c9a84c" }}>👤</span>
               }
             </div>
             <div>
-              <input ref={photoInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => pickFile(e.target.files[0], setPhotoFile, setPhotoPreview)} />
-              <button onClick={() => photoInputRef.current?.click()} style={{
-                background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.25)",
-                color: "#c9a84c", borderRadius: 7, padding: "8px 16px", cursor: "pointer",
-                fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.06em",
-              }}>
-                {photoPreview ? "Change Photo" : "Upload Photo"}
-              </button>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.25)", marginTop: 6 }}>Appears in the contact card on your microsites</div>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ height: 1, background: "rgba(255,255,255,0.07)", marginBottom: 24 }} />
-
-        {/* Agency Logo */}
-        <div style={{ marginBottom: 24 }}>
-          <label style={labelSt}>Agency Logo</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-            <div style={{
-              width: 100, height: 56, borderRadius: 8, overflow: "hidden", flexShrink: 0,
-              background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              {logoPreview
-                ? <img src={logoPreview} alt="Logo" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", padding: 4 }} />
-                : <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.2)", textAlign: "center", padding: 4 }}>No logo</span>
-              }
-            </div>
-            <div style={{ flex: 1 }}>
-              <input ref={logoInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => pickFile(e.target.files[0], setLogoFile, setLogoPreview)} />
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button onClick={() => logoInputRef.current?.click()} style={{
-                  background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.25)",
-                  color: "#c9a84c", borderRadius: 7, padding: "8px 16px", cursor: "pointer",
-                  fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.06em",
-                }}>
-                  {logoPreview ? "Change Logo" : "Upload Logo"}
-                </button>
-                {logoPreview && (
-                  <button onClick={clearLogo} style={{
-                    background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)",
-                    color: "#f87171", borderRadius: 7, padding: "8px 14px", cursor: "pointer",
-                    fontFamily: "'Jost', sans-serif", fontSize: 11,
-                  }}>Remove</button>
-                )}
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#fff", fontWeight: 600, lineHeight: 1.1 }}>
+                {fullName || profile?.full_name || "Your Profile"}
               </div>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.25)", marginTop: 6 }}>Replaces "MILESTONE MEDIA" in nav & footer. PNG with transparent background works best.</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.35)", letterSpacing: "0.08em", marginTop: 2 }}>
+                {user?.email}
+              </div>
             </div>
           </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.35)", fontSize: 20, cursor: "pointer", lineHeight: 1, padding: 4 }}>✕</button>
         </div>
 
-        <div style={{ height: 1, background: "rgba(255,255,255,0.07)", marginBottom: 24 }} />
+        {/* ── Scrollable body ── */}
+        <div style={{ overflowY: "auto", padding: "24px 28px 28px", flex: 1 }}>
 
-        {/* Agency Name (fallback if no logo) */}
-        <div style={{ marginBottom: 32 }}>
-          <label style={labelSt}>Agency Name <span style={{ color: "rgba(255,255,255,0.25)" }}>(used if no logo is uploaded)</span></label>
-          <input
-            style={inputSt}
-            value={agencyName}
-            onChange={e => setAgencyName(e.target.value)}
-            placeholder="e.g. Compass Real Estate · Keller Williams DFW"
-          />
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.25)", marginTop: 6 }}>
-            If no logo is uploaded, this text replaces "MILESTONE MEDIA" on your microsites.
+          {/* ── SECTION: Personal Info ── */}
+          {sectionTitle("👤", "Personal Info")}
+
+          {/* Profile photo upload */}
+          <div style={{ marginBottom: 18 }}>
+            <label style={labelSt}>Profile Photo</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{
+                width: 64, height: 64, borderRadius: "50%", overflow: "hidden", flexShrink: 0,
+                background: "rgba(201,168,76,0.1)", border: "2px solid rgba(201,168,76,0.25)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                {photoPreview
+                  ? <img src={photoPreview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : <span style={{ fontSize: 24, color: "#c9a84c" }}>👤</span>
+                }
+              </div>
+              <div>
+                <input ref={photoInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => pickFile(e.target.files[0], setPhotoFile, setPhotoPreview)} />
+                <button onClick={() => photoInputRef.current?.click()} style={{
+                  background: "rgba(201,168,76,0.08)", border: "1px solid rgba(201,168,76,0.2)",
+                  color: "#c9a84c", borderRadius: 7, padding: "7px 14px", cursor: "pointer",
+                  fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.05em",
+                }}>{photoPreview ? "Change Photo" : "Upload Photo"}</button>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.22)", marginTop: 5 }}>
+                  Shown in the contact card on your microsites
+                </div>
+              </div>
+            </div>
           </div>
+
+          {/* Full name */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={labelSt}>Full Name</label>
+            <input style={inputSt} value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Jane Smith" />
+          </div>
+
+          {/* Phone */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={labelSt}>Phone Number</label>
+            <input style={inputSt} value={phone} onChange={e => setPhone(e.target.value)} placeholder="(214) 555-0100" type="tel" />
+          </div>
+
+          {/* Email — read-only */}
+          <div style={{ marginBottom: 0 }}>
+            <label style={labelSt}>Email Address</label>
+            <input
+              style={{ ...inputSt, color: "rgba(255,255,255,0.4)", cursor: "not-allowed" }}
+              value={user?.email || ""}
+              readOnly
+            />
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.2)", marginTop: 5 }}>
+              Email is tied to your login — contact support to change it
+            </div>
+          </div>
+
+          {divider}
+
+          {/* ── SECTION: Business ── */}
+          {sectionTitle("🏢", "Business")}
+
+          <div style={{ marginBottom: 0 }}>
+            <label style={labelSt}>Business Address</label>
+            <input style={inputSt} value={businessAddress} onChange={e => setBusinessAddress(e.target.value)} placeholder="123 Main St, Dallas, TX 75201" />
+          </div>
+
+          {divider}
+
+          {/* ── SECTION: Agency Branding ── */}
+          {sectionTitle("✦", "Agency Branding")}
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 18, lineHeight: 1.6 }}>
+            Your logo or agency name replaces "Milestone Media" on all your published microsites.
+          </div>
+
+          {/* Agency Logo */}
+          <div style={{ marginBottom: 18 }}>
+            <label style={labelSt}>Agency Logo</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{
+                width: 110, height: 60, borderRadius: 8, overflow: "hidden", flexShrink: 0,
+                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>
+                {logoPreview
+                  ? <img src={logoPreview} alt="Logo" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", padding: 6 }} />
+                  : <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.18)", textAlign: "center", padding: 6 }}>No logo yet</span>
+                }
+              </div>
+              <div style={{ flex: 1 }}>
+                <input ref={logoInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => pickFile(e.target.files[0], setLogoFile, setLogoPreview)} />
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button onClick={() => logoInputRef.current?.click()} style={{
+                    background: "rgba(201,168,76,0.08)", border: "1px solid rgba(201,168,76,0.2)",
+                    color: "#c9a84c", borderRadius: 7, padding: "7px 14px", cursor: "pointer",
+                    fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.05em",
+                  }}>{logoPreview ? "Change Logo" : "Upload Logo"}</button>
+                  {logoPreview && (
+                    <button onClick={clearLogo} style={{
+                      background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.15)",
+                      color: "#f87171", borderRadius: 7, padding: "7px 12px", cursor: "pointer",
+                      fontFamily: "'Jost', sans-serif", fontSize: 11,
+                    }}>Remove</button>
+                  )}
+                </div>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.2)", marginTop: 5 }}>
+                  PNG with transparent background works best
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Agency Name */}
+          <div style={{ marginBottom: 0 }}>
+            <label style={labelSt}>Agency Name <span style={{ color: "rgba(255,255,255,0.2)" }}>— text fallback if no logo</span></label>
+            <input
+              style={inputSt}
+              value={agencyName}
+              onChange={e => setAgencyName(e.target.value)}
+              placeholder="e.g. Compass Real Estate · Keller Williams DFW"
+            />
+          </div>
+
         </div>
 
-        {/* Save */}
-        <button onClick={handleSave} disabled={saving || saved} style={{
-          width: "100%", padding: "14px 0", borderRadius: 10, border: "none", cursor: saving || saved ? "not-allowed" : "pointer",
-          background: saved ? "rgba(74,222,128,0.2)" : "linear-gradient(135deg, #C9A84C 0%, #e8c97a 100%)",
-          color: saved ? "#4ade80" : "#0a1628",
-          fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase",
-          border: saved ? "1px solid rgba(74,222,128,0.4)" : "none",
-          transition: "all 0.3s",
+        {/* ── Sticky footer with save button ── */}
+        <div style={{
+          padding: "16px 28px 20px", borderTop: "1px solid rgba(255,255,255,0.07)", flexShrink: 0,
+          background: "#0e1220",
         }}>
-          {saved ? "✓ Saved!" : saving ? "Saving…" : "Save Branding"}
-        </button>
+          <button onClick={handleSave} disabled={saving || saved} style={{
+            width: "100%", padding: "14px 0", borderRadius: 10, cursor: saving || saved ? "default" : "pointer",
+            background: saved ? "rgba(74,222,128,0.15)" : "linear-gradient(135deg, #C9A84C 0%, #e8c97a 100%)",
+            color: saved ? "#4ade80" : "#0a1628",
+            fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase",
+            border: saved ? "1px solid rgba(74,222,128,0.35)" : "none",
+            transition: "all 0.25s",
+          }}>
+            {saved ? "✓ Profile Saved!" : saving ? "Saving…" : "Save Profile"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -7837,39 +7928,72 @@ function AppShell() {
 
   const ProfileDropdown = showProfile && (
     <div style={{
-      position: "absolute", top: 44, right: 0, width: 220,
-      background: "#161616", border: "1px solid #2A2A2A",
-      borderRadius: 12, padding: 16, zIndex: 50,
-      boxShadow: "0 24px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(201,168,76,0.08)",
+      position: "absolute", top: 48, right: 0, width: 260,
+      background: "#0e1220", border: "1px solid rgba(201,168,76,0.15)",
+      borderRadius: 14, zIndex: 50,
+      boxShadow: "0 24px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(201,168,76,0.06)",
+      overflow: "hidden",
     }}>
-      <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#F0EDE8", fontWeight: 500 }}>
-        {profile?.full_name || "Agent"}
+      {/* Profile summary row */}
+      <div style={{ padding: "16px 18px 14px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{
+            width: 42, height: 42, borderRadius: "50%", overflow: "hidden", flexShrink: 0,
+            background: "rgba(201,168,76,0.12)", border: "1.5px solid rgba(201,168,76,0.3)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            {profile?.profile_photo_url || profile?.avatar_url
+              ? <img src={profile.profile_photo_url || profile.avatar_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              : <span style={{ fontSize: 18, color: "#c9a84c" }}>👤</span>
+            }
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#F0EDE8", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {profile?.full_name || "Agent"}
+            </div>
+            <div style={{ fontSize: 10, color: "#8A8680", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {user?.email}
+            </div>
+            {profile?.role === "admin" && (
+              <span style={{
+                display: "inline-block", marginTop: 4, padding: "1px 7px",
+                borderRadius: 4, fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 600,
+                background: "rgba(201,168,76,0.15)", color: "#c9a84c", border: "1px solid rgba(201,168,76,0.25)",
+              }}>Admin</span>
+            )}
+          </div>
+        </div>
       </div>
-      <div style={{ fontSize: 11, color: "#8A8680", marginTop: 2, wordBreak: "break-all" }}>
-        {user?.email}
+
+      {/* Edit profile CTA */}
+      <div style={{ padding: "10px 12px 6px" }}>
+        <button
+          onClick={() => { setShowEditProfile(true); setShowProfile(false); }}
+          style={{
+            width: "100%", padding: "11px 14px", borderRadius: 9,
+            border: "1px solid rgba(201,168,76,0.25)",
+            background: "rgba(201,168,76,0.07)",
+            display: "flex", alignItems: "center", gap: 10,
+            cursor: "pointer", textAlign: "left",
+          }}
+        >
+          <span style={{ fontSize: 16 }}>✎</span>
+          <div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", fontWeight: 600, letterSpacing: "0.03em" }}>Edit Profile & Branding</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>Photo · contact info · agency logo</div>
+          </div>
+        </button>
       </div>
-      {profile?.role === "admin" && (
-        <span style={{
-          display: "inline-block", marginTop: 6, padding: "2px 8px",
-          borderRadius: 4, fontSize: 9, letterSpacing: "0.1em",
-          textTransform: "uppercase", fontWeight: 600,
-          background: "rgba(201,168,76,0.15)", color: "#c9a84c",
-          border: "1px solid rgba(201,168,76,0.3)",
-        }}>Admin</span>
-      )}
-      <div style={{ height: 1, background: "#2A2A2A", margin: "12px 0" }} />
-      <button onClick={() => { setShowEditProfile(true); setShowProfile(false); }} style={{
-        width: "100%", padding: "10px 0", borderRadius: 8, border: "1px solid rgba(201,168,76,0.2)",
-        background: "rgba(201,168,76,0.06)", color: "#c9a84c",
-        fontFamily: "'Jost', sans-serif", fontSize: 12, cursor: "pointer",
-        fontWeight: 500, letterSpacing: "0.04em", marginBottom: 8,
-      }}>✎ Edit Profile & Branding</button>
-      <button onClick={signOut} style={{
-        width: "100%", padding: "10px 0", borderRadius: 8, border: "none",
-        background: "rgba(239,68,68,0.1)", color: "#f87171",
-        fontFamily: "'Jost', sans-serif", fontSize: 12, cursor: "pointer",
-        fontWeight: 500, letterSpacing: "0.04em",
-      }}>Sign Out</button>
+
+      {/* Sign out */}
+      <div style={{ padding: "6px 12px 12px" }}>
+        <button onClick={signOut} style={{
+          width: "100%", padding: "10px 14px", borderRadius: 9, border: "none",
+          background: "rgba(239,68,68,0.08)", color: "#f87171",
+          fontFamily: "'Jost', sans-serif", fontSize: 12, cursor: "pointer",
+          fontWeight: 500, letterSpacing: "0.04em", textAlign: "center",
+        }}>Sign Out</button>
+      </div>
     </div>
   );
 
