@@ -2432,21 +2432,7 @@ function MicrositePreview({ data, theme }) {
             marginBottom: 40,
             "@media (maxWidth: 768px)": { flexDirection: "column", textAlign: "center" },
           }}>
-            <div style={{
-              width: 80,
-              height: 80,
-              borderRadius: "50%",
-              background: `linear-gradient(135deg, ${t.accent}, ${t.accent}99)`,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 32,
-              fontWeight: 700,
-              color: isLight ? "#fff" : t.bg,
-              flexShrink: 0,
-            }}>
-              {(data.agentName || "JD").split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
-            </div>
+            {agentAvatar(80, t.accent, isLight ? "#fff" : t.bg)}
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 24, color: t.text, marginBottom: 4, fontWeight: 600 }}>
                 {data.agentName || "Jane Doe"}
@@ -4112,6 +4098,7 @@ function PublicMicrosite() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeSection, setActiveSection] = useState("photos");
   const [prestigeMediaTab, setPrestigeMediaTab] = useState(null);
+  const [agentBranding, setAgentBranding] = useState(null);
 
   const photoRef = useRef(null);
   const floorplanRef = useRef(null);
@@ -4151,6 +4138,16 @@ function PublicMicrosite() {
         if (pd.video_url) setVideoUrl(pd.video_url);
         if (pd.floorplan_url) setFloorplanUrl(pd.floorplan_url);
 
+        // Fetch agent branding (logo, agency name, profile photo)
+        if (msData.agent_id) {
+          const { data: ab } = await supabase
+            .from("agents")
+            .select("full_name, agency_name, agency_logo_url, profile_photo_url")
+            .eq("id", msData.agent_id)
+            .single();
+          if (ab) setAgentBranding(ab);
+        }
+
         setLoading(false);
       } catch (err) {
         setError("Error loading microsite");
@@ -4166,6 +4163,60 @@ function PublicMicrosite() {
   const hasFloorplan = !!(floorplanUrl || data.floorplan_url);
   const hasVideo = !!(videoUrl || data.video_url);
   const hasTour = !!data.matterport_url;
+  // ── Agent branding helper ───────────────────────────────────────────────
+  // Returns the correct brand mark for nav/footer based on agent's profile:
+  //   logo image → agency name text → Milestone Media fallback
+  const brandMark = (accentColor = "#C9A84C", subColor = "rgba(255,255,255,0.35)") => {
+    if (agentBranding?.agency_logo_url) {
+      return (
+        <img
+          src={agentBranding.agency_logo_url}
+          alt="Agency Logo"
+          style={{ height: 34, maxWidth: 160, objectFit: "contain" }}
+        />
+      );
+    }
+    if (agentBranding?.agency_name) {
+      return (
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 15, fontWeight: 700, color: accentColor, letterSpacing: "0.08em" }}>
+          {agentBranding.agency_name}
+        </div>
+      );
+    }
+    return (
+      <>
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 15, fontWeight: 700, color: accentColor, letterSpacing: "0.08em" }}>MILESTONE MEDIA</div>
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: subColor, letterSpacing: "0.06em" }}>& Photography</div>
+      </>
+    );
+  };
+
+  // ── Agent avatar helper ─────────────────────────────────────────────────
+  // Returns a profile photo <img> or initial-based fallback circle
+  const agentAvatar = (size, accentColor, textColor) => {
+    const name = agentBranding?.full_name || "Agent";
+    const initials = name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase();
+    if (agentBranding?.profile_photo_url) {
+      return (
+        <img
+          src={agentBranding.profile_photo_url}
+          alt={name}
+          style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}
+        />
+      );
+    }
+    return (
+      <div style={{
+        width: size, height: size, borderRadius: "50%", flexShrink: 0,
+        background: `linear-gradient(135deg, ${accentColor}, ${accentColor}99)`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: size * 0.38, fontWeight: 700, color: textColor,
+      }}>
+        {initials}
+      </div>
+    );
+  };
+
   const isPrestige = microsite?.theme === "Prestige";
 
   const sections = isPrestige ? [
@@ -4317,8 +4368,7 @@ function PublicMicrosite() {
           padding: "16px 32px", display: "flex", justifyContent: "space-between", alignItems: "center",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 15, fontWeight: 700, color: "#C9A84C", letterSpacing: "0.08em" }}>MILESTONE MEDIA</div>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.35)", letterSpacing: "0.06em" }}>& Photography</div>
+            {brandMark("#C9A84C", "rgba(255,255,255,0.35)")}
           </div>
           <div style={{ display: "flex", gap: 32 }}>
             {sections.map(s => (
@@ -4506,9 +4556,7 @@ function PublicMicrosite() {
             </div>
             {agentName && (
               <div style={{ background: "rgba(255,255,255,0.05)", padding: 32, borderRadius: 8, border: "1px solid rgba(201,168,76,0.15)", display: "flex", alignItems: "center", gap: 20, marginBottom: 40 }}>
-                <div style={{ width: 80, height: 80, borderRadius: "50%", background: "linear-gradient(135deg, #C9A84C, #C9A84Caa)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, fontWeight: 700, color: "#0f0f1a", flexShrink: 0 }}>
-                  {agentName.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
-                </div>
+                {agentAvatar(80, "#C9A84C", "#0f0f1a")}
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 24, color: "#fff", marginBottom: 4, fontWeight: 600 }}>{agentName}</div>
                   {agentPhone && <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "rgba(255,255,255,0.5)" }}>{agentPhone}</div>}
@@ -4528,8 +4576,12 @@ function PublicMicrosite() {
 
         {/* Footer */}
         <div style={{ background: "#0f0f1a", borderTop: "1px solid #C9A84C", padding: "40px 48px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "#C9A84C", fontWeight: 700, letterSpacing: "0.08em" }}>MILESTONE MEDIA</div>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.35)" }}>© 2026 Milestone Media. All rights reserved.</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {brandMark("#C9A84C", "rgba(255,255,255,0.35)")}
+          </div>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+            © {new Date().getFullYear()} {agentBranding?.agency_name || "Milestone Media"}. All rights reserved.
+          </div>
         </div>
 
         {/* Lightbox */}
@@ -4562,12 +4614,7 @@ function PublicMicrosite() {
         alignItems: "center",
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: pubT.accent, letterSpacing: "0.06em" }}>
-            MILESTONE MEDIA
-          </div>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: isDarkTheme ? "#888" : "#666", letterSpacing: "0.08em" }}>
-            Photography & Media
-          </div>
+          {brandMark(pubT.accent, isDarkTheme ? "#888" : "#666")}
         </div>
         <div style={{ display: "flex", gap: 28 }}>
           {sections.map(section => (
@@ -4984,11 +5031,11 @@ function PublicMicrosite() {
         justifyContent: "space-between",
         alignItems: "center",
       }}>
-        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: pubT.accent, fontWeight: 700, letterSpacing: "0.08em" }}>
-          MILESTONE MEDIA
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {brandMark(pubT.accent, isDarkTheme ? "#888" : "#666")}
         </div>
         <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#666" }}>
-          © 2026 Milestone Media. All rights reserved.
+          © {new Date().getFullYear()} {agentBranding?.agency_name || "Milestone Media"}. All rights reserved.
         </div>
       </div>
     </div>
@@ -7557,11 +7604,203 @@ function AdminView() {
 }
 
 // ============================================================
+// EDIT PROFILE & BRANDING MODAL
+// ============================================================
+function EditProfileModal({ onClose }) {
+  const { user, profile, fetchProfile } = useAuth();
+  const [agencyName, setAgencyName] = useState(profile?.agency_name || "");
+  const [logoFile, setLogoFile] = useState(null);
+  const [logoPreview, setLogoPreview] = useState(profile?.agency_logo_url || null);
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(profile?.profile_photo_url || profile?.avatar_url || null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const logoInputRef = useRef(null);
+  const photoInputRef = useRef(null);
+
+  const pickFile = (file, setFile, setPreview) => {
+    if (!file) return;
+    setFile(file);
+    const reader = new FileReader();
+    reader.onload = e => setPreview(e.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const uploadBranding = async (file, fileName) => {
+    const ext = file.name.split(".").pop().toLowerCase();
+    const path = `${user.id}/${fileName}.${ext}`;
+    // Upsert (overwrite if exists)
+    await supabase.storage.from("agent-branding").remove([path]).catch(() => {});
+    const { error } = await supabase.storage.from("agent-branding").upload(path, file, { contentType: file.type, upsert: true });
+    if (error) { console.error("Upload error:", error); return null; }
+    const { data } = supabase.storage.from("agent-branding").getPublicUrl(path);
+    return data?.publicUrl ? `${data.publicUrl}?t=${Date.now()}` : null;
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    const updates = { agency_name: agencyName.trim() || null };
+
+    if (logoFile) {
+      const url = await uploadBranding(logoFile, "logo");
+      if (url) updates.agency_logo_url = url;
+    }
+    if (photoFile) {
+      const url = await uploadBranding(photoFile, "photo");
+      if (url) { updates.profile_photo_url = url; updates.avatar_url = url; }
+    }
+
+    const { error } = await supabase.from("agents").update(updates).eq("id", user.id);
+    if (error) { alert("Save failed: " + error.message); setSaving(false); return; }
+    await fetchProfile(user.id);
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => { setSaved(false); onClose(); }, 1200);
+  };
+
+  const clearLogo = async () => {
+    setLogoFile(null); setLogoPreview(null);
+    await supabase.from("agents").update({ agency_logo_url: null }).eq("id", user.id);
+    await fetchProfile(user.id);
+  };
+
+  const inputSt = {
+    width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 8, padding: "12px 14px", color: "#fff",
+    fontFamily: "'Jost', sans-serif", fontSize: 13, outline: "none", boxSizing: "border-box",
+  };
+  const labelSt = {
+    fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.45)",
+    letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8, display: "block",
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 1000,
+      background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+    }} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{
+        background: "#111520", border: "1px solid rgba(201,168,76,0.2)",
+        borderRadius: 16, padding: 32, width: "100%", maxWidth: 480,
+        boxShadow: "0 32px 80px rgba(0,0,0,0.8)",
+        maxHeight: "90vh", overflowY: "auto",
+      }}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
+          <div>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: "#fff", fontWeight: 600 }}>Profile & Branding</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>Your branding replaces Milestone Media on your microsites</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", fontSize: 22, cursor: "pointer", lineHeight: 1 }}>✕</button>
+        </div>
+
+        {/* Profile Photo */}
+        <div style={{ marginBottom: 24 }}>
+          <label style={labelSt}>Profile Photo</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div style={{
+              width: 72, height: 72, borderRadius: "50%", overflow: "hidden", flexShrink: 0,
+              background: "rgba(201,168,76,0.12)", border: "2px solid rgba(201,168,76,0.3)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              {photoPreview
+                ? <img src={photoPreview} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                : <span style={{ fontSize: 28, color: "#c9a84c" }}>👤</span>
+              }
+            </div>
+            <div>
+              <input ref={photoInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => pickFile(e.target.files[0], setPhotoFile, setPhotoPreview)} />
+              <button onClick={() => photoInputRef.current?.click()} style={{
+                background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.25)",
+                color: "#c9a84c", borderRadius: 7, padding: "8px 16px", cursor: "pointer",
+                fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.06em",
+              }}>
+                {photoPreview ? "Change Photo" : "Upload Photo"}
+              </button>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.25)", marginTop: 6 }}>Appears in the contact card on your microsites</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ height: 1, background: "rgba(255,255,255,0.07)", marginBottom: 24 }} />
+
+        {/* Agency Logo */}
+        <div style={{ marginBottom: 24 }}>
+          <label style={labelSt}>Agency Logo</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <div style={{
+              width: 100, height: 56, borderRadius: 8, overflow: "hidden", flexShrink: 0,
+              background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              {logoPreview
+                ? <img src={logoPreview} alt="Logo" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", padding: 4 }} />
+                : <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.2)", textAlign: "center", padding: 4 }}>No logo</span>
+              }
+            </div>
+            <div style={{ flex: 1 }}>
+              <input ref={logoInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={e => pickFile(e.target.files[0], setLogoFile, setLogoPreview)} />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={() => logoInputRef.current?.click()} style={{
+                  background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.25)",
+                  color: "#c9a84c", borderRadius: 7, padding: "8px 16px", cursor: "pointer",
+                  fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.06em",
+                }}>
+                  {logoPreview ? "Change Logo" : "Upload Logo"}
+                </button>
+                {logoPreview && (
+                  <button onClick={clearLogo} style={{
+                    background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)",
+                    color: "#f87171", borderRadius: 7, padding: "8px 14px", cursor: "pointer",
+                    fontFamily: "'Jost', sans-serif", fontSize: 11,
+                  }}>Remove</button>
+                )}
+              </div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.25)", marginTop: 6 }}>Replaces "MILESTONE MEDIA" in nav & footer. PNG with transparent background works best.</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ height: 1, background: "rgba(255,255,255,0.07)", marginBottom: 24 }} />
+
+        {/* Agency Name (fallback if no logo) */}
+        <div style={{ marginBottom: 32 }}>
+          <label style={labelSt}>Agency Name <span style={{ color: "rgba(255,255,255,0.25)" }}>(used if no logo is uploaded)</span></label>
+          <input
+            style={inputSt}
+            value={agencyName}
+            onChange={e => setAgencyName(e.target.value)}
+            placeholder="e.g. Compass Real Estate · Keller Williams DFW"
+          />
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.25)", marginTop: 6 }}>
+            If no logo is uploaded, this text replaces "MILESTONE MEDIA" on your microsites.
+          </div>
+        </div>
+
+        {/* Save */}
+        <button onClick={handleSave} disabled={saving || saved} style={{
+          width: "100%", padding: "14px 0", borderRadius: 10, border: "none", cursor: saving || saved ? "not-allowed" : "pointer",
+          background: saved ? "rgba(74,222,128,0.2)" : "linear-gradient(135deg, #C9A84C 0%, #e8c97a 100%)",
+          color: saved ? "#4ade80" : "#0a1628",
+          fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: "0.1em", textTransform: "uppercase",
+          border: saved ? "1px solid rgba(74,222,128,0.4)" : "none",
+          transition: "all 0.3s",
+        }}>
+          {saved ? "✓ Saved!" : saving ? "Saving…" : "Save Branding"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // MAIN APP SHELL (responsive: desktop sidebar + mobile bottom nav)
 // ============================================================
 function AppShell() {
-  const { user, profile, signOut } = useAuth();
+  const { user, profile, signOut, fetchProfile } = useAuth();
   const [tab, setTab] = useState(0);
+  const [showEditProfile, setShowEditProfile] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
 
@@ -7619,6 +7858,12 @@ function AppShell() {
         }}>Admin</span>
       )}
       <div style={{ height: 1, background: "#2A2A2A", margin: "12px 0" }} />
+      <button onClick={() => { setShowEditProfile(true); setShowProfile(false); }} style={{
+        width: "100%", padding: "10px 0", borderRadius: 8, border: "1px solid rgba(201,168,76,0.2)",
+        background: "rgba(201,168,76,0.06)", color: "#c9a84c",
+        fontFamily: "'Jost', sans-serif", fontSize: 12, cursor: "pointer",
+        fontWeight: 500, letterSpacing: "0.04em", marginBottom: 8,
+      }}>✎ Edit Profile & Branding</button>
       <button onClick={signOut} style={{
         width: "100%", padding: "10px 0", borderRadius: 8, border: "none",
         background: "rgba(239,68,68,0.1)", color: "#f87171",
@@ -7756,6 +8001,7 @@ function AppShell() {
           </div>
         </div>
       </div>
+      {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
     );
   }
 
@@ -7824,6 +8070,7 @@ function AppShell() {
           </button>
         ))}
       </div>
+      {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
     </div>
   );
 }
