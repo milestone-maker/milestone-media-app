@@ -4383,7 +4383,7 @@ function PublicMicrosite() {
         <div style={{ position: "relative", height: "90vh", marginTop: 60 }}>
           <div style={{
             position: "absolute", inset: 0,
-            background: "linear-gradient(to top, rgba(15,15,26,0.92) 0%, rgba(15,15,26,0.45) 55%, rgba(15,15,26,0.12) 100%)",
+            background: "linear-gradient(to top, rgba(15,15,26,0.95) 0%, rgba(15,15,26,0.75) 28%, rgba(15,15,26,0.0) 52%)",
           }} />
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-end", padding: "0 48px 52px" }}>
             <div style={{ flex: 1 }}>
