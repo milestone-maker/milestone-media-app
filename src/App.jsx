@@ -894,7 +894,7 @@ function BookView() {
         console.error("Email send error (non-blocking):", emailErr);
       }
 
-      // Create & send Stripe invoice (non-blocking)
+      // Create & send Stripe invoice, then save invoice ID back to booking
       try {
         const pkgName2 = bookingMode === "package" ? PACKAGES[selectedPackage]?.name : null;
         const svcList2 = bookingMode === "individual"
@@ -908,7 +908,7 @@ function BookView() {
         ADDONS.forEach(a => {
           if (selectedAddons[a.id]) addonList2.push({ name: a.name, price: a.price * (typeof selectedAddons[a.id] === "number" ? selectedAddons[a.id] : 1) });
         });
-        await fetch("/api/create-invoice", {
+        const invoiceRes = await fetch("/api/create-invoice", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -923,6 +923,10 @@ function BookView() {
             },
           }),
         });
+        const invoiceData = await invoiceRes.json();
+        if (invoiceData.invoiceId && inserted?.id) {
+          await supabase.from("bookings").update({ stripe_invoice_id: invoiceData.invoiceId }).eq("id", inserted.id);
+        }
       } catch (invoiceErr) {
         console.error("Stripe invoice error (non-blocking):", invoiceErr);
       }
