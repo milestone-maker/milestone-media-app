@@ -5371,13 +5371,46 @@ function BookingsManagerView() {
     setMediaLoading(false);
   };
 
+  // Resize + compress a photo to max 2048×1536 and under 10 MB before upload.
+  // Videos are passed through untouched.
+  const prepareFile = (file) => new Promise((resolve) => {
+    const MAX_W = 2048, MAX_H = 1536, MAX_BYTES = 10 * 1024 * 1024, QUALITY = 0.88;
+    if (!file.type.startsWith("image/")) { resolve(file); return; }
+
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      let w = img.naturalWidth, h = img.naturalHeight;
+      const needsResize = w > MAX_W || h > MAX_H || file.size > MAX_BYTES;
+      if (!needsResize) { resolve(file); return; }
+
+      // Scale down proportionally to fit within 2048×1536
+      const ratio = Math.min(MAX_W / w, MAX_H / h, 1);
+      w = Math.round(w * ratio);
+      h = Math.round(h * ratio);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+
+      canvas.toBlob((blob) => {
+        const outName = file.name.replace(/\.[^.]+$/, ".jpg");
+        resolve(new File([blob], outName, { type: "image/jpeg" }));
+      }, "image/jpeg", QUALITY);
+    };
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(file); };
+    img.src = objectUrl;
+  });
+
   const handleFileUpload = async (files) => {
     if (!mediaModal || !files.length) return;
     setUploading(true);
     const bookingId = mediaModal.id;
 
     // Upload all files in parallel — no more waiting for each one to finish before starting the next
-    const uploadOne = async (file) => {
+    const uploadOne = async (rawFile) => {
+      const file = await prepareFile(rawFile); // resize photos to 2048×1536 / 10 MB max
       const isVideo = file.type.startsWith("video/");
       const fileType = isVideo ? "video" : "photo";
       const filePath = `${bookingId}/${Date.now()}_${Math.random().toString(36).slice(2)}_${file.name}`;
@@ -5393,7 +5426,7 @@ function BookingsManagerView() {
 
       const { error: dbErr } = await supabase.from("booking_media").insert({
         booking_id: bookingId,
-        file_name: file.name,
+        file_name: rawFile.name, // keep original filename in DB
         file_type: fileType,
         file_path: filePath,
         file_size: file.size,
