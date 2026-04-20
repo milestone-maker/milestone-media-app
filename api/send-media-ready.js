@@ -134,6 +134,7 @@ function buildMediaReadyEmail(b, invoiceUrl) {
   return {
     from:    `"${BUSINESS_NAME}" <${FROM_EMAIL}>`,
     to:      b.clientEmail,
+    bcc:     BUSINESS_EMAIL,
     replyTo: BUSINESS_EMAIL,
     subject: `Your Media is Ready — ${b.address}`,
     html,
