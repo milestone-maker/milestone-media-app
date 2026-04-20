@@ -5295,8 +5295,25 @@ function BookingsManagerView() {
 
   const updateStatus = async (id, newStatus) => {
     const { error } = await supabase.from("bookings").update({ status: newStatus }).eq("id", id);
-    if (error) { console.error("Status update error:", error); alert("Failed to update status."); }
-    else { fetchBookings(); }
+    if (error) { console.error("Status update error:", error); alert("Failed to update status."); return; }
+    if (newStatus === "completed") {
+      const booking = bookings.find(b => b.id === id);
+      if (booking?.client_email) {
+        fetch("/api/send-media-ready", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ booking: {
+            clientName: booking.client_name,
+            clientEmail: booking.client_email,
+            address: booking.address,
+            city: booking.city,
+            invoicePaid: booking.invoice_paid,
+            stripeInvoiceId: booking.stripe_invoice_id,
+          }}),
+        }).catch(err => console.error("Media ready email error:", err));
+      }
+    }
+    fetchBookings();
     setCancelConfirm(null);
   };
 
