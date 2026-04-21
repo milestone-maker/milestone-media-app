@@ -5280,8 +5280,12 @@ function BookingsManagerView() {
         .eq("client_email", user.email).is("agent_id", null)
         .order("created_at", { ascending: false });
 
+      // Fetch bookings where this user is a CC'd assistant/collaborator
+      const { data: ccData } = await supabase.from("bookings").select("*")
+        .eq("cc_email", user.email).order("created_at", { ascending: false });
+
       // Merge and deduplicate
-      const combined = [...(ownData || []), ...(emailData || [])];
+      const combined = [...(ownData || []), ...(emailData || []), ...(ccData || [])];
       allBookings = combined.filter((b, i, arr) => arr.findIndex(x => x.id === b.id) === i);
 
       // Auto-claim unclaimed email-matched bookings (link agent_id silently)
