@@ -6433,10 +6433,16 @@ function BookingsManagerView() {
           {b.status === "completed" && (
             <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
               {isAdmin && (
-                <button onClick={() => openMediaModal(b)} style={{
-                  ...btnBase,
-                  background: "rgba(155,89,182,0.12)", border: "1px solid rgba(155,89,182,0.3)", color: "#9b59b6",
-                }}>Upload Media</button>
+                <>
+                  <button onClick={() => openMediaModal(b)} style={{
+                    ...btnBase,
+                    background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.3)", color: "#c9a84c",
+                  }}>View Media</button>
+                  <button onClick={() => openMediaModal(b)} style={{
+                    ...btnBase,
+                    background: "rgba(155,89,182,0.12)", border: "1px solid rgba(155,89,182,0.3)", color: "#9b59b6",
+                  }}>Upload Media</button>
+                </>
               )}
             </div>
           )}
