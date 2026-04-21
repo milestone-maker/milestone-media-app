@@ -5223,6 +5223,8 @@ function BookingsManagerView() {
   const [tourUrl, setTourUrl] = useState("");
   const [tourLabel, setTourLabel] = useState("");
   const [dragOver, setDragOver] = useState(false);
+  // Cache signed URLs keyed by filePath → { url, expiresAt }
+  const signedUrlCache = useRef({});
   const [zipProgress, setZipProgress] = useState(null); // null | { done, total }
   const [selectMode, setSelectMode] = useState(false);
   const [selectedMedia, setSelectedMedia] = useState(new Set());
@@ -5366,30 +5368,31 @@ function BookingsManagerView() {
 
       const allFilePaths = [...photoPaths, ...videoPaths];
 
-      // Two batch calls in parallel:
-      // 1. Thumbnail signed URLs (160×160 cover crop) — for photo grid display
-      // 2. Full-size signed URLs — stored so downloads work without a second round-trip
-      const [thumbResult, fullResult] = await Promise.all([
-        photoPaths.length > 0
-          ? supabase.storage.from("booking-media").createSignedUrls(photoPaths, 3600, {
-              transform: { width: 160, height: 160, resize: "cover" },
-            })
-          : { data: [] },
-        allFilePaths.length > 0
-          ? supabase.storage.from("booking-media").createSignedUrls(allFilePaths, 3600)
-          : { data: [] },
-      ]);
+      // Only fetch thumbnail URLs on load — full-size URLs are generated on demand
+      // (single download) or lazily batched (download all). This cuts load time in half.
+      const now = Date.now();
+      const uncachedPhotoPaths = photoPaths.filter(p => {
+        const c = signedUrlCache.current[p + "__thumb"];
+        return !c || c.expiresAt < now;
+      });
 
-      const thumbMap = {};
-      thumbResult.data?.forEach(s => { if (s.signedUrl) thumbMap[s.path] = s.signedUrl; });
-      const fullMap = {};
-      fullResult.data?.forEach(s => { if (s.signedUrl) fullMap[s.path] = s.signedUrl; });
+      if (uncachedPhotoPaths.length > 0) {
+        const thumbResult = await supabase.storage.from("booking-media").createSignedUrls(
+          uncachedPhotoPaths, 3600, { transform: { width: 300, height: 300, resize: "cover" } }
+        );
+        thumbResult.data?.forEach(s => {
+          if (s.signedUrl) signedUrlCache.current[s.path + "__thumb"] = { url: s.signedUrl, expiresAt: now + 3500000 };
+        });
+      }
 
-      setMediaFiles(data.map(item => ({
-        ...item,
-        signed_url: item.file_path ? (fullMap[item.file_path] || null) : null,
-        thumb_url:  item.file_path ? (thumbMap[item.file_path] || fullMap[item.file_path] || null) : null,
-      })));
+      setMediaFiles(data.map(item => {
+        const cached = item.file_path ? signedUrlCache.current[item.file_path + "__thumb"] : null;
+        return {
+          ...item,
+          signed_url: null, // fetched on demand at download time
+          thumb_url: cached?.url || null,
+        };
+      }));
     } else {
       setMediaFiles(data || []);
     }
@@ -5513,9 +5516,11 @@ function BookingsManagerView() {
   };
 
   const getDownloadUrl = async (filePath) => {
-    const { data } = await supabase.storage
-      .from("booking-media")
-      .createSignedUrl(filePath, 3600); // 1 hour expiry
+    const now = Date.now();
+    const cached = signedUrlCache.current[filePath];
+    if (cached && cached.expiresAt > now) return cached.url;
+    const { data } = await supabase.storage.from("booking-media").createSignedUrl(filePath, 3600);
+    if (data?.signedUrl) signedUrlCache.current[filePath] = { url: data.signedUrl, expiresAt: now + 3500000 };
     return data?.signedUrl;
   };
 
@@ -5558,6 +5563,17 @@ function BookingsManagerView() {
     setZipProgress({ done: 0, total: totalFiles });
     const zip = new JSZip();
     const addressSlug = buildAddressSlug(mediaModal);
+
+    // Pre-fetch all full-size signed URLs in one batch call before zipping
+    const allPaths = [...photos, ...videos].map(m => m.file_path).filter(Boolean);
+    const now = Date.now();
+    const uncached = allPaths.filter(p => { const c = signedUrlCache.current[p]; return !c || c.expiresAt < now; });
+    if (uncached.length > 0) {
+      const { data: batchUrls } = await supabase.storage.from("booking-media").createSignedUrls(uncached, 3600);
+      batchUrls?.forEach(s => {
+        if (s.signedUrl) signedUrlCache.current[s.path] = { url: s.signedUrl, expiresAt: now + 3500000 };
+      });
+    }
 
     // ── Photos → Photos_MLS/ with sequential MLS naming ──────────────────
     if (photos.length > 0) {
