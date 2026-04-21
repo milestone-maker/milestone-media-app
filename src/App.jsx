@@ -5228,6 +5228,8 @@ function BookingsManagerView() {
   const [zipProgress, setZipProgress] = useState(null); // null | { done, total }
   const [selectMode, setSelectMode] = useState(false);
   const [selectedMedia, setSelectedMedia] = useState(new Set());
+  const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [lightboxUrl, setLightboxUrl] = useState(null);
   const fileInputRef = useRef(null);
   // Photo reorder drag state
   const dragPhotoIdx = useRef(null);
@@ -5524,6 +5526,36 @@ function BookingsManagerView() {
     return data?.signedUrl;
   };
 
+  const openLightbox = async (index) => {
+    const photos = mediaFiles.filter(m => m.file_type === "photo");
+    if (!photos[index]) return;
+    setLightboxIndex(index);
+    setLightboxUrl(null); // show spinner while loading
+    const url = await getDownloadUrl(photos[index].file_path);
+    setLightboxUrl(url);
+  };
+
+  const lightboxNav = async (dir) => {
+    const photos = mediaFiles.filter(m => m.file_type === "photo");
+    const next = (lightboxIndex + dir + photos.length) % photos.length;
+    setLightboxIndex(next);
+    setLightboxUrl(null);
+    const url = await getDownloadUrl(photos[next].file_path);
+    setLightboxUrl(url);
+  };
+
+  // Keyboard nav for lightbox
+  useEffect(() => {
+    if (lightboxIndex === null) return;
+    const onKey = (e) => {
+      if (e.key === "ArrowRight") lightboxNav(1);
+      else if (e.key === "ArrowLeft") lightboxNav(-1);
+      else if (e.key === "Escape") setLightboxIndex(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxIndex, lightboxUrl]);
+
   const downloadSingleFile = async (media) => {
     const url = await getDownloadUrl(media.file_path);
     if (!url) return alert("Could not get download link. Please try again.");
@@ -5703,7 +5735,7 @@ function BookingsManagerView() {
   if (mediaModal) {
     const photos = mediaFiles.filter(m => m.file_type === "photo");
     const videos = mediaFiles.filter(m => m.file_type === "video");
-    const tours = mediaFiles.filter(m => m.file_type === "3d_tour");
+    const tours  = mediaFiles.filter(m => m.file_type === "3d_tour");
     const mediaCount = mediaFiles.length;
     const canDownload = isAdmin || mediaModal.invoice_paid;
 
@@ -6008,7 +6040,8 @@ function BookingsManagerView() {
                         decoding="async"
                         width={80}
                         height={80}
-                        style={{ ...thumbSt, display: "block", opacity: selectMode && selectedMedia.has(p.id) ? 0.75 : 1 }}
+                        onClick={() => !selectMode && openLightbox(idx)}
+                        style={{ ...thumbSt, display: "block", opacity: selectMode && selectedMedia.has(p.id) ? 0.75 : 1, cursor: selectMode ? "default" : "zoom-in" }}
                         draggable={false}
                       />
                       <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 4, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -6155,6 +6188,58 @@ function BookingsManagerView() {
             )}
           </>
         )}
+
+        {/* ── Lightbox ── */}
+        {lightboxIndex !== null && (() => {
+          const photo = photos[lightboxIndex];
+          return (
+            <div
+              onClick={() => setLightboxIndex(null)}
+              style={{
+                position: "fixed", inset: 0, zIndex: 9999,
+                background: "rgba(0,0,0,0.92)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+            >
+              {/* Prev */}
+              <button onClick={e => { e.stopPropagation(); lightboxNav(-1); }} style={{
+                position: "absolute", left: 20, top: "50%", transform: "translateY(-50%)",
+                background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
+                borderRadius: "50%", width: 48, height: 48, fontSize: 22, color: "#fff",
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              }}>‹</button>
+
+              {/* Image */}
+              <div onClick={e => e.stopPropagation()} style={{ maxWidth: "90vw", maxHeight: "90vh", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+                {lightboxUrl ? (
+                  <img src={lightboxUrl} alt={photo?.file_name}
+                    style={{ maxWidth: "88vw", maxHeight: "82vh", objectFit: "contain", borderRadius: 8, boxShadow: "0 8px 40px rgba(0,0,0,0.6)" }} />
+                ) : (
+                  <div style={{ width: 60, height: 60, border: "3px solid rgba(201,168,76,0.4)", borderTopColor: "#c9a84c", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+                )}
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.5)", textAlign: "center" }}>
+                  {lightboxIndex + 1} / {photos.length} &nbsp;·&nbsp; {photo?.file_name}
+                </div>
+              </div>
+
+              {/* Next */}
+              <button onClick={e => { e.stopPropagation(); lightboxNav(1); }} style={{
+                position: "absolute", right: 20, top: "50%", transform: "translateY(-50%)",
+                background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
+                borderRadius: "50%", width: 48, height: 48, fontSize: 22, color: "#fff",
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              }}>›</button>
+
+              {/* Close */}
+              <button onClick={() => setLightboxIndex(null)} style={{
+                position: "absolute", top: 16, right: 16,
+                background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)",
+                borderRadius: "50%", width: 36, height: 36, fontSize: 18, color: "#fff",
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              }}>✕</button>
+            </div>
+          );
+        })()}
       </div>
     );
   }
