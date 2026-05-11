@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
-import { PACKAGES, SQFT_TIERS, ESSENTIAL_PRICING, INDIVIDUAL_SERVICES, ADDONS } from "../../App";
+import { useAuth, PACKAGES, SQFT_TIERS, ESSENTIAL_PRICING, INDIVIDUAL_SERVICES, ADDONS } from "../../App";
 
 function BookView() {
+  const { user } = useAuth();
   // ── State ──
   const [step, setStep] = useState(1);
   const [bookingMode, setBookingMode] = useState(null); // "package" | "individual"
@@ -141,7 +142,7 @@ function BookView() {
         client_name: clientName,
         client_email: clientEmail,
         client_phone: clientPhone || null,
-        address, city, state: st, zip,
+        address, city, state, zip,
         sqft_tier: sqftTier,
         access_method: accessMethod || "lockbox",
         booking_mode: bookingMode,
@@ -172,8 +173,8 @@ function BookView() {
         const pkgName = bookingMode === "package" ? PACKAGES[selectedPackage]?.name : null;
         const svcList = bookingMode === "individual"
           ? Object.keys(selectedServices).filter(k => selectedServices[k]).map(k => {
-              const svc = SERVICES.find(s => s.id === k);
-              return svc ? { name: svc.name, price: svc.tiers?.[sqftTier] || svc.price || 0 } : null;
+              const svc = INDIVIDUAL_SERVICES[k];
+              return svc ? { name: svc.name, price: svc.priceByTier?.[sqftTier] || svc.fixedPrice || 0 } : null;
             }).filter(Boolean)
           : (bookingMode === "package" && PACKAGES[selectedPackage]
               ? PACKAGES[selectedPackage].features.map(f => ({ name: f, price: 0 }))
@@ -187,7 +188,7 @@ function BookView() {
             clientName, clientEmail, clientPhone,
             agentEmail: user?.email,
             agentName: user?.user_metadata?.name || user?.email,
-            address: `${address}, ${city}, ${st} ${zip}`,
+            address: `${address}, ${city}, ${state} ${zip}`,
             sqftTier, accessMethod,
             date: selectedDate, time: selectedTime,
             packageName: pkgName,
@@ -224,7 +225,7 @@ function BookView() {
           body: JSON.stringify({
             booking: {
               clientName, clientEmail, clientPhone,
-              address: `${address}, ${city}, ${st} ${zip}`,
+              address: `${address}, ${city}, ${state} ${zip}`,
               sqftTier, accessMethod,
               date: selectedDate, time: selectedTime,
               packageName: pkgName2,
