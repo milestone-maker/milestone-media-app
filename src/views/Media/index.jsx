@@ -2,6 +2,19 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
 import { useAuth, StatusBadge, PackageBadge, MEDIA_ICONS } from "../../App";
 
+// Maps the user-facing media-type label to its storage folder name.
+// Folder names match AdminView's upload paths so all admin uploads
+// (from either AdminView or MediaView's own upload modal) and reads
+// reference the same storage layout.
+const FOLDER_FOR_LABEL = {
+  "Photos": "photos",
+  "Drone": "drone",
+  "3D Tour": "3d-tour",
+  "Film": "video",
+  "Floor Plan": "floorplan",
+  "Twilight": "twilight",
+};
+
 function MediaView() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === "admin";
@@ -40,7 +53,7 @@ function MediaView() {
     const types = ["Photos", "Drone", "3D Tour", "Film", "Floor Plan", "Twilight"];
     const result = {};
     for (const type of types) {
-      const folder = `${listing.id}/${type.toLowerCase().replace(/\s+/g, "-")}`;
+      const folder = `${listing.id}/${FOLDER_FOR_LABEL[type]}`;
       const { data } = await supabase.storage.from("listing-media").list(folder, { limit: 100 });
       if (data && data.length > 0) {
         result[type] = data.filter(f => f.name !== ".emptyFolderPlaceholder").map(f => ({
@@ -63,7 +76,7 @@ function MediaView() {
     const files = Array.from(e.target.files);
     if (!files.length || !listing.id) return;
     setUploading(true);
-    const folder = `${listing.id}/${uploadType.toLowerCase().replace(/\s+/g, "-")}`;
+    const folder = `${listing.id}/${FOLDER_FOR_LABEL[uploadType]}`;
     let uploaded = 0;
     for (const file of files) {
       setUploadProgress(`Uploading ${uploaded + 1} of ${files.length}...`);
@@ -86,7 +99,7 @@ function MediaView() {
 
   const handleDelete = async (type, fileName) => {
     if (!listing.id) return;
-    const folder = `${listing.id}/${type.toLowerCase().replace(/\s+/g, "-")}`;
+    const folder = `${listing.id}/${FOLDER_FOR_LABEL[type]}`;
     const { error } = await supabase.storage.from("listing-media").remove([`${folder}/${fileName}`]);
     if (error) showToast(`Delete failed: ${error.message}`, "error");
     else {
