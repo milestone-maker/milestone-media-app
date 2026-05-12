@@ -7,6 +7,7 @@ import BookView from "./views/Book";
 import MediaView from "./views/Media";
 import MicrositeView from "./views/Microsite";
 import AnalyticsView from "./views/Analytics";
+import SubscriptionsView from "./views/Subscriptions";
 // Centralized pricing — see comment block below for details.
 import PRICING from "../public/pricing.json";
 
@@ -1745,7 +1746,13 @@ function EditProfileModal({ onClose }) {
 // ============================================================
 function AppShell() {
   const { user, profile, signOut, fetchProfile } = useAuth();
-  const [tab, setTab] = useState(0);
+  const [tabRaw, setTabRaw] = useState(0);
+  // Off-nav views (reachable from the profile dropdown or a URL param,
+  // not from the main nav). When set, it overrides the nav-driven view.
+  const [extraView, setExtraView] = useState(null);
+  // Wrap setTab so any nav-driven navigation clears the off-nav view.
+  const setTab = (n) => { setTabRaw(n); setExtraView(null); };
+  const tab = tabRaw;
   const [showEditProfile, setShowEditProfile] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
@@ -1754,6 +1761,14 @@ function AppShell() {
     const handleResize = () => setIsDesktop(window.innerWidth >= 768);
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  // If we land here via a Stripe-redirect URL (?subscription=...), open
+  // the Subscriptions view on mount so the user sees the success / cancel
+  // banner without having to navigate.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("subscription")) setExtraView("Subscriptions");
   }, []);
 
   const handleBook = () => setTab(1);
@@ -1776,10 +1791,15 @@ function AppShell() {
     Media: <MediaView />,
     Analytics: <AnalyticsView />,
     Microsite: <MicrositeView />,
+    // Subscriptions is reachable only from the profile dropdown — not in navItems.
+    Subscriptions: <SubscriptionsView />,
     Bookings: <BookingsManagerView />,
     ...(isAdmin && { Admin: <AdminView /> }),
   };
-  const activeView = viewMap[navItems[tab]?.label] ?? null;
+  // If extraView is set (off-nav route like Subscriptions), it takes precedence.
+  const activeView = extraView
+    ? (viewMap[extraView] ?? null)
+    : (viewMap[navItems[tab]?.label] ?? null);
 
   const ProfileDropdown = showProfile && (
     <div style={{
@@ -1836,6 +1856,26 @@ function AppShell() {
           <div>
             <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", fontWeight: 600, letterSpacing: "0.03em" }}>Edit Profile & Branding</div>
             <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>Photo · contact info · agency logo</div>
+          </div>
+        </button>
+      </div>
+
+      {/* Subscriptions */}
+      <div style={{ padding: "0 12px 6px" }}>
+        <button
+          onClick={() => { setExtraView("Subscriptions"); setShowProfile(false); }}
+          style={{
+            width: "100%", padding: "11px 14px", borderRadius: 9,
+            border: "1px solid rgba(201,168,76,0.18)",
+            background: "rgba(201,168,76,0.04)",
+            display: "flex", alignItems: "center", gap: 10,
+            cursor: "pointer", textAlign: "left",
+          }}
+        >
+          <span style={{ fontSize: 16 }}>◈</span>
+          <div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", fontWeight: 600, letterSpacing: "0.03em" }}>Subscriptions</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>Manage plan · billing · invoices</div>
           </div>
         </button>
       </div>
