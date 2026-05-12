@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
-import { StatusBadge } from "../../App";
+import { StatusBadge } from "../../lib/ui";
 
 function AnalyticsView() {
   const [analyticsListings, setAnalyticsListings] = useState([]);

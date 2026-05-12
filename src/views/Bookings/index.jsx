@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../../supabaseClient";
-import { useAuth } from "../../App";
+import { useAuth } from "../../lib/auth";
 
 // ============================================================
 // BOOKINGS MANAGER VIEW — View & manage all bookings

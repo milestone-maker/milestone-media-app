@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../../supabaseClient";
-import { useAuth, PRICING } from "../../App";
+import { useAuth } from "../../lib/auth";
+import { PRICING } from "../../lib/pricing";
 
 // ──────────────────────────────────────────────────────────────────────
 // Subscriptions view

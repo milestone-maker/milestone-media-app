@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
-import { useAuth, PACKAGES, SQFT_TIERS, ESSENTIAL_PRICING, INDIVIDUAL_SERVICES, ADDONS } from "../../App";
+import { useAuth } from "../../lib/auth";
+import { PACKAGES, SQFT_TIERS, ESSENTIAL_PRICING, INDIVIDUAL_SERVICES, ADDONS } from "../../lib/pricing";
 
 // Subscription statuses considered "active" for credit purposes.
 // Matches ACTIVE_STATUSES in Subscriptions/index.jsx and the server endpoint.

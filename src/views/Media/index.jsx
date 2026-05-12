@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
-import { useAuth, StatusBadge, PackageBadge, MEDIA_ICONS } from "../../App";
+import { useAuth } from "../../lib/auth";
+import { StatusBadge, PackageBadge, MEDIA_ICONS } from "../../lib/ui";
 
 // Maps the user-facing media-type label to its storage folder name.
 // Folder names match AdminView's upload paths so all admin uploads

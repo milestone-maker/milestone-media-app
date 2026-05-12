@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
-import { useAuth } from "../../App";
+import { useAuth } from "../../lib/auth";
 
 // ADMIN VIEW — Property Creation & Management
 // ============================================================

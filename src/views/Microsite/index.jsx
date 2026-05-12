@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../../supabaseClient";
-import { useAuth, MEDIA_ICONS, THEMES, ADDONS } from "../../App";
+import { useAuth } from "../../lib/auth";
+import { MEDIA_ICONS, THEMES } from "../../lib/ui";
+import { ADDONS } from "../../lib/pricing";
 
 // Microsite add-on price, sourced from the central pricing config
 const MICROSITE_ADDON_PRICE = ADDONS.find(a => a.id === "microsite")?.price ?? 0;
