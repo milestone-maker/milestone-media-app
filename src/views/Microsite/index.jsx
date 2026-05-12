@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../../supabaseClient";
-import { useAuth, MEDIA_ICONS, THEMES } from "../../App";
+import { useAuth, MEDIA_ICONS, THEMES, ADDONS } from "../../App";
+
+// Microsite add-on price, sourced from the central pricing config
+const MICROSITE_ADDON_PRICE = ADDONS.find(a => a.id === "microsite")?.price ?? 0;
 
 function MicrositePreview({ data, theme }) {
   const t = theme;
@@ -1927,7 +1930,7 @@ function MicrositeView() {
             Unlock Your Property Microsite
           </div>
           <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.6, maxWidth: 420, margin: "0 auto 20px" }}>
-            Your {activePackage || "current"} package doesn't include a microsite. Add one for just <span style={{ color: "#c9a84c", fontWeight: 600 }}>$150</span> to give your listing a branded, shareable property page with lead capture.
+            Your {activePackage || "current"} package doesn't include a microsite. Add one for just <span style={{ color: "#c9a84c", fontWeight: 600 }}>${MICROSITE_ADDON_PRICE}</span> to give your listing a branded, shareable property page with lead capture.
           </div>
           {sourceType === "listing" && (
             <>
@@ -1957,7 +1960,7 @@ function MicrositeView() {
                   letterSpacing: "0.1em", textTransform: "uppercase", color: "#0a1628",
                   cursor: "pointer", transition: "all 0.3s",
                 }}>
-                  Add Microsite — $150
+                  Add Microsite — ${MICROSITE_ADDON_PRICE}
                 </button>
               )}
             </>

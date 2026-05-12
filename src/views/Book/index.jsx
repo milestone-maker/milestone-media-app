@@ -91,8 +91,7 @@ function BookView() {
     let total = 0;
     if (bookingMode === "package") {
       if (selectedPackage === 0 && sqftTier) total += ESSENTIAL_PRICING[sqftTier] || 0;
-      else if (selectedPackage === 1) total += 549;
-      else if (selectedPackage === 2) total += 1095;
+      else if (selectedPackage !== null) total += PACKAGES[selectedPackage]?.priceValue || 0;
     } else if (bookingMode === "individual") {
       Object.keys(selectedServices).forEach(key => {
         if (selectedServices[key]) {
@@ -628,7 +627,7 @@ function BookView() {
                     {PACKAGES[selectedPackage].name} Package
                   </span>
                   <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#c9a84c", fontWeight: 600 }}>
-                    ${selectedPackage === 0 ? (ESSENTIAL_PRICING[sqftTier] || 0) : selectedPackage === 1 ? 549 : 1095}
+                    ${selectedPackage === 0 ? (ESSENTIAL_PRICING[sqftTier] || 0) : (PACKAGES[selectedPackage]?.priceValue || 0)}
                   </span>
                 </div>
               )}

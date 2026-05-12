@@ -7,103 +7,32 @@ import BookView from "./views/Book";
 import MediaView from "./views/Media";
 import MicrositeView from "./views/Microsite";
 import AnalyticsView from "./views/Analytics";
+// Centralized pricing — see comment block below for details.
+import PRICING from "../public/pricing.json";
 
 const NAV = ["Showcase", "Book", "My Media", "Analytics"];
 
 // LISTINGS and RELA_PHOTOS removed — all listing data now fetched from Supabase
 
-export const PACKAGES = [
-  {
-    name: "Essential",
-    price: "Pricing depends on square footage",
-    color: "#8fa3b1",
-    features: ["Professional Photography", "3D Virtual Tour with Floor Plan"],
-    desc: "Crystal-clear stills that stop the scroll.",
-  },
-  {
-    name: "Signature",
-    price: "$549",
-    color: "#c9a84c",
-    features: ["Everything in Essential +", "Drone Photos & Video", "Social Media Reels"],
-    desc: "The complete digital listing presence.",
-    popular: true,
-  },
-  {
-    name: "Luxury",
-    price: "$1,095",
-    color: "#e5c97e",
-    features: ["Everything +", "Cinematic Film", "Custom Domain Microsite", "Twilight Photos"],
-    desc: "The full cinematic experience.",
-  },
-];
-
 // ============================================================
-// PRICING DATA — pulled from Rela HQ
+// PRICING DATA — centralized in /public/pricing.json
+// This file is the single source of truth for every package, square-footage
+// tier, individual service, add-on, subscription, and promo amount in the
+// business. App.jsx imports it and re-exports the same names so existing
+// callers keep working. The marketing site fetches /pricing.json at runtime.
+// To change a price: edit public/pricing.json. Do not put numbers here.
 // ============================================================
-export const SQFT_TIERS = [
-  { label: "Under 1,500 sf", value: "under_1500" },
-  { label: "1,501 – 2,500 sf", value: "1501_2500" },
-  { label: "2,501 – 3,500 sf", value: "2501_3500" },
-  { label: "3,501 – 4,500 sf", value: "3501_4500" },
-  { label: "Over 4,501 sf", value: "over_4501" },
-];
 
-export const ESSENTIAL_PRICING = {
-  under_1500: 185, "1501_2500": 205, "2501_3500": 225, "3501_4500": 250, over_4501: 275,
-};
-
-export const INDIVIDUAL_SERVICES = {
-  photography: {
-    name: "Still Photography",
-    desc: "Premium HDR Listing Photos (Interior & Exterior): 30+ professionally edited images.",
-    icon: "📷",
-    priceByTier: { under_1500: 110, "1501_2500": 130, "2501_3500": 150, "3501_4500": 175, over_4501: 200 },
-  },
-  matterport: {
-    name: "Matterport 3D Tour",
-    desc: "Immersive, self-guided 3D walkthrough. Dollhouse view, floor plans & room navigation included.",
-    icon: "🔮",
-    priceByTier: { under_1500: 200, "1501_2500": 250, "2501_3500": 300, "3501_4500": 350, over_4501: 400 },
-  },
-  zillow3d: {
-    name: "Zillow 3D Walkthrough & Floor Plan",
-    desc: "Panoramic 3D tour integrated with high-resolution downloadable floor plans.",
-    icon: "📐",
-    fixedPrice: 100,
-  },
-  aerialVideo: {
-    name: "Aerial Video",
-    desc: "Captivating aerial video (up to 2 min) of the home's exterior and surrounding area.",
-    icon: "🚁",
-    fixedPrice: 200,
-  },
-  aerialPhotos: {
-    name: "Aerial Photos",
-    desc: "5-10 aerial photos showcasing the home's exterior, yard, and neighborhood.",
-    icon: "🛩️",
-    fixedPrice: 125,
-  },
-  socialVideo: {
-    name: "Social Media Listing Video",
-    desc: "Dynamic 30-second mobile-friendly reel optimized for social media.",
-    icon: "🎬",
-    fixedPrice: 125,
-  },
-  cinematicFilm: {
-    name: "Cinematic Film",
-    desc: "Full cinematic property film with professional editing and music.",
-    icon: "🎥",
-    fixedPrice: 400,
-  },
-};
-
-export const ADDONS = [
-  { id: "microsite", name: "Custom Property Microsite", price: 150, icon: "🌐", desc: "Custom-designed property website showcasing your listing." },
-  { id: "amenities", name: "Amenities Photography", price: 20, unit: "/location", icon: "🏊", desc: "Professional photos of on-site amenities (pools, clubhouses, etc.).", hasQty: true, maxQty: 5 },
-  { id: "staging1", name: "Virtual Staging — 1 Room", price: 25, icon: "🛋️", desc: "Lifelike virtual furniture for 1 room." },
-  { id: "staging2", name: "Virtual Staging — 2 Rooms", price: 50, icon: "🛋️", desc: "Lifelike virtual furniture for 2 rooms." },
-  { id: "staging3", name: "Virtual Staging — 3 Rooms", price: 75, icon: "🛋️", desc: "Lifelike virtual furniture for 3 rooms." },
-];
+export const PACKAGES = PRICING.packages;
+export const SQFT_TIERS = PRICING.sqftTiers;
+export const ESSENTIAL_PRICING = PRICING.essentialPricing;
+export const INDIVIDUAL_SERVICES = PRICING.individualServices;
+export const ADDONS = PRICING.addons;
+export const SUBSCRIPTIONS = PRICING.subscriptions;
+export const PROMOS = PRICING.promos;
+export const STRIPE_IDS = PRICING.stripeIds;
+// Full pricing object for callers that need fields not exposed individually above
+export { PRICING };
 
 export const MEDIA_ICONS = {
   Photos: "📷", Drone: "🚁", "3D Tour": "🔮", Film: "🎬",

@@ -1,0 +1,292 @@
+{
+  "$schema": "milestone-pricing-v1",
+  "lastUpdated": "2026-05-12",
+  "notes": "Single source of truth for Milestone Media pricing. Imported by the agent app at build time and fetched at runtime by the marketing site.",
+  "sqftTiers": [
+    {
+      "label": "Under 1,500 sf",
+      "value": "under_1500"
+    },
+    {
+      "label": "1,501 – 2,500 sf",
+      "value": "1501_2500"
+    },
+    {
+      "label": "2,501 – 3,500 sf",
+      "value": "2501_3500"
+    },
+    {
+      "label": "3,501 – 4,500 sf",
+      "value": "3501_4500"
+    },
+    {
+      "label": "Over 4,501 sf",
+      "value": "over_4501"
+    }
+  ],
+  "packages": [
+    {
+      "name": "Essential",
+      "price": "Pricing depends on square footage",
+      "priceValue": null,
+      "color": "#8fa3b1",
+      "features": [
+        "Professional Photography",
+        "3D Virtual Tour with Floor Plan"
+      ],
+      "desc": "Crystal-clear stills that stop the scroll."
+    },
+    {
+      "name": "Signature",
+      "price": "$549",
+      "priceValue": 549,
+      "color": "#c9a84c",
+      "features": [
+        "Everything in Essential +",
+        "Drone Photos & Video",
+        "Social Media Reels"
+      ],
+      "desc": "The complete digital listing presence.",
+      "popular": true
+    },
+    {
+      "name": "Luxury",
+      "price": "$1,095",
+      "priceValue": 1095,
+      "color": "#e5c97e",
+      "features": [
+        "Everything +",
+        "Cinematic Film",
+        "Custom Domain Microsite",
+        "Twilight Photos"
+      ],
+      "desc": "The full cinematic experience."
+    }
+  ],
+  "essentialPricing": {
+    "under_1500": 185,
+    "1501_2500": 205,
+    "2501_3500": 225,
+    "3501_4500": 250,
+    "over_4501": 275
+  },
+  "individualServices": {
+    "photography": {
+      "name": "Still Photography",
+      "desc": "Premium HDR Listing Photos (Interior & Exterior): 30+ professionally edited images.",
+      "icon": "📷",
+      "priceByTier": {
+        "under_1500": 110,
+        "1501_2500": 130,
+        "2501_3500": 150,
+        "3501_4500": 175,
+        "over_4501": 200
+      }
+    },
+    "matterport": {
+      "name": "Matterport 3D Tour",
+      "desc": "Immersive, self-guided 3D walkthrough. Dollhouse view, floor plans & room navigation included.",
+      "icon": "🔮",
+      "priceByTier": {
+        "under_1500": 200,
+        "1501_2500": 250,
+        "2501_3500": 300,
+        "3501_4500": 350,
+        "over_4501": 400
+      }
+    },
+    "zillow3d": {
+      "name": "Zillow 3D Walkthrough & Floor Plan",
+      "desc": "Panoramic 3D tour integrated with high-resolution downloadable floor plans.",
+      "icon": "📐",
+      "fixedPrice": 100
+    },
+    "aerialVideo": {
+      "name": "Aerial Video",
+      "desc": "Captivating aerial video (up to 2 min) of the home's exterior and surrounding area.",
+      "icon": "🚁",
+      "fixedPrice": 200
+    },
+    "aerialPhotos": {
+      "name": "Aerial Photos",
+      "desc": "5-10 aerial photos showcasing the home's exterior, yard, and neighborhood.",
+      "icon": "🛩️",
+      "fixedPrice": 125
+    },
+    "socialVideo": {
+      "name": "Social Media Listing Video",
+      "desc": "Dynamic 30-second mobile-friendly reel optimized for social media.",
+      "icon": "🎬",
+      "fixedPrice": 125
+    },
+    "cinematicFilm": {
+      "name": "Cinematic Film",
+      "desc": "Full cinematic property film with professional editing and music.",
+      "icon": "🎥",
+      "fixedPrice": 400
+    }
+  },
+  "addons": [
+    {
+      "id": "microsite",
+      "name": "Custom Property Microsite",
+      "price": 150,
+      "icon": "🌐",
+      "desc": "Custom-designed property website showcasing your listing."
+    },
+    {
+      "id": "amenities",
+      "name": "Amenities Photography",
+      "price": 20,
+      "unit": "/location",
+      "icon": "🏊",
+      "desc": "Professional photos of on-site amenities (pools, clubhouses, etc.).",
+      "hasQty": true,
+      "maxQty": 5
+    },
+    {
+      "id": "staging1",
+      "name": "Virtual Staging — 1 Room",
+      "price": 25,
+      "icon": "🛋️",
+      "desc": "Lifelike virtual furniture for 1 room."
+    },
+    {
+      "id": "staging2",
+      "name": "Virtual Staging — 2 Rooms",
+      "price": 50,
+      "icon": "🛋️",
+      "desc": "Lifelike virtual furniture for 2 rooms."
+    },
+    {
+      "id": "staging3",
+      "name": "Virtual Staging — 3 Rooms",
+      "price": 75,
+      "icon": "🛋️",
+      "desc": "Lifelike virtual furniture for 3 rooms."
+    }
+  ],
+  "subscriptions": [
+    {
+      "id": "starter",
+      "name": "Starter",
+      "monthlyPrice": 349,
+      "shootsPerMonth": 1,
+      "shootTier": "Essential",
+      "rolloverCap": 1,
+      "includes": [
+        "1 Essential shoot / month",
+        "Content automation",
+        "1-shoot rollover cap"
+      ]
+    },
+    {
+      "id": "pro",
+      "name": "Pro",
+      "monthlyPrice": 899,
+      "shootsPerMonth": 2,
+      "shootTier": "Signature",
+      "rolloverCap": 0,
+      "includes": [
+        "2 Signature shoots / month",
+        "Full content automation",
+        "Microsite included",
+        "Priority scheduling"
+      ]
+    },
+    {
+      "id": "elite",
+      "name": "Elite",
+      "monthlyPrice": 1899,
+      "shootsPerMonth": 4,
+      "shootTier": "Signature+Luxury mix",
+      "rolloverCap": 0,
+      "includes": [
+        "4 shoots / month (Signature + Luxury mix)",
+        "Unlimited content automation",
+        "Dedicated account management",
+        "Rush turnaround"
+      ]
+    },
+    {
+      "id": "teams",
+      "name": "Teams",
+      "monthlyPrice": null,
+      "customQuote": true,
+      "minListingsPerMonth": 8,
+      "includes": [
+        "Custom quote",
+        "For clients with 8+ listings / month"
+      ]
+    }
+  ],
+  "promos": {
+    "annualPrepay": {
+      "id": "annual_prepay",
+      "label": "Annual prepay",
+      "discountPercent": 15,
+      "appliesTo": "all_subscriptions",
+      "desc": "15% off when prepaying 12 months on any subscription tier."
+    },
+    "firstMonth": {
+      "id": "first_month_intro",
+      "label": "First month 50% off",
+      "discountPercent": 50,
+      "appliesTo": "new_subscribers",
+      "desc": "Intro offer: 50% off the first month for new subscribers."
+    },
+    "contentAutomationAlaCarte": {
+      "id": "content_alacarte",
+      "label": "Content automation — à la carte",
+      "minPrice": 75,
+      "maxPrice": 125,
+      "unit": "per listing",
+      "appliesTo": "non_subscribers",
+      "desc": "Per-listing content automation pricing for clients not on a subscription. $75–$125 per listing."
+    }
+  },
+  "stripeIds": {
+    "packages": {
+      "essential": {
+        "under_1500": "",
+        "1501_2500": "",
+        "2501_3500": "",
+        "3501_4500": "",
+        "over_4501": ""
+      },
+      "signature": "",
+      "luxury": ""
+    },
+    "addons": {
+      "microsite": "",
+      "amenities": "",
+      "staging1": "",
+      "staging2": "",
+      "staging3": ""
+    },
+    "subscriptions": {
+      "starter": "prod_UV3lAvhWiMN2nM",
+      "pro": "prod_UV3lIWAYK97RJJ",
+      "elite": "prod_UV3ltuFogeXOb0"
+    },
+    "recurringAddons": {
+      "micrositeMonthly": "",
+      "contentAutomationMonthly": ""
+    },
+    "subscriptionPrices": {
+      "monthly": {
+        "starter": "price_1TW3e4DUlxcAmitw1G15CWUn",
+        "pro": "price_1TW3e5DUlxcAmitwpnKAb4sC",
+        "elite": "price_1TW3e6DUlxcAmitwoicjzpO6"
+      },
+      "annual": {
+        "starter": "price_1TW3e4DUlxcAmitw4AooWKuR",
+        "pro": "price_1TW3e6DUlxcAmitwd33jEpbO",
+        "elite": "price_1TW3e7DUlxcAmitwlTp9ibhy"
+      }
+    },
+    "coupons": {
+      "firstMonth": "UCNSSmo5"
+    }
+  }
+}
