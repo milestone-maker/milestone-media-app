@@ -61,6 +61,7 @@ function moneyUsd(n) {
 function SubscriptionsView() {
   const { user } = useAuth();
   const [agent, setAgent] = useState(null);
+  const [creditRow, setCreditRow] = useState(null); // current period's credit_ledger row, or null
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState("monthly"); // "monthly" | "annual"
   const [redirecting, setRedirecting] = useState(false);
@@ -83,12 +84,38 @@ function SubscriptionsView() {
     return data;
   };
 
+  // ── Current-period credit row ───────────────────────────────────
+  // Returns the credit_ledger row whose period_start ≤ now ≤ period_end,
+  // or null if none exists yet (subscription just started).
+  const fetchCurrentCreditRow = async (agentId) => {
+    if (!agentId) return null;
+    const nowIso = new Date().toISOString();
+    const { data, error } = await supabase
+      .from("credit_ledger")
+      .select("id, period_start, period_end, tier_in_effect, credits_granted, credits_consumed, rollover_in")
+      .eq("agent_id", agentId)
+      .lte("period_start", nowIso)
+      .gte("period_end", nowIso)
+      .order("period_end", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.error("credit_ledger fetch error:", error);
+      return null;
+    }
+    return data;
+  };
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const a = await fetchAgent();
       if (cancelled) return;
       setAgent(a);
+      if (a?.id) {
+        const cr = await fetchCurrentCreditRow(a.id);
+        if (!cancelled) setCreditRow(cr);
+      }
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -118,6 +145,8 @@ function SubscriptionsView() {
           clearInterval(pollIntervalRef.current);
           pollIntervalRef.current = null;
           setAgent(a);
+          const cr = await fetchCurrentCreditRow(a.id);
+          setCreditRow(cr);
           setBanner({ type: "success", text: "You're subscribed! Your plan is active." });
         }
       }, 2000);
@@ -304,6 +333,70 @@ function SubscriptionsView() {
             )}
           </div>
         </div>
+
+        {/* ── Credits panel ─────────────────────────────────────────── */}
+        {agent.subscription_status === "past_due" && (
+          <div style={{
+            background: "rgba(245,158,11,0.08)",
+            border: "1px solid rgba(245,158,11,0.35)",
+            borderRadius: 10,
+            padding: "12px 16px",
+            marginBottom: 14,
+            fontFamily: "'Jost', sans-serif",
+            fontSize: 12,
+            color: "#f59e0b",
+            lineHeight: 1.5,
+          }}>
+            ⚠ Payment failed on your last billing cycle. Your credits are still usable for now,
+            but they will become unavailable if the issue isn't resolved. Update your payment
+            method in the billing portal.
+          </div>
+        )}
+
+        {(() => {
+          // Three sub-states inside the active view:
+          //   1. creditRow exists       → show real numbers
+          //   2. no creditRow yet       → show tier allowance muted with "first cycle" note
+          //   3. tier has no allowance  → don't bother (Teams falls here)
+          const tierAllowanceMap = { starter: 1, pro: 2, elite: 4 };
+          const baseAllowance = tierAllowanceMap[agent.subscription_tier] ?? 0;
+          if (!creditRow && baseAllowance === 0) return null;
+
+          const granted = creditRow ? creditRow.credits_granted : baseAllowance;
+          const consumed = creditRow ? creditRow.credits_consumed : 0;
+          const remaining = Math.max(0, granted - consumed);
+          const hasRealRow = !!creditRow;
+
+          return (
+            <div style={{
+              background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 14,
+              padding: 24,
+              marginBottom: 20,
+              opacity: hasRealRow ? 1 : 0.7,
+            }}>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 10 }}>
+                Shoots remaining this period
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 8 }}>
+                <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 56, color: "#c9a84c", fontWeight: 700, lineHeight: 1 }}>
+                  {remaining}
+                </span>
+                <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.5)" }}>
+                  of {granted} total this period
+                </span>
+              </div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>
+                Renews on {formatRenewDate(agent.current_period_end)}
+              </div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>
+                Each booking uses one credit at or below your tier's level.
+                {!hasRealRow && " Credits will appear here after your first billing cycle completes."}
+              </div>
+            </div>
+          );
+        })()}
 
         <button onClick={handleManage} disabled={redirecting} style={{
           width: "100%",

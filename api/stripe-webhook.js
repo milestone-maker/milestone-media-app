@@ -28,6 +28,7 @@
 
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
+import { grantCreditsFromInvoice, handleTierChange } from "./_lib/credits.js";
 
 // Must disable Vercel's body parser so we can verify the raw Stripe signature
 export const config = {
@@ -203,6 +204,11 @@ async function handleSubscriptionCreatedOrUpdated(supabase, subscription, label)
     patch.subscription_started_at = epochToIso(subscription.start_date || subscription.created);
   }
   await updateAgentByCustomerId(supabase, subscription.customer, patch, label);
+
+  // Tier-change credit adjustment (upgrade replaces current row, downgrade no-op).
+  if (label === "subscription.updated" && oldTier && newTier) {
+    await handleTierChange(supabase, subscription.customer, oldTier, newTier);
+  }
 }
 
 // customer.subscription.deleted:
@@ -229,7 +235,9 @@ async function handleSubscriptionInvoiceFailed(supabase, invoice) {
 }
 
 // invoice.payment_succeeded (subscription invoice):
-// status → active, refresh current_period_end from the invoice's period.
+// status → active, refresh current_period_end from the invoice's period,
+// THEN grant credits for the new billing period (idempotent — re-deliveries
+// hit the credit_ledger unique constraint and are absorbed).
 async function handleSubscriptionInvoicePaid(supabase, invoice) {
   // invoice.lines.data[0].period.end is the period this invoice covers
   const periodEndEpoch =
@@ -246,6 +254,11 @@ async function handleSubscriptionInvoicePaid(supabase, invoice) {
     patch,
     "invoice.payment_succeeded (sub)"
   );
+
+  // Grant credits for the new period. Pure helper handles tier lookup,
+  // rollover policy (Starter only, cap 1), and unique-constraint
+  // duplicate detection for re-delivered events.
+  await grantCreditsFromInvoice(supabase, invoice);
 }
 
 // ──────────────────────────────────────────────────────────────────────
