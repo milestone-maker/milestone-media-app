@@ -69,16 +69,20 @@ export default async function handler(req, res) {
     }
     const authUser = authData.user;
 
-    // ── 2. Resolve agent profile (for role) ──
+    // ── 2. Resolve agent profile (for role + subscription state) ──
     const { data: profile, error: profileErr } = await supabase
       .from("agents")
-      .select("id, role")
+      .select("id, role, subscription_tier, subscription_status")
       .eq("id", authUser.id)
       .single();
     if (profileErr || !profile) {
       return res.status(401).json({ error: "no agent profile for this user" });
     }
     const user = { id: profile.id, role: profile.role };
+    const subscription = {
+      tier: profile.subscription_tier || null,
+      status: profile.subscription_status || null,
+    };
 
     // ── 3. Validate request body ──
     const { bookingId, theme, slug, propertyData } = req.body || {};
@@ -99,7 +103,7 @@ export default async function handler(req, res) {
     }
 
     // ── 5. Entitlement check ──
-    const { entitled, reason } = checkMicrositeEntitlement(user, booking);
+    const { entitled, reason } = checkMicrositeEntitlement(user, booking, subscription);
     if (!entitled) {
       return res.status(403).json({ error: reason });
     }
