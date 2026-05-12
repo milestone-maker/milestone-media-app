@@ -20,6 +20,29 @@ export function tierAllowance(tier) {
   }
 }
 
+/**
+ * Whether a subscription tier covers a given package slug.
+ *
+ * Starter covers Essential only.
+ * Pro covers Essential or Signature.
+ * Elite covers Essential, Signature, or Luxury.
+ * Teams / unknown tiers cover nothing here — Teams pricing is handled
+ * manually outside the credit system.
+ *
+ * @param {string} tier  agent's current subscription_tier
+ * @param {string} pkg   package slug: "essential" | "signature" | "luxury"
+ * @returns {boolean}
+ */
+export function packageCoveredByTier(tier, pkg) {
+  if (!tier || !pkg) return false;
+  const allowed = {
+    starter: new Set(["essential"]),
+    pro:     new Set(["essential", "signature"]),
+    elite:   new Set(["essential", "signature", "luxury"]),
+  }[tier];
+  return !!allowed && allowed.has(pkg);
+}
+
 /** Ordinal rank for tier comparison. Teams is incomparable (null). */
 export function tierRank(tier) {
   switch (tier) {
