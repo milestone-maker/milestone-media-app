@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+
+// Fail loudly: any unhandled error in this test script must
+// translate to a non-zero exit so CI catches it.
+process.on("unhandledRejection", (err) => { console.error("✗ Unhandled rejection:", err); process.exit(1); });
+process.on("uncaughtException",  (err) => { console.error("✗ Uncaught exception:",  err); process.exit(1); });
 // Smoke test for the centralized pricing config.
 // Reads public/pricing.json and asserts the price values that the
 // business depends on. Does NOT touch the database, Stripe, email,

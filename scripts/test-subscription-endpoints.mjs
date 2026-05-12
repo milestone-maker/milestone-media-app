@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+
+// Fail loudly: any unhandled error in this test script must
+// translate to a non-zero exit so CI catches it.
+process.on("unhandledRejection", (err) => { console.error("✗ Unhandled rejection:", err); process.exit(1); });
+process.on("uncaughtException",  (err) => { console.error("✗ Uncaught exception:",  err); process.exit(1); });
 // Unit tests for the checkout-session and portal-session endpoints.
 // No real Stripe calls, no real database writes — all clients are mocks
 // passed via the handler's third-arg dependency-injection slot.

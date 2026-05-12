@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+
+// Fail loudly: any unhandled error in this test script must
+// translate to a non-zero exit so CI catches it.
+process.on("unhandledRejection", (err) => { console.error("✗ Unhandled rejection:", err); process.exit(1); });
+process.on("uncaughtException",  (err) => { console.error("✗ Uncaught exception:",  err); process.exit(1); });
 // Smoke test for the Stripe-subscription foundation work.
 // Does NOT touch Stripe, the database, or any external service.
 //
@@ -20,7 +25,7 @@ import { spawnSync } from "node:child_process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
-const MIGRATION_PATH = resolve(REPO_ROOT, "supabase", "011_agent_stripe_billing.sql");
+const MIGRATION_PATH = resolve(REPO_ROOT, "supabase", "migrations", "20250101000011_agent_stripe_billing.sql");
 const SETUP_PATH     = resolve(REPO_ROOT, "scripts", "setup-stripe-subscriptions.mjs");
 const WEBHOOK_PATH   = resolve(REPO_ROOT, "api", "stripe-webhook.js");
 
@@ -37,7 +42,7 @@ function check(name, cond, detail = "") {
 }
 
 // ── 1. Migration content ─────────────────────────────────────────────
-console.log("Migration (supabase/011_agent_stripe_billing.sql):");
+console.log("Migration (supabase/migrations/20250101000011_agent_stripe_billing.sql):");
 const sql = await readFile(MIGRATION_PATH, "utf8");
 const expectedCols = [
   "stripe_customer_id",

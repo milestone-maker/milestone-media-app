@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+
+// Fail loudly: any unhandled error in this test script must
+// translate to a non-zero exit so CI catches it.
+process.on("unhandledRejection", (err) => { console.error("✗ Unhandled rejection:", err); process.exit(1); });
+process.on("uncaughtException",  (err) => { console.error("✗ Uncaught exception:",  err); process.exit(1); });
 // Unit tests for api/create-booking.js — exercises the credit-eligibility
 // decision tree, the conditional-decrement race fallback, and the side-effect
 // orchestration. No real Stripe, no real DB, no real network calls.
