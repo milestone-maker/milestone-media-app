@@ -13,7 +13,7 @@ import SubscriptionsView from "./views/Subscriptions";
 // the views; the views imported pricing/auth/UI symbols back from App).
 // Production minification turned that cycle into a TDZ runtime error.
 import { PRICING, PACKAGES, SQFT_TIERS, ESSENTIAL_PRICING, INDIVIDUAL_SERVICES, ADDONS, SUBSCRIPTIONS, PROMOS, STRIPE_IDS } from "./lib/pricing";
-import { AuthContext } from "./lib/auth";
+import { AuthContext, useAuth } from "./lib/auth";
 import { MEDIA_ICONS, THEMES, StatusBadge, PackageBadge } from "./lib/ui";
 
 const NAV = ["Showcase", "Book", "My Media", "Analytics"];
