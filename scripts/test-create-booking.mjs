@@ -261,10 +261,22 @@ await runCase("Starter + Essential + 1 credit → credit consumed, addons-only i
     check("ledger decrement attempted", supabase.calls.creditLedgerUpdates.length === 1);
     check("booking insert has credit_consumed:true", supabase.calls.bookingsInserts[0].credit_consumed === true);
     check("booking insert has credit_ledger_id", supabase.calls.bookingsInserts[0].credit_ledger_id === "cl_001");
+    check("booking insert has invoice_paid:true (credit covers it)", supabase.calls.bookingsInserts[0].invoice_paid === true);
     const urls = fetchMock.calls.map(c => c.url);
     check("calendar called", urls.some(u => u.includes("/api/calendar")));
     check("email called",    urls.some(u => u.includes("/api/send-email")));
     check("invoice NOT called (subtotal is 0)", !urls.some(u => u.includes("/api/create-invoice")));
+  },
+});
+
+await runCase("Transactional booking → invoice_paid NOT set on insert (waits for webhook)", {
+  agent: baseAgent({ subscription_tier: null, subscription_status: null }),
+  cr: null,
+  payload: basePayload({ selected_package: "essential" }),
+  expect: ({ supabase }) => {
+    const inserted = supabase.calls.bookingsInserts[0];
+    check("booking insert credit_consumed false", inserted.credit_consumed === false);
+    check("booking insert does NOT carry invoice_paid", !("invoice_paid" in inserted));
   },
 });
 

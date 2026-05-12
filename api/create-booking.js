@@ -267,6 +267,10 @@ export default async function handler(req, res, depsOverride) {
       subtotal,
       credit_consumed: shouldUseCredit,
       credit_ledger_id: appliedLedgerId,
+      // A credit-covered booking is paid-for at insert time — the
+      // subscription credit is the payment. Without this, the microsite
+      // entitlement check would still gate on a never-arriving invoice.
+      ...(shouldUseCredit ? { invoice_paid: true } : {}),
     };
 
     const { data: inserted, error: insertErr } = await supabase
