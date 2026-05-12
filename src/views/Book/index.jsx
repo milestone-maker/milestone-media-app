@@ -2,6 +2,26 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
 import { useAuth, PACKAGES, SQFT_TIERS, ESSENTIAL_PRICING, INDIVIDUAL_SERVICES, ADDONS } from "../../App";
 
+// Subscription statuses considered "active" for credit purposes.
+// Matches ACTIVE_STATUSES in Subscriptions/index.jsx and the server endpoint.
+const ACTIVE_STATUSES = new Set(["active", "trialing", "past_due"]);
+
+// Mirror of api/_lib/credits.js packageCoveredByTier. Duplicated client-side
+// so the UI can render coverage state without a network round-trip per click.
+function packageCoveredByTier(tier, pkg) {
+  if (!tier || !pkg) return false;
+  const map = {
+    starter: ["essential"],
+    pro:     ["essential", "signature"],
+    elite:   ["essential", "signature", "luxury"],
+  };
+  return (map[tier] || []).includes(pkg);
+}
+
+// Index → package slug used by the server.
+const PACKAGE_SLUGS = ["essential", "signature", "luxury"];
+const TIER_LABEL = { starter: "Starter", pro: "Pro", elite: "Elite" };
+
 function BookView() {
   const { user } = useAuth();
   // ── State ──
@@ -13,27 +33,82 @@ function BookView() {
   const [zip, setZip] = useState("");
   const [sqftTier, setSqftTier] = useState("");
   const [accessMethod, setAccessMethod] = useState("");
-  // Package mode
   const [selectedPackage, setSelectedPackage] = useState(null); // 0,1,2
-  // Individual service mode
-  const [selectedServices, setSelectedServices] = useState({}); // { photography: true, matterport: true, ... }
-  // Add-ons
-  const [selectedAddons, setSelectedAddons] = useState({}); // { microsite: true, amenities: 2, ... }
-  // Scheduling
+  const [selectedServices, setSelectedServices] = useState({});
+  const [selectedAddons, setSelectedAddons] = useState({});
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedTime, setSelectedTime] = useState("");
   const [busySlots, setBusySlots] = useState([]);
   const [loadingSlots, setLoadingSlots] = useState(false);
-  // Contact info
   const [clientName, setClientName] = useState("");
   const [clientEmail, setClientEmail] = useState("");
   const [clientPhone, setClientPhone] = useState("");
-  // Booking complete
   const [booked, setBooked] = useState(false);
+  const [bookedResult, setBookedResult] = useState(null); // { creditConsumed, creditsRemaining, subtotal }
   const [bookingError, setBookingError] = useState(null);
   const [processing, setProcessing] = useState(false);
 
+  // ── Subscription / credit state ──
+  const [subTier, setSubTier] = useState(null);
+  const [subStatus, setSubStatus] = useState(null);
+  const [creditRow, setCreditRow] = useState(null); // { credits_granted, credits_consumed }
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    (async () => {
+      const { data: agent } = await supabase
+        .from("agents")
+        .select("subscription_tier, subscription_status")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      setSubTier(agent?.subscription_tier || null);
+      setSubStatus(agent?.subscription_status || null);
+
+      if (agent && ACTIVE_STATUSES.has(agent.subscription_status)) {
+        const nowIso = new Date().toISOString();
+        const { data: row } = await supabase
+          .from("credit_ledger")
+          .select("id, credits_granted, credits_consumed, tier_in_effect")
+          .eq("agent_id", user.id)
+          .lte("period_start", nowIso)
+          .gte("period_end", nowIso)
+          .order("period_end", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!cancelled) setCreditRow(row || null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
   const STEPS = ["Address", "Services", "Add-ons", "Schedule", "Review & Pay"];
+
+  // ── Credit helpers ──
+  const subActive = !!subStatus && ACTIVE_STATUSES.has(subStatus);
+  const creditsRemaining = creditRow
+    ? Math.max(0, (creditRow.credits_granted || 0) - (creditRow.credits_consumed || 0))
+    : 0;
+  const hasCreditsLeft = creditsRemaining >= 1;
+
+  // Will a credit apply to the *current* booking selection?
+  const creditWillApply = (() => {
+    if (bookingMode !== "package") return false;
+    if (selectedPackage === null) return false;
+    if (!subActive || !hasCreditsLeft) return false;
+    return packageCoveredByTier(subTier, PACKAGE_SLUGS[selectedPackage]);
+  })();
+
+  // Per-card coverage helper for step-2 messaging
+  const coverageStateFor = (pkgIndex) => {
+    const slug = PACKAGE_SLUGS[pkgIndex];
+    if (!subActive) return "no-sub";
+    const covered = packageCoveredByTier(subTier, slug);
+    if (covered && hasCreditsLeft) return "covered";
+    if (covered && !hasCreditsLeft) return "no-credits";
+    return "above-tier";
+  };
 
   // Fetch Google Calendar busy slots when date changes
   useEffect(() => {
@@ -42,15 +117,12 @@ function BookView() {
     setLoadingSlots(true);
     fetch(`/api/calendar?date=${selectedDate}`)
       .then(r => r.json())
-      .then(data => {
-        if (!cancelled) setBusySlots(data.busySlots || []);
-      })
+      .then(data => { if (!cancelled) setBusySlots(data.busySlots || []); })
       .catch(() => { if (!cancelled) setBusySlots([]); })
       .finally(() => { if (!cancelled) setLoadingSlots(false); });
     return () => { cancelled = true; };
   }, [selectedDate]);
 
-  // Check if a time slot overlaps with any busy period
   const isSlotBusy = (slotLabel) => {
     if (!busySlots.length || !selectedDate) return false;
     const parts = slotLabel.match(/(\d+):(\d+)\s*(AM|PM)/i);
@@ -86,31 +158,44 @@ function BookView() {
     return null;
   };
 
-  // ── Total calc ──
-  const calcTotal = () => {
-    let total = 0;
+  // ── Total calc (credit-aware) ──
+  // Returns { packageAmount, servicesAmount, addonsAmount, total }.
+  // When a credit applies, packageAmount becomes 0 in the total.
+  const calcBreakdown = () => {
+    let packageAmount = 0;
+    let servicesAmount = 0;
+    let addonsAmount = 0;
+
     if (bookingMode === "package") {
-      if (selectedPackage === 0 && sqftTier) total += ESSENTIAL_PRICING[sqftTier] || 0;
-      else if (selectedPackage !== null) total += PACKAGES[selectedPackage]?.priceValue || 0;
+      if (selectedPackage === 0 && sqftTier) packageAmount = ESSENTIAL_PRICING[sqftTier] || 0;
+      else if (selectedPackage !== null) packageAmount = PACKAGES[selectedPackage]?.priceValue || 0;
     } else if (bookingMode === "individual") {
       Object.keys(selectedServices).forEach(key => {
         if (selectedServices[key]) {
           const svc = INDIVIDUAL_SERVICES[key];
           const p = getServicePrice(svc);
-          if (p) total += p;
+          if (p) servicesAmount += p;
         }
       });
     }
-    // Add-ons
     ADDONS.forEach(a => {
       const val = selectedAddons[a.id];
       if (val) {
-        if (a.hasQty) total += a.price * (typeof val === "number" ? val : 1);
-        else if (val === true) total += a.price;
+        if (a.hasQty) addonsAmount += a.price * (typeof val === "number" ? val : 1);
+        else if (val === true) addonsAmount += a.price;
       }
     });
-    return total;
+
+    const effectivePackage = creditWillApply ? 0 : packageAmount;
+    return {
+      packageAmount,
+      effectivePackage,
+      servicesAmount,
+      addonsAmount,
+      total: effectivePackage + servicesAmount + addonsAmount,
+    };
   };
+  const calcTotal = () => calcBreakdown().total;
 
   const canProceed = () => {
     if (step === 1) return address.trim() && city.trim() && zip.trim() && sqftTier;
@@ -119,7 +204,7 @@ function BookView() {
       if (bookingMode === "individual") return Object.values(selectedServices).some(v => v);
       return false;
     }
-    if (step === 3) return true; // add-ons optional
+    if (step === 3) return true;
     if (step === 4) return selectedDate && selectedTime;
     if (step === 5) return clientName.trim() && clientEmail.trim() && clientEmail.includes("@");
     return true;
@@ -127,17 +212,23 @@ function BookView() {
 
   const handleBook = async () => {
     setProcessing(true);
+    setBookingError(null);
     try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) throw new Error("Session expired. Please sign in again.");
+
       const selSvcs = bookingMode === "individual"
         ? Object.keys(selectedServices).filter(k => selectedServices[k])
         : [];
       const selAddons = [];
       ADDONS.forEach(a => {
-        if (selectedAddons[a.id]) selAddons.push({ id: a.id, qty: typeof selectedAddons[a.id] === "number" ? selectedAddons[a.id] : 1 });
+        if (selectedAddons[a.id]) {
+          selAddons.push({ id: a.id, qty: typeof selectedAddons[a.id] === "number" ? selectedAddons[a.id] : 1 });
+        }
       });
-      const bookingData = {
-        source: "app",
-        agent_id: user?.id,
+
+      const payload = {
         client_name: clientName,
         client_email: clientEmail,
         client_phone: clientPhone || null,
@@ -145,107 +236,33 @@ function BookView() {
         sqft_tier: sqftTier,
         access_method: accessMethod || "lockbox",
         booking_mode: bookingMode,
-        selected_package: bookingMode === "package" ? ["essential","signature","luxury"][selectedPackage] : null,
+        selected_package: bookingMode === "package" ? PACKAGE_SLUGS[selectedPackage] : null,
         selected_services: selSvcs,
         selected_addons: selAddons,
         booking_date: selectedDate,
         booking_time: selectedTime,
-        subtotal: calcTotal(),
       };
-      const { data: inserted, error } = await supabase.from("bookings").insert(bookingData).select("id").single();
-      if (error) { console.error("Booking insert error:", error); throw new Error("Booking insert failed: " + error.message); }
 
-      // Create Google Calendar event
-      try {
-        const calBody = { ...bookingData, booking_id: inserted?.id };
-        await fetch("/api/calendar", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(calBody),
-        });
-      } catch (calErr) {
-        console.error("Calendar sync error (non-blocking):", calErr);
-      }
+      const res = await fetch("/api/create-booking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Booking failed");
 
-      // Send booking confirmation emails (owner + client)
-      try {
-        const pkgName = bookingMode === "package" ? PACKAGES[selectedPackage]?.name : null;
-        const svcList = bookingMode === "individual"
-          ? Object.keys(selectedServices).filter(k => selectedServices[k]).map(k => {
-              const svc = INDIVIDUAL_SERVICES[k];
-              return svc ? { name: svc.name, price: svc.priceByTier?.[sqftTier] || svc.fixedPrice || 0 } : null;
-            }).filter(Boolean)
-          : (bookingMode === "package" && PACKAGES[selectedPackage]
-              ? PACKAGES[selectedPackage].features.map(f => ({ name: f, price: 0 }))
-              : []);
-        const addonList = [];
-        ADDONS.forEach(a => {
-          if (selectedAddons[a.id]) addonList.push({ name: a.name, price: a.price * (typeof selectedAddons[a.id] === "number" ? selectedAddons[a.id] : 1) });
-        });
-        const emailPayload = {
-          booking: {
-            clientName, clientEmail, clientPhone,
-            agentEmail: user?.email,
-            agentName: user?.user_metadata?.name || user?.email,
-            address: `${address}, ${city}, ${state} ${zip}`,
-            sqftTier, accessMethod,
-            date: selectedDate, time: selectedTime,
-            packageName: pkgName,
-            services: svcList, addons: addonList,
-            total: calcTotal(),
-          },
-        };
-        await fetch("/api/send-email", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(emailPayload),
-        });
-      } catch (emailErr) {
-        console.error("Email send error (non-blocking):", emailErr);
-      }
-
-      // Create & send Stripe invoice, then save invoice ID back to booking
-      try {
-        const pkgName2 = bookingMode === "package" ? PACKAGES[selectedPackage]?.name : null;
-        const svcList2 = bookingMode === "individual"
-          ? Object.keys(selectedServices).filter(k => selectedServices[k]).map(k => {
-              const svc = Object.values(INDIVIDUAL_SERVICES).find(s => s.name && Object.keys(INDIVIDUAL_SERVICES).find(key => key === k));
-              const svcData = INDIVIDUAL_SERVICES[k];
-              return svcData ? { name: svcData.name, price: svcData.priceByTier?.[sqftTier] || svcData.fixedPrice || 0 } : null;
-            }).filter(Boolean)
-          : [];
-        const addonList2 = [];
-        ADDONS.forEach(a => {
-          if (selectedAddons[a.id]) addonList2.push({ name: a.name, price: a.price * (typeof selectedAddons[a.id] === "number" ? selectedAddons[a.id] : 1) });
-        });
-        const invoiceRes = await fetch("/api/create-invoice", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            booking: {
-              clientName, clientEmail, clientPhone,
-              address: `${address}, ${city}, ${state} ${zip}`,
-              sqftTier, accessMethod,
-              date: selectedDate, time: selectedTime,
-              packageName: pkgName2,
-              services: svcList2, addons: addonList2,
-              total: calcTotal(),
-            },
-          }),
-        });
-        const invoiceData = await invoiceRes.json();
-        if (invoiceData.invoiceId && inserted?.id) {
-          await supabase.from("bookings").update({ stripe_invoice_id: invoiceData.invoiceId }).eq("id", inserted.id);
-        }
-      } catch (invoiceErr) {
-        console.error("Stripe invoice error (non-blocking):", invoiceErr);
-      }
-      setProcessing(false);
+      setBookedResult({
+        bookingId: data.bookingId,
+        creditConsumed: !!data.creditConsumed,
+        creditsRemaining: data.creditsRemaining,
+        subtotal: data.subtotal,
+      });
       setBooked(true);
     } catch (err) {
       console.error("Booking error:", err);
-      setProcessing(false);
       setBookingError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setProcessing(false);
     }
   };
 
@@ -254,10 +271,9 @@ function BookView() {
     setZip(""); setSqftTier(""); setAccessMethod(""); setSelectedPackage(null);
     setSelectedServices({}); setSelectedAddons({}); setSelectedDate(""); setSelectedTime("");
     setClientName(""); setClientEmail(""); setClientPhone("");
-    setBooked(false); setProcessing(false);
+    setBooked(false); setBookedResult(null); setProcessing(false);
   };
 
-  // ── Time slots (placeholder until Google Calendar integration) ──
   const TIME_SLOTS = [
     "9:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
     "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM",
@@ -278,12 +294,22 @@ function BookView() {
         <div style={{ fontFamily: "'Jost', sans-serif", color: "rgba(255,255,255,0.4)", fontSize: 13, marginBottom: 8 }}>
           {selectedDate} at {selectedTime}
         </div>
-        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#c9a84c", marginBottom: 32 }}>
-          Total: ${calcTotal().toLocaleString()}
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#c9a84c", marginBottom: 8 }}>
+          Total: ${(bookedResult?.subtotal ?? calcTotal()).toLocaleString()}
         </div>
-        <div style={{ fontFamily: "'Jost', sans-serif", color: "rgba(255,255,255,0.5)", fontSize: 13, marginBottom: 32 }}>
-          We'll reach out within 24 hours to finalize details.
-        </div>
+        {bookedResult?.creditConsumed && (
+          <div style={{
+            fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#e5c97e",
+            marginBottom: 32, letterSpacing: "0.04em",
+          }}>
+            1 credit used. You have {bookedResult.creditsRemaining ?? 0} credit{(bookedResult.creditsRemaining ?? 0) === 1 ? "" : "s"} remaining this period.
+          </div>
+        )}
+        {!bookedResult?.creditConsumed && (
+          <div style={{ fontFamily: "'Jost', sans-serif", color: "rgba(255,255,255,0.5)", fontSize: 13, marginBottom: 32 }}>
+            We'll reach out within 24 hours to finalize details.
+          </div>
+        )}
         <button onClick={resetBooking} style={{
           background: "transparent", border: "1px solid rgba(201,168,76,0.5)",
           color: "#c9a84c", padding: "12px 28px", borderRadius: 8,
@@ -293,6 +319,8 @@ function BookView() {
       </div>
     );
   }
+
+  const breakdown = calcBreakdown();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 28 }}>
@@ -316,9 +344,20 @@ function BookView() {
           <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "#c9a84c", letterSpacing: "0.1em", textTransform: "uppercase" }}>
             {address}, {city}
           </div>
-          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#c9a84c", fontWeight: 700 }}>
-            ${calcTotal().toLocaleString()}
-          </div>
+          {creditWillApply ? (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.5)" }}>
+                $0 (package) + ${breakdown.addonsAmount.toLocaleString()} add-ons
+              </div>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#c9a84c", fontWeight: 700 }}>
+                ${breakdown.total.toLocaleString()}
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#c9a84c", fontWeight: 700 }}>
+              ${breakdown.total.toLocaleString()}
+            </div>
+          )}
         </div>
       )}
 
@@ -415,9 +454,17 @@ function BookView() {
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {PACKAGES.map((p, i) => {
                 const isEssential = i === 0;
-                const priceDisplay = isEssential
-                  ? (sqftTier ? `$${ESSENTIAL_PRICING[sqftTier]}` : "Select sqft")
-                  : p.price;
+                const cov = coverageStateFor(i);
+                const showAsCovered = cov === "covered";
+                const priceDisplay = showAsCovered
+                  ? "$0"
+                  : (isEssential
+                      ? (sqftTier ? `$${ESSENTIAL_PRICING[sqftTier]}` : "Select sqft")
+                      : p.price);
+                let coverageNote = null;
+                if (cov === "covered")     coverageNote = `Covered by your ${TIER_LABEL[subTier] || subTier} subscription`;
+                else if (cov === "no-credits") coverageNote = "You've used all your credits this period";
+                else if (cov === "above-tier") coverageNote = `Your ${TIER_LABEL[subTier] || subTier} subscription doesn't cover this tier`;
                 return (
                   <div key={p.name} onClick={() => setSelectedPackage(i)} style={{
                     border: selectedPackage === i ? `2px solid ${p.color}` : "2px solid rgba(255,255,255,0.08)",
@@ -437,9 +484,18 @@ function BookView() {
                             padding: "2px 8px", borderRadius: 4,
                           }}>Most Popular</span>
                         )}
+                        {showAsCovered && (
+                          <span style={{
+                            background: "rgba(201,168,76,0.15)", color: "#e5c97e",
+                            border: "1px solid rgba(229,201,126,0.4)",
+                            fontFamily: "'Jost', sans-serif", fontSize: 9, fontWeight: 700,
+                            letterSpacing: "0.1em", textTransform: "uppercase",
+                            padding: "2px 8px", borderRadius: 4,
+                          }}>1 credit</span>
+                        )}
                       </div>
                       <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 8 }}>{p.desc}</div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: coverageNote ? 8 : 0 }}>
                         {p.features.map(f => (
                           <span key={f} style={{
                             fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.6)",
@@ -447,6 +503,15 @@ function BookView() {
                           }}>✓ {f}</span>
                         ))}
                       </div>
+                      {coverageNote && (
+                        <div style={{
+                          fontFamily: "'Jost', sans-serif", fontSize: 10,
+                          color: cov === "covered" ? "#e5c97e" : "rgba(255,255,255,0.35)",
+                          letterSpacing: "0.04em",
+                        }}>
+                          {coverageNote}
+                        </div>
+                      )}
                     </div>
                     <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, color: "#fff", fontWeight: 700, marginLeft: 16, textAlign: "right", whiteSpace: "nowrap" }}>
                       {priceDisplay}
@@ -625,9 +690,14 @@ function BookView() {
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                   <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff" }}>
                     {PACKAGES[selectedPackage].name} Package
+                    {creditWillApply && (
+                      <span style={{ color: "#e5c97e", fontSize: 11, marginLeft: 8 }}>
+                        (covered by {TIER_LABEL[subTier] || subTier} subscription)
+                      </span>
+                    )}
                   </span>
                   <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#c9a84c", fontWeight: 600 }}>
-                    ${selectedPackage === 0 ? (ESSENTIAL_PRICING[sqftTier] || 0) : (PACKAGES[selectedPackage]?.priceValue || 0)}
+                    ${creditWillApply ? 0 : (selectedPackage === 0 ? (ESSENTIAL_PRICING[sqftTier] || 0) : (PACKAGES[selectedPackage]?.priceValue || 0))}
                   </span>
                 </div>
               )}
@@ -666,7 +736,7 @@ function BookView() {
             {/* Total */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 16, borderTop: "2px solid rgba(201,168,76,0.3)" }}>
               <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#fff" }}>Total</span>
-              <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#c9a84c", fontWeight: 700 }}>${calcTotal().toLocaleString()}</span>
+              <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: "#c9a84c", fontWeight: 700 }}>${breakdown.total.toLocaleString()}</span>
             </div>
           </div>
           {/* Contact info */}
@@ -681,14 +751,16 @@ function BookView() {
               <input type="tel" placeholder="Phone Number" value={clientPhone} onChange={e => setClientPhone(e.target.value)} style={inputStyle} />
             </div>
           </div>
-          {/* Payment stub */}
+          {/* Payment note */}
           <div style={{
             background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
             borderRadius: 10, padding: 16,
           }}>
             <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>Payment</div>
             <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.5)" }}>
-              Payment processing will be available soon. Your booking will be confirmed and invoiced separately.
+              {creditWillApply && breakdown.total === 0
+                ? `No charge for this booking — covered entirely by your ${TIER_LABEL[subTier] || subTier} subscription credit.`
+                : "Payment processing will be available soon. Your booking will be confirmed and invoiced separately."}
             </div>
           </div>
         </div>
