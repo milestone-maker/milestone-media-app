@@ -1183,145 +1183,80 @@ function MicrositeView() {
 
   const handlePublish = async () => {
     try {
-      let galleryPhotos = listingPhotos;
-      let heroImg = data.heroImg;
-      let publishVideoUrl = data.videoUrl || listingVideo;
-      let publishFloorplanUrl = listingFloorplan;
-
-      // For booking source, copy media from private bucket to public bucket
-      // so published microsite URLs never expire
-      if (sourceType === "booking" && selectedBookingId) {
-        const { data: mediaRows } = await supabase
-          .from("booking_media")
-          .select("*")
-          .eq("booking_id", selectedBookingId)
-          .order("created_at", { ascending: false });
-
-        if (mediaRows && mediaRows.length > 0) {
-          const publishedPhotos = [];
-          let publishedVideo = null;
-
-          for (const item of mediaRows) {
-            if (item.file_type === "3d_tour" || !item.file_path) continue;
-
-            // Download from private bucket
-            const { data: fileBlob, error: dlError } = await supabase.storage
-              .from("booking-media")
-              .download(item.file_path);
-
-            if (dlError || !fileBlob) {
-              console.error("Download error for", item.file_path, dlError);
-              continue;
-            }
-
-            // Upload to public bucket under slug folder
-            const fileName = item.file_path.split("/").pop();
-            const destPath = `${slug}/${fileName}`;
-            const { error: upError } = await supabase.storage
-              .from("published-media")
-              .upload(destPath, fileBlob, { upsert: true, contentType: fileBlob.type });
-
-            if (upError) {
-              console.error("Upload to published-media error:", upError);
-              continue;
-            }
-
-            // Get permanent public URL
-            const { data: pubUrlData } = supabase.storage
-              .from("published-media")
-              .getPublicUrl(destPath);
-
-            const publicUrl = pubUrlData?.publicUrl;
-            if (!publicUrl) continue;
-
-            if (item.file_type === "video") {
-              publishedVideo = publicUrl;
-            } else {
-              publishedPhotos.push(publicUrl);
-            }
-          }
-
-          if (publishedPhotos.length > 0) {
-            galleryPhotos = publishedPhotos;
-            heroImg = publishedPhotos[0];
-          }
-          if (publishedVideo) publishVideoUrl = publishedVideo;
-        }
+      // Publish is now a server-side operation. The endpoint validates
+      // entitlement, copies booking media into the public bucket, builds
+      // the final property_data, and writes the microsites row using a
+      // service-role key. The client just sends the form fields.
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        alert("Your session expired. Please sign in again.");
+        return;
       }
 
-      const property_data = {
-        address: data.address,
-        city: data.city,
-        price: data.price,
-        beds: data.beds,
-        baths: data.baths,
-        sqft: data.sqft,
-        description: data.description,
-        features: data.features.filter(f => f),
-        media_types: data.mediaTypes,
-        agent_name: data.agentName,
-        agent_phone: data.agentPhone,
-        agent_email: data.agentEmail,
-        hero_img: heroImg,
-        listing_id: selectedListingId || null,
-        booking_id: selectedBookingId || null,
-        source_type: sourceType,
-        matterport_url: data.matterportUrl,
-        video_url: publishVideoUrl,
-        floorplan_url: publishFloorplanUrl,
-        gallery_photos: galleryPhotos,
-      };
-
-      // Build the record to insert
-      const micrositeData = {
-        agent_id: user?.id,
-        slug,
+      const payload = {
+        bookingId: selectedBookingId,
         theme: THEMES[themeIdx].name,
-        published: true,
-        property_data,
-        agent_name: data.agentName,
-        agent_phone: data.agentPhone,
+        slug,
+        propertyData: {
+          address: data.address,
+          city: data.city,
+          price: data.price,
+          beds: data.beds,
+          baths: data.baths,
+          sqft: data.sqft,
+          description: data.description,
+          features: (data.features || []).filter(f => f),
+          mediaTypes: data.mediaTypes,
+          agentName: data.agentName,
+          agentPhone: data.agentPhone,
+          agentEmail: data.agentEmail,
+          heroImg: data.heroImg,
+          listingId: selectedListingId || null,
+          matterportUrl: data.matterportUrl,
+          videoUrl: data.videoUrl || listingVideo || "",
+          floorplanUrl: listingFloorplan || null,
+        },
       };
 
-      // Use INSERT for new microsites, UPDATE for existing ones.
-      // Never use upsert-on-slug — if the slug exists and belongs to a different
-      // agent the USING policy on the UPDATE path throws an RLS error.
-      let result, error;
-      if (publishedSlug) {
-        // Agent is re-publishing / editing their own microsite — targeted UPDATE
-        ({ data: result, error } = await supabase
-          .from("microsites")
-          .update(micrositeData)
-          .eq("slug", publishedSlug)
-          .eq("agent_id", user?.id)
-          .select());
-      } else {
-        // Brand-new microsite — INSERT (slug already includes agent suffix)
-        ({ data: result, error } = await supabase
-          .from("microsites")
-          .insert(micrositeData)
-          .select());
+      const res = await fetch("/api/publish-microsite", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.status === 401) {
+        alert("Your session expired. Please sign in again.");
+        return;
+      }
+      if (res.status === 403) {
+        const body = await res.json().catch(() => ({}));
+        alert("Failed to publish: " + (body.error || "you are not entitled to publish this microsite"));
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        console.error("Publish error:", body);
+        alert("Failed to publish. Please try again.");
+        return;
       }
 
-      if (error) {
-        console.error("Publish error:", error);
-        alert("Failed to publish: " + error.message);
-      } else if (!result || result.length === 0) {
-        console.error("Publish failed: no row returned (RLS blocked the insert)");
-        alert("Publish failed — your account may not have permission. Check the browser console for details.");
-      } else {
-        console.log("Microsite published successfully:", result[0]);
-        setPublished(true);
-        setPublishedSlug(slug);
-        setStep("published");
-        // Refresh the microsites list so it's up to date
-        const { data: refreshed } = await supabase
-          .from("microsites")
-          .select("id, slug, theme, published, property_data, agent_name, agent_phone, created_at")
-          .eq("agent_id", user?.id)
-          .order("created_at", { ascending: false });
-        if (refreshed) setMyMicrosites(refreshed);
-      }
+      const result = await res.json();
+      console.log("Microsite published successfully:", result);
+      setPublished(true);
+      setPublishedSlug(result.slug || slug);
+      setStep("published");
+
+      // Refresh the microsites list so it's up to date
+      const { data: refreshed } = await supabase
+        .from("microsites")
+        .select("id, slug, theme, published, property_data, agent_name, agent_phone, created_at")
+        .eq("agent_id", user?.id)
+        .order("created_at", { ascending: false });
+      if (refreshed) setMyMicrosites(refreshed);
     } catch (err) {
       console.error("Publish error:", err);
       alert("Failed to publish. Please try again.");
