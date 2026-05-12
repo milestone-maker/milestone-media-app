@@ -16,3 +16,8 @@ node_modules/
 .idea/
 .vscode/
 .claude/
+
+# Supabase CLI artifacts (environment-specific link/branch state)
+supabase/.temp/
+supabase/.branches/
+supabase/.env*

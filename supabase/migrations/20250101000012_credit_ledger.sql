@@ -22,7 +22,7 @@ drop table if exists public.credit_ledger cascade;
 
 -- ── Table ────────────────────────────────────────────────────────────
 create table if not exists public.credit_ledger (
-  id                uuid primary key default uuid_generate_v4(),
+  id                uuid primary key default gen_random_uuid(),
   agent_id          uuid not null references public.agents(id) on delete cascade,
   period_start      timestamptz not null,
   period_end        timestamptz not null,
