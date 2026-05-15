@@ -101,9 +101,9 @@ Tyshawn Miles runs **Milestone Media & Photography**, a professional real estate
 2. **Admin media upload** — Upload photos, video to Supabase Storage for a listing; paste 3D tour (Matterport) link
 3. **Connect microsites to listing media** — Agent sees uploaded photos in microsite builder, picks hero image, remaining photos populate gallery on public page
 4. **Package tier logic:**
-   - Essential: No microsite by default → "Add Microsite — $50" upgrade prompt → notifies admin → admin enables after payment
+   - Essential: No microsite by default → "Add Microsite — $150" upgrade prompt → notifies admin → admin enables after payment
    - Signature: Free microsite on default Vercel URL (`/p/{slug}`)
-   - Luxury: Custom domain microsite (agent brings their own domain)
+   - Luxury: Custom domain microsite (agent chooses their own domain)
 5. **Phase 5:** Custom booking system (replace Rela)
 6. **Phase 6:** IDX Integration (deferred)
 7. Website portfolio/gallery page
@@ -119,7 +119,7 @@ Tyshawn Miles runs **Milestone Media & Photography**, a professional real estate
 6. **Microsites RLS** — Use agent_id-based policies, NOT listing_id-based. Old listing_id policies caused silent insert failures.
 7. **Microsite theme CHECK constraint** — theme column must be exactly: 'Obsidian', 'Ivory', 'Slate', or 'Blush'.
 8. **Supabase upsert + RLS** — When RLS blocks an upsert, Supabase returns `{data: null, error: null}` silently. Always use `.select()` after upsert and check if result is empty.
-9. **Package tiers** — Essential = $50 add-on for microsite. Signature = free microsite (default URL). Luxury = custom domain microsite.
+9. **Package tiers** — Essential = $150 add-on for microsite. Signature = free microsite (default URL). Luxury = custom domain microsite.
 10. **Website section order** — Hero (video) → Lead Magnet Banner → Trust Bar → More Than Media (3 dark cards) → Milestone Listing Experience (split layout with real listing mockup) → Beyond Showcase (comparison + bg image) → How It Works → Packages → Portfolio → Testimonials → Lead Magnet Form → Booking → Footer
 11. **Listing template** — `listings/2410-prosperity/` contains a working listing site (index.html + data.json) with real property data, used as the mockup in the Milestone Listing Experience section
 12. **ChatGPT mockup reference** — User provided a dark-mode SaaS-style mockup from ChatGPT. Key elements adapted: eyebrow pills, stat cards, comparison layout, browser mockups, split sections. Adapted to match existing brand (Cormorant Garamond + Jost, gold accents, dark backgrounds).
