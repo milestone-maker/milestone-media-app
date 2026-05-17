@@ -21,3 +21,5 @@ node_modules/
 supabase/.temp/
 supabase/.branches/
 supabase/.env*
+.vercel
+.env*.local

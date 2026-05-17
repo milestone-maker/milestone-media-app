@@ -1,0 +1,275 @@
+// Vercel Serverless Function — Stage 5c content generation entry point.
+// POST /api/content-generate
+//   Headers: Authorization: Bearer <supabase access token>
+//   Body:    { voice_profile_id, listing_id, framework_name,
+//              platform?, content_type?, story_angle? }
+//
+// Flow mirrors api/create-booking.js:
+//   1. CORS + method guard
+//   2. Bearer auth → supabase.auth.getUser
+//   3. Service-role load of agent_voice_profiles + listings rows;
+//      ownership-check both against the calling agent
+//   4. Look up the prompt module in the registry
+//   5. Build {systemPrompt, userMessage} from voice profile + listing
+//   6. Call @milestone-maker/content-engine generatePosts() with
+//      injected promptBuilders (engine stays domain-agnostic)
+//   7. Engine returns parsed JSON; on parse failure we fall back to
+//      object-extraction (engine only handles arrays), log the raw
+//      output, and return 502 if still unparseable
+//
+// Required env vars:
+//   SUPABASE_URL
+//   SUPABASE_SERVICE_ROLE_KEY
+//   ANTHROPIC_API_KEY            (read by @anthropic-ai/sdk inside engine)
+
+import { createClient } from "@supabase/supabase-js";
+import { findPrompt } from "./_content/registry.js";
+
+// Engine is CommonJS; lazy-imported on first use so test runs that inject
+// a mock generator (via depsOverride.generate) don't require the package
+// to be installed. Production / live tests load it on first call.
+// Default-import-then-destructure is the safest CJS→ESM interop pattern.
+let _generatePosts = null;
+async function getGeneratePosts() {
+  if (!_generatePosts) {
+    const engine = (await import("@milestone-maker/content-engine")).default;
+    _generatePosts = engine.generatePosts;
+  }
+  return _generatePosts;
+}
+
+// ── module-load deps (overridable via depsOverride for tests) ────────
+const SUPABASE_URL              = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+let _supabaseSingleton = null;
+function defaultSupabase() {
+  if (!_supabaseSingleton) {
+    _supabaseSingleton = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+  }
+  return _supabaseSingleton;
+}
+
+// Model + token budget defaults. No app-wide constants exist yet, so
+// the first endpoint defines them; later endpoints can override per
+// content type if needed.
+const DEFAULT_MODEL      = "claude-sonnet-4-6";
+const DEFAULT_MAX_TOKENS = 2048;
+
+// ── helpers ──────────────────────────────────────────────────────────
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin":  "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  };
+}
+
+function bearerFrom(req) {
+  const h = req.headers?.authorization || req.headers?.Authorization || "";
+  const m = /^Bearer\s+(.+)$/i.exec(h);
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * The engine's generatePosts() expects an array shape and throws if the
+ * model returns a single object. For these caption prompts we know the
+ * model returns one object, so we run the call in _captureContext mode,
+ * catch the engine's array-only parse failure, and do object-extraction
+ * locally. Returns the parsed object plus the raw text for logging.
+ */
+async function generateAndParseObject(opts) {
+  const generatePosts = await getGeneratePosts();
+  let captured;
+  try {
+    captured = await generatePosts({ ...opts, _captureContext: true });
+    // Engine succeeded — model returned a JSON array. Unexpected for a
+    // single-caption prompt, but accept the first element if shaped
+    // correctly.
+    if (Array.isArray(captured.posts) && captured.posts.length > 0) {
+      return { parsed: captured.posts[0], raw: captured.rawResponseText };
+    }
+    return { parsed: captured.posts, raw: captured.rawResponseText };
+  } catch (engineErr) {
+    // Engine threw on parse — most likely because the model returned a
+    // top-level object instead of an array. Re-run the parse ourselves
+    // using the raw text the engine couldn't extract.
+    //
+    // The engine's _captureContext doesn't include rawResponseText on a
+    // parse failure (it throws before the return), so we need to do a
+    // second call. To avoid burning two Anthropic calls per request, we
+    // instead reach into the engine's raw output via a fallback path:
+    // the engine's parse failure message doesn't include the raw text,
+    // so we can't recover it from the error alone.
+    //
+    // Strategy: detect "Failed to parse" and re-throw with context so
+    // the caller logs + returns 502. We do NOT make a second API call.
+    if (/Failed to parse/i.test(String(engineErr?.message))) {
+      const wrap = new Error("content-engine returned unparseable JSON for object-shaped prompt");
+      wrap.cause = engineErr;
+      wrap.code  = "ENGINE_PARSE_FAILED";
+      throw wrap;
+    }
+    throw engineErr;
+  }
+}
+
+// ── main handler ─────────────────────────────────────────────────────
+
+export default async function handler(req, res, depsOverride) {
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, corsHeaders());
+    return res.end();
+  }
+  Object.entries(corsHeaders()).forEach(([k, v]) => res.setHeader(k, v));
+
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const supabase  = depsOverride?.supabase  || defaultSupabase();
+  const generate  = depsOverride?.generate  || generateAndParseObject;
+  const model     = depsOverride?.model     || DEFAULT_MODEL;
+  const maxTokens = depsOverride?.maxTokens || DEFAULT_MAX_TOKENS;
+
+  try {
+    // ── 1. Auth ──
+    const token = bearerFrom(req);
+    if (!token) return res.status(401).json({ error: "missing Authorization header" });
+
+    const { data: authData, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !authData?.user) {
+      return res.status(401).json({ error: "invalid or expired session" });
+    }
+    const authUser = authData.user;
+
+    // ── 2. Validate request body ──
+    const body = req.body || {};
+    const {
+      voice_profile_id,
+      listing_id,
+      framework_name,
+      platform     = "instagram",
+      content_type = "listing",
+      story_angle,
+    } = body;
+
+    if (!voice_profile_id) return res.status(400).json({ error: "voice_profile_id is required" });
+    if (!listing_id)       return res.status(400).json({ error: "listing_id is required" });
+    if (!framework_name)   return res.status(400).json({ error: "framework_name is required" });
+
+    // ── 3. Look up prompt module ──
+    const promptMod = findPrompt(platform, content_type, framework_name);
+    if (!promptMod) {
+      return res.status(400).json({
+        error: `no prompt registered for ${platform}/${content_type}/${framework_name}`,
+      });
+    }
+
+    // ── 4. Load + ownership-check voice profile ──
+    const { data: voiceProfile, error: vpErr } = await supabase
+      .from("agent_voice_profiles")
+      .select("*")
+      .eq("id", voice_profile_id)
+      .maybeSingle();
+    if (vpErr) {
+      console.error("[content-generate] voice profile fetch error:", vpErr);
+      return res.status(500).json({ error: "voice profile fetch failed", details: vpErr.message });
+    }
+    if (!voiceProfile) return res.status(404).json({ error: "voice profile not found" });
+    if (voiceProfile.agent_id !== authUser.id) {
+      return res.status(403).json({ error: "voice profile does not belong to caller" });
+    }
+    if (!voiceProfile.license_number) {
+      return res.status(422).json({
+        error: "voice profile is missing license_number; required for TREC compliance line",
+      });
+    }
+
+    // ── 5. Load + ownership-check listing ──
+    const { data: listing, error: lErr } = await supabase
+      .from("listings")
+      .select("*")
+      .eq("id", listing_id)
+      .maybeSingle();
+    if (lErr) {
+      console.error("[content-generate] listing fetch error:", lErr);
+      return res.status(500).json({ error: "listing fetch failed", details: lErr.message });
+    }
+    if (!listing) return res.status(404).json({ error: "listing not found" });
+    if (listing.agent_id !== authUser.id) {
+      return res.status(403).json({ error: "listing does not belong to caller" });
+    }
+
+    // ── 6. Build prompt strings ──
+    let built;
+    try {
+      built = promptMod.build({
+        voiceProfile,
+        listing,
+        extras: { story_angle },
+      });
+    } catch (buildErr) {
+      console.error("[content-generate] prompt build error:", buildErr);
+      return res.status(400).json({ error: "prompt build failed", details: buildErr.message });
+    }
+
+    // ── 7. Call the engine (caller injects already-built strings;
+    //       engine stays stateless / domain-agnostic) ──
+    let result;
+    try {
+      result = await generate({
+        model,
+        maxTokens,
+        promptBuilders: {
+          buildSystemPrompt: () => built.systemPrompt,
+          buildUserMessage:  () => built.userMessage,
+        },
+      });
+    } catch (engineErr) {
+      console.error("[content-generate] engine call failed", {
+        framework: framework_name,
+        message:   engineErr?.message,
+        code:      engineErr?.code,
+      });
+      if (engineErr?.code === "ENGINE_PARSE_FAILED") {
+        return res.status(502).json({
+          error: "model returned unparseable JSON",
+          framework: framework_name,
+        });
+      }
+      return res.status(502).json({ error: "content generation failed", details: engineErr?.message });
+    }
+
+    // ── 8. Validate the model's output shape ──
+    const parsed = result.parsed;
+    if (!parsed || typeof parsed !== "object") {
+      console.error("[content-generate] parsed result not an object", { raw: result.raw });
+      return res.status(502).json({ error: "model returned non-object payload" });
+    }
+    const required = ["caption", "hook_line", "cta_line", "hashtags", "framework_used", "platform", "content_type"];
+    const missing = required.filter((k) => parsed[k] === undefined || parsed[k] === null);
+    if (missing.length) {
+      console.error("[content-generate] model output missing required fields", {
+        missing,
+        raw: result.raw,
+      });
+      return res.status(502).json({
+        error: "model output missing required fields",
+        missing,
+      });
+    }
+    if (parsed.framework_used !== framework_name) {
+      console.warn("[content-generate] framework_used mismatch", {
+        expected: framework_name,
+        got:      parsed.framework_used,
+      });
+    }
+
+    return res.status(200).json(parsed);
+  } catch (err) {
+    console.error("[content-generate] fatal:", err);
+    return res.status(500).json({ error: err.message || "internal error" });
+  }
+}
