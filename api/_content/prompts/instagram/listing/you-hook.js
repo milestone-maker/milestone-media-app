@@ -1,4 +1,4 @@
-// Stage 5c — Instagram listing prompt #1: Story-Driven Listing.
+// Stage 5c — Instagram listing prompt #2: "You" Hook Listing.
 //
 // Underscored folder (_content/) keeps this file out of Vercel's
 // serverless-function routing — Vercel only deploys files under api/
@@ -10,7 +10,9 @@
 // { systemPrompt, userMessage } pair the content-engine will send.
 //
 // Shared mapping / validation / substitution logic lives in
-// ../../_helpers.js so frameworks 2–7 can stay thin.
+// ../../_helpers.js. scene_angle is request-only — no listings column;
+// resolveOverride falls through to a default fallback when neither
+// extras nor a (nonexistent) listing column supplies it.
 
 import {
   formatList,
@@ -26,7 +28,7 @@ import {
 const TEMPLATE = `You are writing an Instagram listing caption for {agent_name}.
 
 VOICE PROFILE
-- Tone: {tone_descriptors}
+- Tone descriptors: {tone_descriptors}
 - CTA style: {cta_style}
 - Signature phrases: {signature_phrases}
 - Words to avoid: {avoided_words}
@@ -38,21 +40,21 @@ LISTING
 - City: {city}
 - Beds: {beds} | Baths: {baths} | Sqft: {sqft}
 - Standout features: {features}
-- Story angle: {story_angle}
+- Scene angle: {scene_angle}
 
-FRAMEWORK: STORY-DRIVEN LISTING
+FRAMEWORK: "YOU" HOOK LISTING
 
 Write a caption with these eight sections, in this order:
 
-1. HOOK (1-2 sentences): Open with a vivid scene or short story tied to the story angle. Do NOT mention the property yet. Must land within 3 seconds of reading. Match the agent's tone exactly.
+1. HOOK (1 sentence): Begin with the word "You" and drop the viewer into a sensory moment inside or near the home. Tie to the scene angle. Must land within 3 seconds of reading. Match the agent's tone exactly.
 
-2. BRIDGE (1 sentence): Transition from the story to the property.
+2. SENSORY EXPANSION (1-2 sentences): Continue the scene with sight, sound, smell, or feel details. Stay in second person ("you"). Preserve the rhythm of the hook.
 
-3. REVEAL: State neighborhood, beds, baths, sqft. Do not include full street address.
+3. REVEAL: State neighborhood, beds, baths, sqft. Do not include the full street address.
 
-4. FEATURES (2-3 short sentences): Highlight standout details that tie back to the story angle.
+4. FEATURES (2-3 short sentences): Highlight features that ground the sensory scene from the hook in physical details of the home.
 
-5. TAKE (1 sentence): A reflective line about what this home represents emotionally. Use the agent's reflection style.
+5. TAKE (1 sentence): A reflective line about what living here would feel like. Use the agent's reflection style.
 
 6. CTA (1 sentence): Use the agent's preferred CTA verb and style.
 
@@ -64,6 +66,7 @@ RULES
 - Never use words in the avoided_words list.
 - Naturally incorporate 1-2 signature phrases if they fit; do not force them.
 - Do not use emojis unless the voice profile explicitly enables them.
+- Stay in second person ("you") through HOOK and SENSORY EXPANSION; the FEATURES section can shift to third person if it reads more naturally.
 
 OUTPUT FORMAT (return only valid JSON, no other text):
 {
@@ -71,7 +74,7 @@ OUTPUT FORMAT (return only valid JSON, no other text):
   "hook_line": "<just the hook>",
   "cta_line": "<just the CTA>",
   "hashtags": ["tag1", "tag2", ...],
-  "framework_used": "story_driven_listing",
+  "framework_used": "you_hook_listing",
   "license_number": "{license_number}",
   "platform": "instagram",
   "content_type": "listing"
@@ -95,20 +98,22 @@ const REQUIRED_VARS = [
   "baths",
   "sqft",
   "features",
-  "story_angle",
+  "scene_angle",
 ];
 
 /**
- * Build {systemPrompt, userMessage} for the story-driven listing prompt.
+ * Build {systemPrompt, userMessage} for the "You" Hook listing prompt.
  *
  * @param {object} ctx
  * @param {object} ctx.voiceProfile  Row from public.agent_voice_profiles.
  * @param {object} ctx.listing       Row from public.listings.
- * @param {object} [ctx.extras]      Per-request overrides. story_angle here
- *                                   wins over listing.story_angle.
+ * @param {object} [ctx.extras]      Per-request overrides. scene_angle here
+ *                                   is request-only (no listings column);
+ *                                   resolveOverride falls through to the
+ *                                   default fallback when absent.
  */
 function build({ voiceProfile, listing, extras = {} }) {
-  requireBuildInputs({ voiceProfile, listing }, "story-driven");
+  requireBuildInputs({ voiceProfile, listing }, "you-hook");
 
   // TEMPORARY MAPPING (Stage 5c MVP):
   // The prompt asks for "signature phrases" but agent_voice_profiles has
@@ -125,20 +130,20 @@ function build({ voiceProfile, listing, extras = {} }) {
     ...mapVoiceProfileToPromptVars(voiceProfile),
     ...mapListingToPromptVars(listing),
     signature_phrases: signaturePhrases,
-    story_angle: resolveOverride(
-      extras, listing, "story_angle",
-      "a memorable home in a desirable neighborhood"
+    scene_angle: resolveOverride(
+      extras, listing, "scene_angle",
+      "a quiet moment somewhere in the home"
     ),
   };
 
-  requirePromptVars(vars, REQUIRED_VARS, "story-driven");
+  requirePromptVars(vars, REQUIRED_VARS, "you-hook");
   return { systemPrompt: SYSTEM_PROMPT, userMessage: substituteTemplate(TEMPLATE, vars) };
 }
 
 export default {
   platform:       "instagram",
   content_type:   "listing",
-  framework_name: "story_driven_listing",
+  framework_name: "you_hook_listing",
   template:       TEMPLATE,
   requiredVars:   REQUIRED_VARS,
   build,

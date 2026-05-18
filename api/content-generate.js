@@ -146,6 +146,13 @@ export default async function handler(req, res, depsOverride) {
     const authUser = authData.user;
 
     // ── 2. Validate request body ──
+    //
+    // Structural keys are destructured explicitly; everything else
+    // collects into `extras` and is forwarded to the prompt module's
+    // build() unchanged. Each prompt module declares which override
+    // keys it consumes via resolveOverride() calls — unknown keys are
+    // silently ignored, so new frameworks add override fields without
+    // touching this endpoint.
     const body = req.body || {};
     const {
       voice_profile_id,
@@ -153,7 +160,7 @@ export default async function handler(req, res, depsOverride) {
       framework_name,
       platform     = "instagram",
       content_type = "listing",
-      story_angle,
+      ...extras
     } = body;
 
     if (!voice_profile_id) return res.status(400).json({ error: "voice_profile_id is required" });
@@ -209,7 +216,7 @@ export default async function handler(req, res, depsOverride) {
       built = promptMod.build({
         voiceProfile,
         listing,
-        extras: { story_angle },
+        extras,
       });
     } catch (buildErr) {
       console.error("[content-generate] prompt build error:", buildErr);

@@ -346,3 +346,12 @@ export function substituteTemplate(template, vars) {
     Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : `{${key}}`
   );
 }
+
+// ────────────────────────────────────────────────────────────────────
+// Shared system prompts
+// ────────────────────────────────────────────────────────────────────
+
+/** Shared default system prompt for Instagram-caption listing frameworks. Frameworks may override locally if their structure requires it. */
+export const INSTAGRAM_CAPTION_SYSTEM_PROMPT =
+  "You are a real-estate copywriter generating Instagram captions in the voice of a specific agent. " +
+  "Follow the framework structure exactly. Return only the JSON object described in the OUTPUT FORMAT section, with no prose before or after.";

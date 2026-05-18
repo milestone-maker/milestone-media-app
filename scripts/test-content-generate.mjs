@@ -207,6 +207,12 @@ const CANNED_MODEL_OUTPUT = {
 
 let capturedBuilders = null;
 
+// Per-test override for the canned model output. Default is the
+// framework-1 Sarah Martinez story-driven response (CANNED_MODEL_OUTPUT).
+// Framework-2 tests (or any future test that needs a different shape)
+// set this before calling the handler, then reset to null afterward.
+let cannedOverride = null;
+
 async function mockGenerate(opts) {
   capturedBuilders = {
     systemPrompt: opts.promptBuilders.buildSystemPrompt({}),
@@ -214,7 +220,8 @@ async function mockGenerate(opts) {
     model:        opts.model,
     maxTokens:    opts.maxTokens,
   };
-  return { parsed: CANNED_MODEL_OUTPUT, raw: JSON.stringify(CANNED_MODEL_OUTPUT) };
+  const out = cannedOverride || CANNED_MODEL_OUTPUT;
+  return { parsed: out, raw: JSON.stringify(out) };
 }
 
 // Live mode: route to the real engine via the handler's default path.
@@ -349,6 +356,106 @@ console.log("\n── api/content-generate.js — story_driven_listing ──\n"
     capturedBuilders?.userMessage?.includes("the column-level story angle"));
 }
 
+// ── Framework 2 — you_hook_listing ───────────────────────────────────
+//
+// Same fixture rows as framework 1 (Sarah Martinez voice profile +
+// Lakewood listing). scene_angle is request-only — no listings column.
+// Two scenarios:
+//   F2a: scene_angle override supplied via request body → confirm it
+//        flows through to the user message.
+//   F2b: no scene_angle in extras and no column on listings → confirm
+//        resolveOverride lands on the default fallback string.
+
+const SCENE_ANGLE_OVERRIDE =
+  "Standing on the back porch at golden hour, coffee in hand, listening to the neighborhood wake up.";
+
+// Framework-2 canned output — same hashtags as framework 1 so the
+// canonicalizer assertions stay simple, but framework_used flipped.
+const CANNED_F2_OUTPUT = {
+  ...CANNED_MODEL_OUTPUT,
+  framework_used: "you_hook_listing",
+};
+
+// F2a — happy path with scene_angle override
+{
+  capturedBuilders = null;
+  cannedOverride = CANNED_F2_OUTPUT;
+  const res = await callHandler({
+    body: {
+      voice_profile_id: VOICE_PROFILE_ID,
+      listing_id:       LISTING_ID,
+      framework_name:   "you_hook_listing",
+      scene_angle:      SCENE_ANGLE_OVERRIDE,
+    },
+  });
+  cannedOverride = null;
+  check("F2: happy path returns 200",                  res.statusCode === 200, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
+  check("F2: framework_used === you_hook_listing",     res.body?.framework_used === "you_hook_listing");
+  check("F2: returns caption",                         typeof res.body?.caption === "string" && res.body.caption.length > 0);
+  check("F2: returns hook_line",                       typeof res.body?.hook_line === "string");
+  check("F2: returns cta_line",                        typeof res.body?.cta_line === "string");
+  check("F2: returns hashtags array (8-12)",           Array.isArray(res.body?.hashtags) && res.body.hashtags.length >= 8 && res.body.hashtags.length <= 12);
+  check("F2: platform === instagram",                  res.body?.platform === "instagram");
+  check("F2: content_type === listing",                res.body?.content_type === "listing");
+  check("F2: license_number passed through",           res.body?.license_number === "0123456");
+
+  // Substitution checks specific to framework 2
+  check("F2: user message uses request-body scene_angle override",
+    capturedBuilders?.userMessage?.includes(SCENE_ANGLE_OVERRIDE));
+  check("F2: user message includes 'YOU' HOOK LISTING framework label",
+    capturedBuilders?.userMessage?.includes('FRAMEWORK: "YOU" HOOK LISTING'));
+  check("F2: user message includes Scene angle: prefix",
+    capturedBuilders?.userMessage?.includes("Scene angle: " + SCENE_ANGLE_OVERRIDE));
+  check("F2: no unreplaced {placeholders} remain",
+    !/\{[a-z_]+\}/.test(capturedBuilders?.userMessage || ""));
+}
+
+// F2b — default fallback when scene_angle absent from both extras and listing
+{
+  capturedBuilders = null;
+  cannedOverride = CANNED_F2_OUTPUT;
+  // No scene_angle in body. LAKEWOOD_LISTING fixture has no scene_angle
+  // column (listings schema doesn't include one for this field).
+  await callHandler({
+    body: {
+      voice_profile_id: VOICE_PROFILE_ID,
+      listing_id:       LISTING_ID,
+      framework_name:   "you_hook_listing",
+    },
+  });
+  cannedOverride = null;
+  check("F2: default fallback for missing scene_angle",
+    capturedBuilders?.userMessage?.includes("Scene angle: a quiet moment somewhere in the home"));
+}
+
+// Generic-forwarding test — protects option (b) endpoint behavior.
+// An unknown body key must be silently ignored (forwarded into extras
+// but never consumed by the prompt module's resolveOverride calls).
+// Regression guard against anyone adding filtering logic to the endpoint.
+{
+  capturedBuilders = null;
+  cannedOverride = CANNED_F2_OUTPUT;
+  const res = await callHandler({
+    body: {
+      voice_profile_id:  VOICE_PROFILE_ID,
+      listing_id:        LISTING_ID,
+      framework_name:    "you_hook_listing",
+      scene_angle:       SCENE_ANGLE_OVERRIDE,
+      random_unused_key: "garbage value that should be ignored",
+      another_phantom:   {nested: "also fine"},
+    },
+  });
+  cannedOverride = null;
+  check("generic-forward: unknown extras keys don't error → 200",
+    res.statusCode === 200);
+  check("generic-forward: known scene_angle still substituted",
+    capturedBuilders?.userMessage?.includes(SCENE_ANGLE_OVERRIDE));
+  check("generic-forward: garbage value not present in user message",
+    !capturedBuilders?.userMessage?.includes("garbage value"));
+  check("generic-forward: random_unused_key not present as placeholder",
+    !capturedBuilders?.userMessage?.includes("random_unused_key"));
+}
+
 // 9. LIVE mode — real Anthropic call. Only when --live passed.
 if (LIVE) {
   console.log("\n── LIVE mode — calling Anthropic via @milestone-maker/content-engine ──");
@@ -368,10 +475,39 @@ if (LIVE) {
   check("live: license # appears in caption",         res.body?.caption?.includes("0123456"));
   check("live: brokerage appears in caption",         res.body?.caption?.includes("Compass DFW"));
 
-  console.log("\n── GENERATED CAPTION ──\n");
+  console.log("\n── GENERATED CAPTION (story_driven_listing) ──\n");
   console.log(res.body?.caption);
   console.log("\n── HASHTAGS ──");
   console.log(res.body?.hashtags?.join(" "));
+  console.log("");
+
+  // ── Framework 2 live ──
+  console.log("\n── LIVE — you_hook_listing ──");
+  const res2 = await callHandler({
+    live: true,
+    body: {
+      voice_profile_id: VOICE_PROFILE_ID,
+      listing_id:       LISTING_ID,
+      framework_name:   "you_hook_listing",
+      scene_angle:      SCENE_ANGLE_OVERRIDE,
+    },
+  });
+  check("live F2: returns 200",                          res2.statusCode === 200, `got ${res2.statusCode} ${JSON.stringify(res2.body)}`);
+  check("live F2: framework_used === you_hook_listing",  res2.body?.framework_used === "you_hook_listing");
+  check("live F2: caption is non-empty string",          typeof res2.body?.caption === "string" && res2.body.caption.length > 100);
+  check("live F2: hashtags 8-12",                        Array.isArray(res2.body?.hashtags) && res2.body.hashtags.length >= 8 && res2.body.hashtags.length <= 12);
+  check("live F2: license # appears in caption",         res2.body?.caption?.includes("0123456"));
+  check("live F2: brokerage appears in caption",         res2.body?.caption?.includes("Compass DFW"));
+  // Framework-2-specific: hook begins with "You"
+  check("live F2: caption opens with 'You'",             /^you\b/i.test(String(res2.body?.caption || "").trimStart()));
+  // Canonicalizer holds: caption trailing block matches hashtags array byte-for-byte
+  check("live F2: caption ends with array-joined hashtags",
+    res2.body?.caption?.endsWith((res2.body?.hashtags || []).join(" ")));
+
+  console.log("\n── GENERATED CAPTION (you_hook_listing) ──\n");
+  console.log(res2.body?.caption);
+  console.log("\n── HASHTAGS ──");
+  console.log(res2.body?.hashtags?.join(" "));
   console.log("");
 }
 

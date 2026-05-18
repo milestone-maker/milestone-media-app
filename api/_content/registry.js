@@ -10,10 +10,12 @@
 // match the table cell it's slotted into, catching copy-paste errors.
 
 import storyDrivenListing from "./prompts/instagram/listing/story-driven.js";
+import youHookListing     from "./prompts/instagram/listing/you-hook.js";
 
 const PROMPTS = [
   storyDrivenListing,
-  // Frameworks 2–7 land here as their files are added.
+  youHookListing,
+  // Frameworks 3–7 land here as their files are added.
 ];
 
 const registry = Object.create(null);
