@@ -25,6 +25,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { findPrompt } from "./_content/registry.js";
 import { canonicalizeHashtags } from "./_content/post-processors.js";
+import { UNIVERSAL_REQUIRED_OUTPUT_FIELDS } from "./_content/prompts/_helpers.js";
 
 // Engine is CommonJS; lazy-imported on first use so test runs that inject
 // a mock generator (via depsOverride.generate) don't require the package
@@ -262,7 +263,13 @@ export default async function handler(req, res, depsOverride) {
     // before validation so the validated caption is the canonical one.
     const finalParsed = canonicalizeHashtags(parsed);
 
-    const required = ["caption", "hook_line", "cta_line", "hashtags", "framework_used", "platform", "content_type"];
+    // Per-framework union: the universal minimum every Instagram
+    // listing template emits, plus any extra fields the framework
+    // module declares (e.g., walkthrough-carousel adds "slides").
+    const required = [
+      ...UNIVERSAL_REQUIRED_OUTPUT_FIELDS,
+      ...(promptMod.additionalRequiredOutputFields || []),
+    ];
     const missing = required.filter((k) => finalParsed[k] === undefined || finalParsed[k] === null);
     if (missing.length) {
       console.error("[content-generate] model output missing required fields", {

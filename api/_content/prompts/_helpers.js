@@ -355,3 +355,36 @@ export function substituteTemplate(template, vars) {
 export const INSTAGRAM_CAPTION_SYSTEM_PROMPT =
   "You are a real-estate copywriter generating Instagram captions in the voice of a specific agent. " +
   "Follow the framework structure exactly. Return only the JSON object described in the OUTPUT FORMAT section, with no prose before or after.";
+
+// ────────────────────────────────────────────────────────────────────
+// Output validation
+// ────────────────────────────────────────────────────────────────────
+
+/**
+ * Universal minimum set of required output fields that every Instagram
+ * listing prompt template emits. Lifted from the OUTPUT FORMAT JSON
+ * example baked into each template — these seven fields appear in
+ * every framework's contract.
+ *
+ * Per-framework modules may extend this set via the
+ * `additionalRequiredOutputFields` array on their default export
+ * (e.g., walkthrough-carousel declares ["slides"]). The endpoint
+ * validates the union of these two lists.
+ *
+ * Presence-only — the endpoint checks that each listed key has a
+ * non-null/non-undefined value. Type-level validation is deliberately
+ * out of scope; add a per-framework validateOutput(parsed) hook when
+ * a concrete production failure mode justifies it.
+ *
+ * Frozen to discourage runtime mutation; spread or copy if a caller
+ * needs to compute a union.
+ */
+export const UNIVERSAL_REQUIRED_OUTPUT_FIELDS = Object.freeze([
+  "caption",
+  "hook_line",
+  "cta_line",
+  "hashtags",
+  "framework_used",
+  "platform",
+  "content_type",
+]);

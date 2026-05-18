@@ -146,5 +146,6 @@ export default {
   framework_name: "you_hook_listing",
   template:       TEMPLATE,
   requiredVars:   REQUIRED_VARS,
+  additionalRequiredOutputFields: [],
   build,
 };

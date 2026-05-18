@@ -141,5 +141,6 @@ export default {
   framework_name: "story_driven_listing",
   template:       TEMPLATE,
   requiredVars:   REQUIRED_VARS,
+  additionalRequiredOutputFields: [],
   build,
 };

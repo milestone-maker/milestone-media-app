@@ -456,6 +456,113 @@ const CANNED_F2_OUTPUT = {
     !capturedBuilders?.userMessage?.includes("random_unused_key"));
 }
 
+// ── Framework 3 — walkthrough_carousel ───────────────────────────────
+//
+// New surface area for framework 3:
+//   • Per-request override key: slide_subjects (string).
+//   • Default fallback: "kitchen, primary suite, primary bathroom,
+//                       living area, outdoor space" (5 subjects → 7 slides).
+//   • Additional required output field: "slides" (array).
+//
+// Two happy-path tests + one default-fallback test + the per-framework
+// output-validation regression at the end.
+
+const SLIDE_SUBJECTS_OVERRIDE = "entryway, chef kitchen, primary suite, screened porch, rooftop deck";
+
+// Canned framework-3 output — same caption shell as frameworks 1/2 plus
+// a well-formed 7-slide array for the override-list scenario.
+const CANNED_F3_OUTPUT = {
+  ...CANNED_MODEL_OUTPUT,
+  framework_used: "walkthrough_carousel",
+  slides: [
+    { slide_number: 1, subject: "cover",          text: "Step inside a Lakewood Tudor" },
+    { slide_number: 2, subject: "entryway",       text: "Original 1920s wood floors greet you" },
+    { slide_number: 3, subject: "chef kitchen",   text: "Marble counters, built-in pantry" },
+    { slide_number: 4, subject: "primary suite",  text: "South-facing windows, morning light" },
+    { slide_number: 5, subject: "screened porch", text: "Slow Saturdays start here" },
+    { slide_number: 6, subject: "rooftop deck",   text: "Sunset views over White Rock Lake" },
+    { slide_number: 7, subject: "final",          text: "DM me to walk through it" },
+  ],
+};
+
+// F3a — happy path with slide_subjects override
+{
+  capturedBuilders = null;
+  cannedOverride = CANNED_F3_OUTPUT;
+  const res = await callHandler({
+    body: {
+      voice_profile_id: VOICE_PROFILE_ID,
+      listing_id:       LISTING_ID,
+      framework_name:   "walkthrough_carousel",
+      slide_subjects:   SLIDE_SUBJECTS_OVERRIDE,
+    },
+  });
+  cannedOverride = null;
+  check("F3: happy path returns 200",                  res.statusCode === 200, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
+  check("F3: framework_used === walkthrough_carousel", res.body?.framework_used === "walkthrough_carousel");
+  check("F3: slides array present in response",        Array.isArray(res.body?.slides));
+  // 5 subjects + 1 cover + 1 final = 7 slides
+  check("F3: slides length === 1 cover + N subjects + 1 final",
+    res.body?.slides?.length === 7);
+  check("F3: slide 1 subject === 'cover'",             res.body?.slides?.[0]?.subject === "cover");
+  check("F3: last slide subject === 'final'",          res.body?.slides?.[res.body?.slides?.length - 1]?.subject === "final");
+
+  // Substitution checks
+  check("F3: user message includes WALK-THROUGH CAROUSEL framework label",
+    capturedBuilders?.userMessage?.includes("FRAMEWORK: WALK-THROUGH CAROUSEL"));
+  check("F3: user message uses request-body slide_subjects override",
+    capturedBuilders?.userMessage?.includes(SLIDE_SUBJECTS_OVERRIDE));
+  check("F3: user message includes Slide subjects line",
+    capturedBuilders?.userMessage?.includes("Slide subjects (ordered, one slide per subject): " + SLIDE_SUBJECTS_OVERRIDE));
+  check("F3: no unreplaced {placeholders} remain",
+    !/\{[a-z_]+\}/.test(capturedBuilders?.userMessage || ""));
+}
+
+// F3b — default fallback when slide_subjects absent
+{
+  capturedBuilders = null;
+  cannedOverride = CANNED_F3_OUTPUT;
+  await callHandler({
+    body: {
+      voice_profile_id: VOICE_PROFILE_ID,
+      listing_id:       LISTING_ID,
+      framework_name:   "walkthrough_carousel",
+    },
+  });
+  cannedOverride = null;
+  check("F3: default fallback for missing slide_subjects",
+    capturedBuilders?.userMessage?.includes(
+      "Slide subjects (ordered, one slide per subject): kitchen, primary suite, primary bathroom, living area, outdoor space"
+    ));
+}
+
+// Per-framework output-validation regression
+//
+// Proves additionalRequiredOutputFields is consulted, not a hardcoded
+// universal list. Two scenarios with the same omission (slides field):
+//   • Framework 3 demands slides → 502
+//   • Framework 1 does not demand slides → 200
+{
+  // F3 model output missing the slides field → 502
+  cannedOverride = { ...CANNED_F3_OUTPUT, slides: undefined };
+  const res3 = await callHandler({
+    body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "walkthrough_carousel" },
+  });
+  cannedOverride = null;
+  check("output-validation: F3 missing slides → 502", res3.statusCode === 502);
+  check("output-validation: F3 missing slides reports 'slides' in missing list",
+    Array.isArray(res3.body?.missing) && res3.body.missing.includes("slides"));
+
+  // F1 model output ALSO missing slides (which F1 doesn't require) → 200
+  cannedOverride = { ...CANNED_MODEL_OUTPUT, slides: undefined };
+  const res1 = await callHandler({
+    body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "story_driven_listing" },
+  });
+  cannedOverride = null;
+  check("output-validation: F1 missing slides → 200 (not in its declared set)",
+    res1.statusCode === 200);
+}
+
 // 9. LIVE mode — real Anthropic call. Only when --live passed.
 if (LIVE) {
   console.log("\n── LIVE mode — calling Anthropic via @milestone-maker/content-engine ──");
@@ -508,6 +615,58 @@ if (LIVE) {
   console.log(res2.body?.caption);
   console.log("\n── HASHTAGS ──");
   console.log(res2.body?.hashtags?.join(" "));
+  console.log("");
+
+  // ── Framework 3 live ──
+  console.log("\n── LIVE — walkthrough_carousel ──");
+  const res3 = await callHandler({
+    live: true,
+    body: {
+      voice_profile_id: VOICE_PROFILE_ID,
+      listing_id:       LISTING_ID,
+      framework_name:   "walkthrough_carousel",
+      // No slide_subjects override — exercises default fallback in production.
+    },
+  });
+  check("live F3: returns 200",                          res3.statusCode === 200, `got ${res3.statusCode} ${JSON.stringify(res3.body)}`);
+  check("live F3: framework_used === walkthrough_carousel", res3.body?.framework_used === "walkthrough_carousel");
+  check("live F3: slides array present",                 Array.isArray(res3.body?.slides));
+  // Default fallback has 5 subjects → 7 slides total (1 cover + 5 + 1 final)
+  check("live F3: 7 slides (cover + 5 default subjects + final)",
+    res3.body?.slides?.length === 7);
+  check("live F3: slide 1 subject === 'cover'",          res3.body?.slides?.[0]?.subject === "cover");
+  check("live F3: last slide subject === 'final'",       res3.body?.slides?.[res3.body?.slides?.length - 1]?.subject === "final");
+  // Every slide has slide_number + subject + text
+  const slidesWellFormed = (res3.body?.slides || []).every(
+    (s) => typeof s.slide_number === "number" && typeof s.subject === "string" && typeof s.text === "string"
+  );
+  check("live F3: every slide has slide_number/subject/text", slidesWellFormed);
+  // Slide overlay text length cap (prompt says max 8 words; allow some slack via a soft cap of 12)
+  const overlaysShort = (res3.body?.slides || []).every(
+    (s) => String(s.text || "").trim().split(/\s+/).length <= 12
+  );
+  check("live F3: all slide overlays ≤ 12 words (soft cap on prompt's 8-word rule)", overlaysShort);
+  // Universal contract checks
+  check("live F3: hashtags 8-12",                        Array.isArray(res3.body?.hashtags) && res3.body.hashtags.length >= 8 && res3.body.hashtags.length <= 12);
+  check("live F3: license # appears in caption",         res3.body?.caption?.includes("0123456"));
+  check("live F3: brokerage appears in caption",         res3.body?.caption?.includes("Compass DFW"));
+  check("live F3: caption ends with array-joined hashtags",
+    res3.body?.caption?.endsWith((res3.body?.hashtags || []).join(" ")));
+  // hook_line should equal the cover slide's text per the prompt contract
+  check("live F3: hook_line === cover slide text",
+    res3.body?.hook_line === res3.body?.slides?.[0]?.text);
+  // cta_line should equal the final slide's text
+  check("live F3: cta_line === final slide text",
+    res3.body?.cta_line === res3.body?.slides?.[res3.body?.slides?.length - 1]?.text);
+
+  console.log("\n── GENERATED CAPTION (walkthrough_carousel) ──\n");
+  console.log(res3.body?.caption);
+  console.log("\n── SLIDES ──");
+  for (const s of (res3.body?.slides || [])) {
+    console.log(`  ${String(s.slide_number).padStart(2, " ")}. [${s.subject}] ${s.text}`);
+  }
+  console.log("\n── HASHTAGS ──");
+  console.log(res3.body?.hashtags?.join(" "));
   console.log("");
 }
 

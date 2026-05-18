@@ -9,13 +9,15 @@
 // register() helper validates the module's self-declared coordinates
 // match the table cell it's slotted into, catching copy-paste errors.
 
-import storyDrivenListing from "./prompts/instagram/listing/story-driven.js";
-import youHookListing     from "./prompts/instagram/listing/you-hook.js";
+import storyDrivenListing    from "./prompts/instagram/listing/story-driven.js";
+import youHookListing        from "./prompts/instagram/listing/you-hook.js";
+import walkthroughCarousel   from "./prompts/instagram/listing/walkthrough-carousel.js";
 
 const PROMPTS = [
   storyDrivenListing,
   youHookListing,
-  // Frameworks 3–7 land here as their files are added.
+  walkthroughCarousel,
+  // Frameworks 4–7 land here as their files are added.
 ];
 
 const registry = Object.create(null);
