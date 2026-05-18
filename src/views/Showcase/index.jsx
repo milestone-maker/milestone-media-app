@@ -46,7 +46,7 @@ function ShowcaseView({ onBook }) {
     if (!user?.id) return;
     supabase
       .from("microsites")
-      .select("id, slug, theme, data, created_at")
+      .select("id, slug, theme, property_data, created_at")
       .eq("agent_id", user.id)
       .eq("published", true)
       .order("created_at", { ascending: false })
@@ -227,7 +227,7 @@ function ShowcaseView({ onBook }) {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
             {microsites.map(ms => {
-              const msData = ms.data || {};
+              const msData = ms.property_data || {};
               const heroImg = msData.hero_img || "";
               const address = msData.address || "Property";
               const city    = msData.city || "";
@@ -271,7 +271,7 @@ function ShowcaseView({ onBook }) {
                     borderRadius: 20, padding: "3px 10px",
                     fontFamily: "'Jost', sans-serif", fontSize: 9, color: "#C9A84C",
                     letterSpacing: "0.1em", textTransform: "uppercase", fontWeight: 600,
-                  }}>{ms.theme || "Classic"}</div>
+                  }}>{ms.theme}</div>
                   {/* Content — bottom */}
                   <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "16px 18px" }}>
                     <div style={{
