@@ -563,6 +563,97 @@ const CANNED_F3_OUTPUT = {
     res1.statusCode === 200);
 }
 
+// ── Frameworks 4-7 — single-caption frameworks with one override each ──
+//
+// Same shape and validation surface as framework 1 (single object, no
+// additional required output fields). One mock canned-output template
+// flipped per framework_name; one happy-path + one default-fallback
+// test each. Override key, default fallback, and a string the live
+// prompt body should contain are table-driven so adding framework 8
+// later is a one-row addition.
+
+const F4_7_SCENARIOS = [
+  {
+    label:           "F4 (behind_the_scenes_prelist)",
+    framework_name:  "behind_the_scenes_prelist",
+    override_key:    "bts_context",
+    override_value:  "Staging crew wraps tonight; drone goes up at golden hour Saturday.",
+    default_value:   "Prepping this one to go live soon — wrapping up final details.",
+    user_label:      "FRAMEWORK: BEHIND-THE-SCENES PRE-LIST",
+    listing_field:   "Pre-list context (timing + what the visual shows): ",
+  },
+  {
+    label:           "F5 (neighborhood_first)",
+    framework_name:  "neighborhood_first",
+    override_key:    "lifestyle_angle",
+    override_value:  "Walk-everywhere mornings: coffee at the corner spot, dog-park stroll, Saturday market by 9am.",
+    default_value:   "a neighborhood with strong daily rituals and walkable charm",
+    user_label:      "FRAMEWORK: NEIGHBORHOOD-FIRST",
+    listing_field:   "Lifestyle angle: ",
+  },
+  {
+    label:           "F6 (problem_solution)",
+    framework_name:  "problem_solution",
+    override_key:    "buyer_problem",
+    override_value:  "You keep finding homes that look good in photos but feel cramped the second you step inside.",
+    default_value:   "the search for a home that actually fits your life",
+    user_label:      "FRAMEWORK: PROBLEM-SOLUTION",
+    listing_field:   "Buyer problem: ",
+  },
+  {
+    label:           "F7 (pov_day_in_life)",
+    framework_name:  "pov_day_in_life",
+    override_key:    "time_of_day_moment",
+    override_value:  "6:47am — first cup of coffee on the back porch as the neighborhood wakes up.",
+    default_value:   "a quiet Sunday morning at home",
+    user_label:      "FRAMEWORK: POV / DAY-IN-THE-LIFE",
+    listing_field:   "Time-of-day moment: ",
+  },
+];
+
+for (const scn of F4_7_SCENARIOS) {
+  const cannedForFw = { ...CANNED_MODEL_OUTPUT, framework_used: scn.framework_name };
+
+  // Happy path with override
+  {
+    capturedBuilders = null;
+    cannedOverride = cannedForFw;
+    const res = await callHandler({
+      body: {
+        voice_profile_id:    VOICE_PROFILE_ID,
+        listing_id:          LISTING_ID,
+        framework_name:      scn.framework_name,
+        [scn.override_key]:  scn.override_value,
+      },
+    });
+    cannedOverride = null;
+    check(`${scn.label}: happy path returns 200`,                  res.statusCode === 200, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
+    check(`${scn.label}: framework_used matches`,                  res.body?.framework_used === scn.framework_name);
+    check(`${scn.label}: caption present`,                         typeof res.body?.caption === "string" && res.body.caption.length > 0);
+    check(`${scn.label}: hashtags 8-12`,                           Array.isArray(res.body?.hashtags) && res.body.hashtags.length >= 8 && res.body.hashtags.length <= 12);
+    check(`${scn.label}: user message includes framework label`,   capturedBuilders?.userMessage?.includes(scn.user_label));
+    check(`${scn.label}: user message uses override value`,        capturedBuilders?.userMessage?.includes(scn.override_value));
+    check(`${scn.label}: user message has labeled listing field`,  capturedBuilders?.userMessage?.includes(scn.listing_field + scn.override_value));
+    check(`${scn.label}: no unreplaced {placeholders} remain`,     !/\{[a-z_]+\}/.test(capturedBuilders?.userMessage || ""));
+  }
+
+  // Default-fallback path
+  {
+    capturedBuilders = null;
+    cannedOverride = cannedForFw;
+    await callHandler({
+      body: {
+        voice_profile_id: VOICE_PROFILE_ID,
+        listing_id:       LISTING_ID,
+        framework_name:   scn.framework_name,
+      },
+    });
+    cannedOverride = null;
+    check(`${scn.label}: default fallback used when override absent`,
+      capturedBuilders?.userMessage?.includes(scn.listing_field + scn.default_value));
+  }
+}
+
 // 9. LIVE mode — real Anthropic call. Only when --live passed.
 if (LIVE) {
   console.log("\n── LIVE mode — calling Anthropic via @milestone-maker/content-engine ──");
@@ -668,6 +759,48 @@ if (LIVE) {
   console.log("\n── HASHTAGS ──");
   console.log(res3.body?.hashtags?.join(" "));
   console.log("");
+
+  // ── Frameworks 4-7 live ──
+  for (const scn of F4_7_SCENARIOS) {
+    console.log(`\n── LIVE — ${scn.framework_name} ──`);
+    const resN = await callHandler({
+      live: true,
+      body: {
+        voice_profile_id:    VOICE_PROFILE_ID,
+        listing_id:          LISTING_ID,
+        framework_name:      scn.framework_name,
+        [scn.override_key]:  scn.override_value,
+      },
+    });
+    check(`live ${scn.label}: returns 200`,                     resN.statusCode === 200, `got ${resN.statusCode} ${JSON.stringify(resN.body)}`);
+    check(`live ${scn.label}: framework_used matches`,          resN.body?.framework_used === scn.framework_name);
+    check(`live ${scn.label}: caption non-empty`,               typeof resN.body?.caption === "string" && resN.body.caption.length > 100);
+    check(`live ${scn.label}: hashtags 8-12`,                   Array.isArray(resN.body?.hashtags) && resN.body.hashtags.length >= 8 && resN.body.hashtags.length <= 12);
+    check(`live ${scn.label}: license # in caption`,            resN.body?.caption?.includes("0123456"));
+    check(`live ${scn.label}: brokerage in caption`,            resN.body?.caption?.includes("Compass DFW"));
+    check(`live ${scn.label}: hashtag canonicalization holds`,
+      resN.body?.caption?.endsWith((resN.body?.hashtags || []).join(" ")));
+    // Banned-word adherence (Sarah Martinez's phrases_to_avoid)
+    const lower = String(resN.body?.caption || "").toLowerCase();
+    check(`live ${scn.label}: avoided word 'luxury' absent`,    !lower.includes("luxury"));
+    check(`live ${scn.label}: avoided word 'stunning' absent`,  !lower.includes("stunning"));
+    check(`live ${scn.label}: avoided word 'must-see' absent`,  !lower.includes("must-see") && !lower.includes("must see"));
+    check(`live ${scn.label}: avoided word "won't last" absent`,!lower.includes("won't last") && !lower.includes("wont last"));
+
+    // Framework-4-specific: pre-list must not reveal full street address.
+    // The fixture's address is "5912 Velasco Ave" — assert that exact
+    // street string never appears.
+    if (scn.framework_name === "behind_the_scenes_prelist") {
+      check(`live ${scn.label}: full street address NEVER in caption`,
+        !lower.includes("5912 velasco") && !lower.includes("velasco ave"));
+    }
+
+    console.log(`\n── GENERATED CAPTION (${scn.framework_name}) ──\n`);
+    console.log(resN.body?.caption);
+    console.log("\n── HASHTAGS ──");
+    console.log(resN.body?.hashtags?.join(" "));
+    console.log("");
+  }
 }
 
 // ── Unit tests: canonicalizeHashtags ─────────────────────────────────
