@@ -24,6 +24,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { findPrompt } from "./_content/registry.js";
+import { canonicalizeHashtags } from "./_content/post-processors.js";
 
 // Engine is CommonJS; lazy-imported on first use so test runs that inject
 // a mock generator (via depsOverride.generate) don't require the package
@@ -248,8 +249,14 @@ export default async function handler(req, res, depsOverride) {
       console.error("[content-generate] parsed result not an object", { raw: result.raw });
       return res.status(502).json({ error: "model returned non-object payload" });
     }
+
+    // Canonicalize hashtags so the caption-body block and the structured
+    // hashtags[] array can never disagree on casing or content. Runs
+    // before validation so the validated caption is the canonical one.
+    const finalParsed = canonicalizeHashtags(parsed);
+
     const required = ["caption", "hook_line", "cta_line", "hashtags", "framework_used", "platform", "content_type"];
-    const missing = required.filter((k) => parsed[k] === undefined || parsed[k] === null);
+    const missing = required.filter((k) => finalParsed[k] === undefined || finalParsed[k] === null);
     if (missing.length) {
       console.error("[content-generate] model output missing required fields", {
         missing,
@@ -260,14 +267,14 @@ export default async function handler(req, res, depsOverride) {
         missing,
       });
     }
-    if (parsed.framework_used !== framework_name) {
+    if (finalParsed.framework_used !== framework_name) {
       console.warn("[content-generate] framework_used mismatch", {
         expected: framework_name,
-        got:      parsed.framework_used,
+        got:      finalParsed.framework_used,
       });
     }
 
-    return res.status(200).json(parsed);
+    return res.status(200).json(finalParsed);
   } catch (err) {
     console.error("[content-generate] fatal:", err);
     return res.status(500).json({ error: err.message || "internal error" });

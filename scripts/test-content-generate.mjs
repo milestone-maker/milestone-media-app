@@ -174,6 +174,12 @@ function makeSupabaseMock({
 }
 
 // Canned model output matching the framework's documented JSON shape.
+//
+// The caption body's trailing hashtag block uses DELIBERATELY MISMATCHED
+// CASING vs the hashtags[] array (#lakewooddallas all-lowercase in body,
+// #LakewoodDallas CamelCase in array). This reproduces the live-output
+// bug from Stage 5c framework 1 and lets the happy-path test assert
+// the canonicalizer fixed it end-to-end.
 const CANNED_MODEL_OUTPUT = {
   caption:
     "There's a porch in Lakewood that catches the late afternoon light just right—the kind of porch where Saturday mornings stretch into Saturday afternoons.\n\n" +
@@ -183,7 +189,8 @@ const CANNED_MODEL_OUTPUT = {
     "Some homes feel like a fresh start. This one feels like the place where your next chapter actually begins.\n\n" +
     "Send me a DM to schedule a private tour this week.\n\n" +
     "Sarah Martinez | Compass DFW | TREC License #0123456\n\n" +
-    "#LakewoodDallas #DallasRealEstate #DFWHomes #WhiteRockLake #LakewoodHomes #HistoricHomes #LakewoodLiving #DallasLifestyle #DFWRealtor #DallasFamily",
+    // ↓ mismatched casing — #lakewooddallas (lowercase) here vs #LakewoodDallas in hashtags[]
+    "#lakewooddallas #DallasRealEstate #DFWHomes #WhiteRockLake #LakewoodHomes #HistoricHomes #LakewoodLiving #DallasLifestyle #DFWRealtor #DallasFamily",
   hook_line:
     "There's a porch in Lakewood that catches the late afternoon light just right—the kind of porch where Saturday mornings stretch into Saturday afternoons.",
   cta_line: "Send me a DM to schedule a private tour this week.",
@@ -267,6 +274,16 @@ console.log("\n── api/content-generate.js — story_driven_listing ──\n"
   check("signature_phrases concat hook+take",         capturedBuilders?.userMessage?.includes("Signature phrases: There's a porch in Lakewood"));
   check("cta_style formatted from cta_verbs",         capturedBuilders?.userMessage?.includes("Preferred CTA verbs: send me a DM"));
   check("no unreplaced {placeholders} remain",        !/\{[a-z_]+\}/.test(capturedBuilders?.userMessage || ""));
+
+  // Canonicalization assertions — caption body must end up using the
+  // array's casing exactly, and the mismatched lowercase tag from the
+  // canned body must be gone.
+  check("canonicalized: caption ends with array-cased hashtag block",
+    res.body?.caption?.endsWith("#LakewoodDallas #DallasRealEstate #DFWHomes #WhiteRockLake #LakewoodHomes #HistoricHomes #LakewoodLiving #DallasLifestyle #DFWRealtor #DallasFamily"));
+  check("canonicalized: lowercase #lakewooddallas removed from caption body",
+    !res.body?.caption?.includes("#lakewooddallas"));
+  check("canonicalized: compliance line with TREC License #0123456 preserved",
+    res.body?.caption?.includes("Sarah Martinez | Compass DFW | TREC License #0123456"));
 }
 
 // 2. Missing Authorization header → 401
@@ -356,6 +373,136 @@ if (LIVE) {
   console.log("\n── HASHTAGS ──");
   console.log(res.body?.hashtags?.join(" "));
   console.log("");
+}
+
+// ── Unit tests: canonicalizeHashtags ─────────────────────────────────
+//
+// Direct unit tests on the post-processor itself, separate from the
+// handler integration test above. Imports from the same source the
+// handler uses.
+
+console.log("\n── api/_content/post-processors.js — canonicalizeHashtags ──\n");
+
+const postProc = await import(pathToFileURL(resolve(REPO_ROOT, "api", "_content", "post-processors.js")).href);
+const { canonicalizeHashtags } = postProc;
+
+// 1. Empty hashtags array → unchanged (same reference)
+{
+  const input = { caption: "Hello\n\n#tag #stuff", hashtags: [] };
+  const out = canonicalizeHashtags(input);
+  check("empty hashtags array → returns same reference", out === input);
+}
+
+// 2. Missing hashtags field → unchanged
+{
+  const input = { caption: "Hello\n\n#tag #stuff" };
+  const out = canonicalizeHashtags(input);
+  check("missing hashtags field → returns same reference", out === input);
+}
+
+// 3. hashtags not an array → unchanged
+{
+  const input = { caption: "Hello\n\n#tag", hashtags: "#NotAnArray" };
+  const out = canonicalizeHashtags(input);
+  check("hashtags not an array → returns same reference", out === input);
+}
+
+// 4. Single-line trailing block — replaced with array casing
+{
+  const input = {
+    caption: "Body paragraph here.\n\n#old #tags #here",
+    hashtags: ["#New", "#TAGS", "#Here"],
+  };
+  const out = canonicalizeHashtags(input);
+  check("single-line trailing block replaced",
+    out.caption === "Body paragraph here.\n\n#New #TAGS #Here");
+  check("single-line: input not mutated", input.caption.endsWith("#old #tags #here"));
+}
+
+// 5. Multi-line trailing block — replaced as a single block
+{
+  const input = {
+    caption: "Body paragraph here.\n\n#a #b #c\n#d #e #f",
+    hashtags: ["#A", "#B", "#C", "#D", "#E", "#F"],
+  };
+  const out = canonicalizeHashtags(input);
+  check("multi-line trailing block collapsed + replaced",
+    out.caption === "Body paragraph here.\n\n#A #B #C #D #E #F");
+}
+
+// 6. Case mismatches in body → final caption uses array casing exactly
+{
+  const input = {
+    caption: "Story body.\n\n#lakewooddallas #dallasrealestate",
+    hashtags: ["#LakewoodDallas", "#DallasRealEstate"],
+  };
+  const out = canonicalizeHashtags(input);
+  check("case-mismatched body → array casing wins",
+    out.caption === "Story body.\n\n#LakewoodDallas #DallasRealEstate");
+  check("case-mismatched: lowercase fully removed",
+    !out.caption.includes("#lakewooddallas") && !out.caption.includes("#dallasrealestate"));
+}
+
+// 7. No trailing hashtag block — array appended after blank line
+{
+  const input = {
+    caption: "Story body, no tags at the bottom.",
+    hashtags: ["#One", "#Two"],
+  };
+  const out = canonicalizeHashtags(input);
+  check("no trailing block → array appended after blank line",
+    out.caption === "Story body, no tags at the bottom.\n\n#One #Two");
+}
+
+// 7b. No trailing hashtag block, caption has trailing whitespace already
+{
+  const input = {
+    caption: "Story body.\n\n",
+    hashtags: ["#One"],
+  };
+  const out = canonicalizeHashtags(input);
+  check("no trailing block + trailing whitespace → trimmed before append",
+    out.caption === "Story body.\n\n#One");
+}
+
+// 8. Negative case: compliance line contains "#0123456" AND there's a
+//    separate trailing hashtag block. Only the trailing block should
+//    be replaced; the compliance line stays exactly as-is.
+{
+  const input = {
+    caption:
+      "Story body here.\n\n" +
+      "Sarah Martinez | Compass DFW | TREC License #0123456\n\n" +
+      "#old #wrong #casing",
+    hashtags: ["#Right", "#Casing", "#Here"],
+  };
+  const out = canonicalizeHashtags(input);
+  check("compliance line with #0123456 preserved exactly",
+    out.caption.includes("Sarah Martinez | Compass DFW | TREC License #0123456"));
+  check("only trailing block replaced, not compliance line",
+    out.caption.endsWith("#Right #Casing #Here"));
+  check("old wrong hashtags removed",
+    !out.caption.includes("#old") && !out.caption.includes("#wrong"));
+  // Also confirm the compliance line wasn't matched as a hashtag block
+  // (would have been replaced by appending, producing a duplicate).
+  const occurrences = (out.caption.match(/#Right #Casing #Here/g) || []).length;
+  check("canonical block appears exactly once (no duplicate from append fallback)",
+    occurrences === 1);
+}
+
+// 9. Caption is empty string + hashtags present → caption becomes the block
+{
+  const input = { caption: "", hashtags: ["#Only"] };
+  const out = canonicalizeHashtags(input);
+  check("empty caption → caption becomes canonical block alone",
+    out.caption === "#Only");
+}
+
+// 10. Non-string caption → unchanged
+{
+  const input = { caption: null, hashtags: ["#X"] };
+  const out = canonicalizeHashtags(input);
+  check("non-string caption → returns same reference", out === input);
 }
 
 // ── Summary ──────────────────────────────────────────────────────────
