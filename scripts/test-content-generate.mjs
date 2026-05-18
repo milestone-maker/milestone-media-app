@@ -505,6 +505,216 @@ const { canonicalizeHashtags } = postProc;
   check("non-string caption → returns same reference", out === input);
 }
 
+// ── Unit tests: prompts/_helpers.js ──────────────────────────────────
+//
+// Direct unit tests on every helper exported from
+// api/_content/prompts/_helpers.js — the shared boilerplate that
+// every framework's build() function composes from. Covers happy
+// path, edge cases (null/empty), and documented "Assumes" boundaries.
+
+console.log("\n── api/_content/prompts/_helpers.js — shared builder helpers ──\n");
+
+const helpers = await import(pathToFileURL(resolve(REPO_ROOT, "api", "_content", "prompts", "_helpers.js")).href);
+const {
+  arrOrEmpty,
+  formatList,
+  requireBuildInputs,
+  mapVoiceProfileToPromptVars,
+  mapListingToPromptVars,
+  resolveOverride,
+  requirePromptVars,
+  substituteTemplate,
+} = helpers;
+
+// ── arrOrEmpty ──
+{
+  const a = [1, 2, 3];
+  check("arrOrEmpty: array passes through (same reference)", arrOrEmpty(a) === a);
+  check("arrOrEmpty: null → []",         Array.isArray(arrOrEmpty(null))      && arrOrEmpty(null).length === 0);
+  check("arrOrEmpty: undefined → []",    Array.isArray(arrOrEmpty(undefined)) && arrOrEmpty(undefined).length === 0);
+  check("arrOrEmpty: string → []",       arrOrEmpty("x").length === 0);
+  check("arrOrEmpty: object → []",       arrOrEmpty({a:1}).length === 0);
+}
+
+// ── formatList ──
+{
+  check("formatList: joins with commas",            formatList(["a", "b", "c"])             === "a, b, c");
+  check("formatList: empty → default fallback",     formatList([])                          === "(none specified)");
+  check("formatList: null → default fallback",      formatList(null)                        === "(none specified)");
+  check("formatList: custom fallback honored",      formatList([], "warm and direct")       === "warm and direct");
+  check("formatList: filters blanks/whitespace",    formatList(["a", "", "  ", "b"])        === "a, b");
+  check("formatList: all-blank → fallback",         formatList(["", "  ", null])            === "(none specified)");
+  check("formatList: coerces non-strings via String", formatList([1, true, 3])              === "1, true, 3");
+}
+
+// ── requireBuildInputs ──
+{
+  // happy path: no throw
+  let threw = false;
+  try { requireBuildInputs({ voiceProfile: {}, listing: {} }, "test-fw"); } catch { threw = true; }
+  check("requireBuildInputs: both present → no throw", !threw);
+
+  let err = null;
+  try { requireBuildInputs({ voiceProfile: null, listing: {} }, "test-fw"); } catch (e) { err = e; }
+  check("requireBuildInputs: missing voiceProfile throws with framework label",
+    err && err.message === "test-fw build: voiceProfile is required");
+
+  err = null;
+  try { requireBuildInputs({ voiceProfile: {}, listing: null }, "test-fw"); } catch (e) { err = e; }
+  check("requireBuildInputs: missing listing throws with framework label",
+    err && err.message === "test-fw build: listing is required");
+
+  // voiceProfile checked first
+  err = null;
+  try { requireBuildInputs({ voiceProfile: null, listing: null }, "test-fw"); } catch (e) { err = e; }
+  check("requireBuildInputs: voiceProfile checked before listing",
+    err && err.message.includes("voiceProfile"));
+}
+
+// ── mapVoiceProfileToPromptVars ──
+{
+  const vp = {
+    full_name: "Test Agent",
+    brokerage_name: "Test Brokerage",
+    license_number: "9999999",
+    tone_descriptors: ["warm", "direct"],
+    cta_verbs: ["DM", "schedule"],
+    phrases_to_avoid: ["luxury", "stunning"],
+  };
+  const out = mapVoiceProfileToPromptVars(vp);
+  check("mapVP: agent_name from full_name",   out.agent_name === "Test Agent");
+  check("mapVP: brokerage_name pass-through", out.brokerage_name === "Test Brokerage");
+  check("mapVP: license_number pass-through", out.license_number === "9999999");
+  check("mapVP: tone_descriptors formatted",  out.tone_descriptors === "warm, direct");
+  check("mapVP: cta_style with verbs",        out.cta_style === "Preferred CTA verbs: DM, schedule. Use one naturally.");
+  check("mapVP: avoided_words formatted",     out.avoided_words === "luxury, stunning");
+
+  // Assumes-block: null license_number passes through (caller is endpoint guard)
+  const vpNoLicense = { ...vp, license_number: null };
+  check("mapVP: null license_number passes through",
+    mapVoiceProfileToPromptVars(vpNoLicense).license_number === null);
+
+  // Edge: empty/missing arrays fall back to documented defaults
+  const vpEmpty = {
+    full_name: "X", brokerage_name: "Y", license_number: "1",
+    tone_descriptors: [], cta_verbs: null, phrases_to_avoid: undefined,
+  };
+  const outEmpty = mapVoiceProfileToPromptVars(vpEmpty);
+  check("mapVP: empty tone_descriptors → 'warm and direct' fallback",
+    outEmpty.tone_descriptors === "warm and direct");
+  check("mapVP: null cta_verbs → default verbs in style line",
+    outEmpty.cta_style === "Preferred CTA verbs: send, schedule, ask. Use one naturally.");
+  check("mapVP: undefined phrases_to_avoid → '(none specified)'",
+    outEmpty.avoided_words === "(none specified)");
+}
+
+// ── mapListingToPromptVars ──
+{
+  const listing = {
+    city: "Dallas", neighborhood: "Lakewood",
+    beds: 4, baths: 3, sqft: "2,850",
+    features: ["porch", "wood floors"],
+  };
+  const out = mapListingToPromptVars(listing);
+  check("mapListing: neighborhood from column",     out.neighborhood === "Lakewood");
+  check("mapListing: city pass-through",            out.city === "Dallas");
+  check("mapListing: beds pass-through",            out.beds === 4);
+  check("mapListing: baths pass-through",           out.baths === 3);
+  check("mapListing: sqft pass-through",            out.sqft === "2,850");
+  check("mapListing: features formatted",           out.features === "porch, wood floors");
+
+  // neighborhood falls back to city
+  const noNeighborhood = { ...listing, neighborhood: null };
+  check("mapListing: null neighborhood falls back to city",
+    mapListingToPromptVars(noNeighborhood).neighborhood === "Dallas");
+
+  // both null → static default
+  const neither = { ...listing, neighborhood: null, city: null };
+  check("mapListing: null neighborhood + null city → '(neighborhood not specified)'",
+    mapListingToPromptVars(neither).neighborhood === "(neighborhood not specified)");
+  check("mapListing: null city → '(city not specified)'",
+    mapListingToPromptVars(neither).city === "(city not specified)");
+
+  // beds=0 preserved via ?? (Assumes-block boundary: 0 is a valid value)
+  const zeroBeds = { ...listing, beds: 0, baths: 0 };
+  const outZero = mapListingToPromptVars(zeroBeds);
+  check("mapListing: beds=0 preserved (?? not ||)",  outZero.beds === 0);
+  check("mapListing: baths=0 preserved (?? not ||)", outZero.baths === 0);
+
+  // null beds → fallback string
+  const noBeds = { ...listing, beds: null, baths: null, sqft: null };
+  const outNo = mapListingToPromptVars(noBeds);
+  check("mapListing: null beds → fallback",  outNo.beds  === "(beds not specified)");
+  check("mapListing: null baths → fallback", outNo.baths === "(baths not specified)");
+  check("mapListing: null sqft → fallback",  outNo.sqft  === "(sqft not specified)");
+
+  // empty features
+  check("mapListing: null features → '(no standout features listed)'",
+    mapListingToPromptVars({ ...listing, features: null }).features === "(no standout features listed)");
+}
+
+// ── resolveOverride ──
+{
+  const listing = { story_angle: "from the column" };
+  check("resolveOverride: extras wins over listing",
+    resolveOverride({ story_angle: "from extras" }, listing, "story_angle", "default") === "from extras");
+  check("resolveOverride: listing used when extras blank",
+    resolveOverride({}, listing, "story_angle", "default") === "from the column");
+  check("resolveOverride: fallback when both missing",
+    resolveOverride({}, {}, "story_angle", "default") === "default");
+  check("resolveOverride: whitespace extras treated as missing",
+    resolveOverride({ story_angle: "   " }, listing, "story_angle", "default") === "from the column");
+  check("resolveOverride: whitespace listing treated as missing",
+    resolveOverride({}, { story_angle: "  " }, "story_angle", "default") === "default");
+  check("resolveOverride: trims extras value",
+    resolveOverride({ story_angle: "  hello  " }, {}, "story_angle", "default") === "hello");
+  check("resolveOverride: null extras object handled",
+    resolveOverride(null, listing, "story_angle", "default") === "from the column");
+  check("resolveOverride: null listing object handled",
+    resolveOverride({}, null, "story_angle", "default") === "default");
+}
+
+// ── requirePromptVars ──
+{
+  let threw = false;
+  try { requirePromptVars({ a: 1, b: "x" }, ["a", "b"], "test-fw"); } catch { threw = true; }
+  check("requirePromptVars: all present → no throw", !threw);
+
+  let err = null;
+  try { requirePromptVars({ a: 1 }, ["a", "b", "c"], "test-fw"); } catch (e) { err = e; }
+  check("requirePromptVars: lists all missing keys with framework label",
+    err && err.message === "test-fw build: missing required placeholder values: b, c");
+
+  // Assumes-block boundary: empty string / 0 / false are VALID
+  threw = false;
+  try { requirePromptVars({ a: "", b: 0, c: false }, ["a", "b", "c"], "test-fw"); } catch { threw = true; }
+  check("requirePromptVars: empty string / 0 / false treated as valid", !threw);
+
+  // null and undefined are missing
+  err = null;
+  try { requirePromptVars({ a: null, b: undefined }, ["a", "b"], "test-fw"); } catch (e) { err = e; }
+  check("requirePromptVars: null and undefined both flagged as missing",
+    err && err.message === "test-fw build: missing required placeholder values: a, b");
+}
+
+// ── substituteTemplate ──
+{
+  check("substituteTemplate: replaces single placeholder",
+    substituteTemplate("Hi {name}", { name: "world" }) === "Hi world");
+  check("substituteTemplate: replaces multiple placeholders",
+    substituteTemplate("{a} + {b} = {c}", { a: 1, b: 2, c: 3 }) === "1 + 2 = 3");
+  check("substituteTemplate: leaves unknown placeholders verbatim",
+    substituteTemplate("Hi {name}, missing {unknown}", { name: "x" }) === "Hi x, missing {unknown}");
+  check("substituteTemplate: coerces values via String",
+    substituteTemplate("n={n}", { n: 42 }) === "n=42");
+  check("substituteTemplate: empty template → empty output",
+    substituteTemplate("", { a: 1 }) === "");
+  // Assumes-block: JSON-style {"key": ...} should NOT be substituted
+  // (inner key starts with `"`, not a word char)
+  check("substituteTemplate: JSON-style braces inside template preserved",
+    substituteTemplate(`{"key": "{val}"}`, { val: "v" }) === `{"key": "v"}`);
+}
+
 // ── Summary ──────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed${LIVE ? " (live mode)" : " (mock mode)"}\n`);
 if (failed > 0) process.exit(1);

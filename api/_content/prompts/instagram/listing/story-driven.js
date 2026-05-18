@@ -8,6 +8,19 @@
 // can dispatch uniformly. The build() function receives the loaded
 // voiceProfile + listing rows plus per-request extras, and returns the
 // { systemPrompt, userMessage } pair the content-engine will send.
+//
+// Shared mapping / validation / substitution logic lives in
+// ../../_helpers.js so frameworks 2–7 can stay thin.
+
+import {
+  formatList,
+  requireBuildInputs,
+  mapVoiceProfileToPromptVars,
+  mapListingToPromptVars,
+  resolveOverride,
+  requirePromptVars,
+  substituteTemplate,
+} from "../../_helpers.js";
 
 const TEMPLATE = `You are writing an Instagram listing caption for {agent_name}.
 
@@ -86,18 +99,8 @@ const REQUIRED_VARS = [
   "story_angle",
 ];
 
-function arrOrEmpty(v) {
-  return Array.isArray(v) ? v : [];
-}
-
-function formatList(arr, fallback = "(none specified)") {
-  const a = arrOrEmpty(arr).filter((x) => x != null && String(x).trim() !== "");
-  return a.length === 0 ? fallback : a.join(", ");
-}
-
 /**
- * Map voiceProfile + listing rows + extras into the flat placeholder
- * dict the template expects, then substitute into TEMPLATE.
+ * Build {systemPrompt, userMessage} for the story-driven listing prompt.
  *
  * @param {object} ctx
  * @param {object} ctx.voiceProfile  Row from public.agent_voice_profiles.
@@ -106,8 +109,7 @@ function formatList(arr, fallback = "(none specified)") {
  *                                   wins over listing.story_angle.
  */
 function build({ voiceProfile, listing, extras = {} }) {
-  if (!voiceProfile) throw new Error("story-driven build: voiceProfile is required");
-  if (!listing)      throw new Error("story-driven build: listing is required");
+  requireBuildInputs({ voiceProfile, listing }, "story-driven");
 
   // TEMPORARY MAPPING (Stage 5c MVP):
   // The prompt asks for "signature phrases" but agent_voice_profiles has
@@ -115,50 +117,23 @@ function build({ voiceProfile, listing, extras = {} }) {
   // proxy so the agent's voice still leaks into the caption. Future work
   // (tracked separately) will route hook_lines into the HOOK section and
   // take_lines into the TAKE section for more precise voice injection.
-  const signaturePhrases = [
-    ...arrOrEmpty(voiceProfile.hook_lines),
-    ...arrOrEmpty(voiceProfile.take_lines),
-  ];
-
-  // story_angle: request body overrides the listing column when present.
-  const storyAngle =
-    (extras.story_angle && String(extras.story_angle).trim()) ||
-    (listing.story_angle && String(listing.story_angle).trim()) ||
-    "a memorable home in a desirable neighborhood";
-
-  // neighborhood falls back to city when the listing row hasn't set one yet.
-  const neighborhood =
-    (listing.neighborhood && String(listing.neighborhood).trim()) ||
-    (listing.city && String(listing.city).trim()) ||
-    "(neighborhood not specified)";
-
-  const vars = {
-    agent_name:        voiceProfile.full_name,
-    tone_descriptors:  formatList(voiceProfile.tone_descriptors, "warm and direct"),
-    cta_style:         "Preferred CTA verbs: " + formatList(voiceProfile.cta_verbs, "send, schedule, ask") + ". Use one naturally.",
-    signature_phrases: formatList(signaturePhrases, "(none specified — match overall tone)"),
-    avoided_words:     formatList(voiceProfile.phrases_to_avoid, "(none specified)"),
-    license_number:    voiceProfile.license_number,
-    brokerage_name:    voiceProfile.brokerage_name,
-    neighborhood,
-    city:              listing.city || "(city not specified)",
-    beds:              listing.beds ?? "(beds not specified)",
-    baths:             listing.baths ?? "(baths not specified)",
-    sqft:              listing.sqft || "(sqft not specified)",
-    features:          formatList(listing.features, "(no standout features listed)"),
-    story_angle:       storyAngle,
-  };
-
-  const missing = REQUIRED_VARS.filter((k) => vars[k] === undefined || vars[k] === null);
-  if (missing.length) {
-    throw new Error(`story-driven build: missing required placeholder values: ${missing.join(", ")}`);
-  }
-
-  const userMessage = TEMPLATE.replace(/\{(\w+)\}/g, (_m, key) =>
-    Object.prototype.hasOwnProperty.call(vars, key) ? String(vars[key]) : `{${key}}`
+  const signaturePhrases = formatList(
+    [...(voiceProfile.hook_lines || []), ...(voiceProfile.take_lines || [])],
+    "(none specified — match overall tone)"
   );
 
-  return { systemPrompt: SYSTEM_PROMPT, userMessage };
+  const vars = {
+    ...mapVoiceProfileToPromptVars(voiceProfile),
+    ...mapListingToPromptVars(listing),
+    signature_phrases: signaturePhrases,
+    story_angle: resolveOverride(
+      extras, listing, "story_angle",
+      "a memorable home in a desirable neighborhood"
+    ),
+  };
+
+  requirePromptVars(vars, REQUIRED_VARS, "story-driven");
+  return { systemPrompt: SYSTEM_PROMPT, userMessage: substituteTemplate(TEMPLATE, vars) };
 }
 
 export default {
