@@ -8,6 +8,17 @@ export const MEDIA_ICONS = {
   "Floor Plan": "📐", Microsite: "🌐", Twilight: "🌅",
 };
 
+// Layout variant assigned to each theme. Drives the public/preview
+// renderer's hero arrangement and stats positioning. Lifted from
+// App.jsx during the shared MicrositeRenderer extraction so both the
+// public render and the in-app preview can read the same map.
+export const THEME_LAYOUT = {
+  Prestige: "cinematic", Dusk: "cinematic", Obsidian: "cinematic", Ember: "cinematic",
+  Noir: "split", Loft: "split", Slate: "split",
+  Blanc: "minimal", Ivory: "minimal", Classic: "minimal", Maison: "minimal",
+  Coastal: "editorial", Grove: "editorial", Sage: "editorial",
+};
+
 export const THEMES = [
   // ── Luxury ──
   { name: "Prestige",  label: "Milestone Signature", slug: "prestige",  bg: "#0f0f1a", accent: "#C9A84C", text: "#fff",    sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",  swatches: ["#0f0f1a","#C9A84C","#F5ECD7"] },
