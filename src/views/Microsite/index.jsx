@@ -822,6 +822,7 @@ function MicrositeView() {
     beds: "", baths: "", sqft: "",
     description: "", agentName: "", agentPhone: "",
     heroImg: "",
+    heroMediaId: "",  // booking_media.id for the agent's hero pick — sent to publish endpoint for lookup
     features: ["", "", "", ""],
     mediaTypes: ["Photos", "Drone", "3D Tour"],
     matterportUrl: "",
@@ -925,11 +926,17 @@ function MicrositeView() {
             const { data: urlData } = supabase.storage
               .from("listing-media")
               .getPublicUrl(`${selectedListingId}/photos/${f.name}`);
-            return urlData.publicUrl;
+            // Listing-source has no booking_media row id; use the
+            // storage path as the stable identifier. Listing-source
+            // publish isn't currently wired through the server, so this
+            // id never round-trips — but consistent shape keeps the
+            // hero-picker code below uniform.
+            return { id: `listing-media:${selectedListingId}/photos/${f.name}`, url: urlData.publicUrl };
           });
         setListingPhotos(photos);
+        // Only auto-set hero if the agent hasn't picked one yet (N13 fix).
         if (photos.length > 0) {
-          setData(d => ({ ...d, heroImg: photos[0] }));
+          setData(d => d.heroMediaId ? d : { ...d, heroImg: photos[0].url, heroMediaId: photos[0].id });
         }
 
         // Fetch video
@@ -989,14 +996,21 @@ function MicrositeView() {
     const fetchBookingMedia = async () => {
       setMediaLoading(true);
       try {
+        // Match server ordering exactly (sort_order ASC NULLS LAST,
+        // created_at ASC) so the photo the agent sees first in the
+        // picker is the same one the server treats as the default hero.
         const { data: mediaRows, error } = await supabase
           .from("booking_media")
           .select("*")
           .eq("booking_id", selectedBookingId)
-          .order("created_at", { ascending: false });
+          .order("sort_order", { ascending: true, nullsFirst: false })
+          .order("created_at", { ascending: true });
 
         if (error) { console.error("Error fetching booking media:", error); setMediaLoading(false); return; }
 
+        // photos: { id, url }[] — id is the booking_media row id, which
+        // the publish endpoint uses to resolve the agent's hero pick
+        // against the post-copy published-media URLs.
         const photos = [];
         let video = null;
         let tourUrl = null;
@@ -1019,7 +1033,7 @@ function MicrositeView() {
             if (item.file_type === "video") {
               video = signedUrl;
             } else {
-              photos.push(signedUrl);
+              photos.push({ id: item.id, url: signedUrl });
             }
           }
         }
@@ -1027,8 +1041,11 @@ function MicrositeView() {
         setListingPhotos(photos);
         setListingVideo(video);
         setListingFloorplan(null); // bookings don't have separate floorplan category
+        // Only auto-set hero if the agent hasn't picked one yet (N13 fix):
+        // refetches on tab switches or re-renders must not clobber the
+        // current selection.
         if (photos.length > 0) {
-          setData(d => ({ ...d, heroImg: photos[0] }));
+          setData(d => d.heroMediaId ? d : { ...d, heroImg: photos[0].url, heroMediaId: photos[0].id });
         }
         if (tourUrl) {
           setData(d => ({ ...d, matterportUrl: tourUrl }));
@@ -1057,6 +1074,7 @@ function MicrositeView() {
       beds: "", baths: "", sqft: "",
       description: "", agentName: "", agentPhone: "",
       heroImg: "",
+      heroMediaId: "",
       features: ["", "", "", ""],
       matterportUrl: "", videoUrl: "",
     }));
@@ -1147,6 +1165,7 @@ function MicrositeView() {
       agentPhone: pd.agent_phone || ms.agent_phone || "",
       agentEmail: pd.agent_email || "",
       heroImg: pd.hero_img || "",
+      heroMediaId: pd.hero_media_id || "",
       features: pd.features?.length
         ? [...pd.features, ...Array(Math.max(0, 4 - pd.features.length)).fill("")]
         : ["", "", "", ""],
@@ -1155,10 +1174,13 @@ function MicrositeView() {
       videoUrl: pd.video_url || "",
     });
 
-    // Load gallery photos directly from published URLs — avoids re-fetching from
-    // the booking media bucket (which would overwrite the saved hero selection)
+    // Load gallery photos directly from published URLs as the initial
+    // picker state. Wrapped in the new { id, url } shape (the id slot
+    // holds the published URL itself as a synthetic identifier so the
+    // picker renders something while the booking-source fetch effect
+    // below replaces it with real booking_media row ids).
     if (pd.gallery_photos?.length) {
-      setListingPhotos(pd.gallery_photos);
+      setListingPhotos(pd.gallery_photos.map(u => ({ id: u, url: u })));
     }
     if (pd.video_url) setListingVideo(pd.video_url);
     if (pd.floorplan_url) setListingFloorplan(pd.floorplan_url);
@@ -1167,6 +1189,16 @@ function MicrositeView() {
     if (pd.source_type && pd.source_type !== sourceType) {
       editLoadRef.current = true;
       setSourceType(pd.source_type);
+    }
+
+    // Restore booking selection so the booking-source fetch effect
+    // re-populates listingPhotos with real booking_media row ids — the
+    // picker can then highlight the saved hero by id and the publish
+    // payload sends a real id, not the synthetic URL placeholder.
+    // N13 fix (auto-set gated on !heroMediaId) ensures this re-fetch
+    // does NOT clobber the heroMediaId we just restored above.
+    if (pd.booking_id) {
+      setSelectedBookingId(pd.booking_id);
     }
 
     // Restore theme
@@ -1214,6 +1246,7 @@ function MicrositeView() {
           agentPhone: data.agentPhone,
           agentEmail: data.agentEmail,
           heroImg: data.heroImg,
+          heroMediaId: data.heroMediaId || null,
           listingId: selectedListingId || null,
           matterportUrl: data.matterportUrl,
           videoUrl: data.videoUrl || listingVideo || "",
@@ -1707,7 +1740,7 @@ function MicrositeView() {
         </div>
       </div>
 
-      <MicrositePreview data={{ ...data, galleryPhotos: listingPhotos, videoUrl: data.videoUrl || listingVideo, floorplanUrl: listingFloorplan, onLeadSubmit: handleNewLead }} theme={theme} />
+      <MicrositePreview data={{ ...data, galleryPhotos: listingPhotos.map(p => p.url), videoUrl: data.videoUrl || listingVideo, floorplanUrl: listingFloorplan, onLeadSubmit: handleNewLead }} theme={theme} />
 
       <button onClick={handlePublish} style={{
         background: "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
@@ -1945,19 +1978,28 @@ function MicrositeView() {
             )}
             {/* Photo strip picker */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
-              {listingPhotos.map((url, i) => (
-                <div key={i} onClick={() => setField("heroImg", url)} style={{
-                  position: "relative", height: 72, borderRadius: 7, overflow: "hidden", cursor: "pointer",
-                  border: data.heroImg === url ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.08)",
-                  transition: "border-color 0.2s",
-                }}>
-                  <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  {data.heroImg === url && (
-                    <div style={{ position: "absolute", inset: 0, background: "rgba(201,168,76,0.25)" }} />
-                  )}
-                  <div style={{ position: "absolute", bottom: 4, right: 5, fontFamily: "'Jost', sans-serif", fontSize: 8, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em" }}>{String(i + 1).padStart(2, "0")}</div>
-                </div>
-              ))}
+              {listingPhotos.map((photo, i) => {
+                // Selected if EITHER the id matches (modern path, real
+                // booking_media row ids after fetch) OR the URL matches
+                // (edit-mode bootstrap before booking-source fetch
+                // replaces the synthetic-id rows with real ids).
+                const isSelected = data.heroMediaId === photo.id || data.heroImg === photo.url;
+                return (
+                  <div key={photo.id || i}
+                    onClick={() => setData(d => ({ ...d, heroImg: photo.url, heroMediaId: photo.id }))}
+                    style={{
+                      position: "relative", height: 72, borderRadius: 7, overflow: "hidden", cursor: "pointer",
+                      border: isSelected ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.08)",
+                      transition: "border-color 0.2s",
+                    }}>
+                    <img src={photo.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    {isSelected && (
+                      <div style={{ position: "absolute", inset: 0, background: "rgba(201,168,76,0.25)" }} />
+                    )}
+                    <div style={{ position: "absolute", bottom: 4, right: 5, fontFamily: "'Jost', sans-serif", fontSize: 8, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em" }}>{String(i + 1).padStart(2, "0")}</div>
+                  </div>
+                );
+              })}
             </div>
           </>
         ) : hasSourceSelection ? (

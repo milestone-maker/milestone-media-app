@@ -31,11 +31,17 @@ function corsHeaders() {
   };
 }
 
-function getServiceClient() {
-  return createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
+// Lazy singleton so unit tests can inject a mock via depsOverride
+// without forcing a new client per request in production.
+let _supabaseSingleton = null;
+function defaultSupabase() {
+  if (!_supabaseSingleton) {
+    _supabaseSingleton = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
+  }
+  return _supabaseSingleton;
 }
 
 // Extract a Bearer token from the Authorization header.
@@ -46,7 +52,10 @@ function bearerFrom(req) {
 }
 
 // ── main handler ─────────────────────────────────────────────────────
-export default async function handler(req, res) {
+//
+// depsOverride is for unit tests only — production callers use the
+// 2-arg form and the lazy default supabase singleton is used.
+export default async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -62,7 +71,7 @@ export default async function handler(req, res) {
     const token = bearerFrom(req);
     if (!token) return res.status(401).json({ error: "missing Authorization header" });
 
-    const supabase = getServiceClient();
+    const supabase = depsOverride?.supabase || defaultSupabase();
     const { data: authData, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !authData?.user) {
       return res.status(401).json({ error: "invalid or expired session" });
@@ -109,18 +118,31 @@ export default async function handler(req, res) {
     }
 
     // ── 6. Fetch booking media ──
+    //
+    // Order by sort_order ASC NULLS LAST with created_at ASC as a stable
+    // tiebreaker. Migration 007 added sort_order specifically so first-
+    // uploaded comes first; the UI (Microsite/index.jsx) sorts the same
+    // way so client and server agree on which photo is "first."
     const { data: mediaRows, error: mediaErr } = await supabase
       .from("booking_media")
       .select("*")
       .eq("booking_id", bookingId)
-      .order("created_at", { ascending: false });
+      .order("sort_order", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: true });
     if (mediaErr) {
       console.error("booking_media fetch error:", mediaErr);
       return res.status(500).json({ error: "failed to load booking media" });
     }
 
     // ── 7. Copy private booking files → public published-media bucket ──
+    //
+    // While copying, we also build an id → publishedUrl map so the hero
+    // resolution in step 8 can take the agent's heroMediaId pick (a
+    // booking_media row id) and return the matching public URL. Agents
+    // work with signed private URLs in the UI that can't be stored as
+    // the hero, so we resolve by id, not by URL.
     const publishedPhotos = [];
+    const publishedUrlForId = Object.create(null);
     let publishedVideo = null;
 
     for (const item of (mediaRows || [])) {
@@ -154,6 +176,11 @@ export default async function handler(req, res) {
       const publicUrl = pubUrlData?.publicUrl;
       if (!publicUrl) continue;
 
+      // Record id→url for every successfully published item, including
+      // video — a future framework that wants a video hero can use the
+      // same lookup.
+      publishedUrlForId[item.id] = publicUrl;
+
       if (item.file_type === "video") {
         publishedVideo = publicUrl;
       } else {
@@ -164,8 +191,33 @@ export default async function handler(req, res) {
     // ── 8. Build the final property_data, preserving every other field ──
     //    Field name translation mirrors the original client-side handlePublish:
     //    camelCase form fields → snake_case database fields.
+    //
+    // Hero resolution precedence (Phase 2 fix — Bug #4 + N13 + N17):
+    //   1. propertyData.heroMediaId → publishedUrlForId[heroMediaId]
+    //      (agent's explicit pick, resolved to a published-media URL)
+    //   2. publishedPhotos[0]
+    //      (auto-fallback: first photo in sort_order, matches UI default)
+    //   3. propertyData.heroImg
+    //      (legacy fallback for pre-fix clients still sending only a URL;
+    //       only useful if it's already a published-media URL)
+    //   4. "" (no media at all)
     let galleryPhotos = publishedPhotos;
-    let heroImg = publishedPhotos[0] || propertyData.heroImg || "";
+    let heroImg = "";
+    let heroMediaId = "";
+    if (propertyData.heroMediaId && publishedUrlForId[propertyData.heroMediaId]) {
+      heroImg = publishedUrlForId[propertyData.heroMediaId];
+      heroMediaId = propertyData.heroMediaId;
+    } else if (publishedPhotos[0]) {
+      heroImg = publishedPhotos[0];
+      // Find the id that produced this URL so hero_media_id is still
+      // written — lets future in-place hero edits resolve by id without
+      // a second publish cycle.
+      heroMediaId = Object.keys(publishedUrlForId)
+        .find(id => publishedUrlForId[id] === publishedPhotos[0]) || "";
+    } else if (propertyData.heroImg) {
+      heroImg = propertyData.heroImg;
+      heroMediaId = "";
+    }
     let videoUrl = publishedVideo || propertyData.videoUrl || "";
 
     // Pull the matterport / 3D tour URL from the media rows if present
@@ -186,6 +238,7 @@ export default async function handler(req, res) {
       agent_phone: propertyData.agentPhone || "",
       agent_email: propertyData.agentEmail || "",
       hero_img: heroImg,
+      hero_media_id: heroMediaId,
       listing_id: propertyData.listingId || null,
       booking_id: bookingId,
       source_type: "booking",
