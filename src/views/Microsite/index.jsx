@@ -593,7 +593,30 @@ function MicrositePreview({ data, theme }) {
             marginBottom: 40,
             "@media (maxWidth: 768px)": { flexDirection: "column", textAlign: "center" },
           }}>
-            {agentAvatar(80, t.accent, isLight ? "#fff" : t.bg)}
+            {/*
+              Inline initials avatar.
+              Hotfix for a pre-existing ReferenceError introduced by
+              commit 5092b3a (2026-05-10) — the agentAvatar function
+              defined inside App.jsx's PublicMicrosite component was
+              referenced here in the extracted MicrositeView with no
+              corresponding declaration. Crash blocked all Preview
+              Changes / Preview Microsite flows for 9 days.
+              Long-term fix: lift agentAvatar + agentBranding fetch
+              into src/lib/ui.jsx so the in-app preview and the
+              public render share one implementation. Deferred.
+            */}
+            {(() => {
+              const name = data.agentName || "Agent";
+              const initials = name.split(" ").map(n => n[0]).filter(Boolean).join("").slice(0, 2).toUpperCase() || "A";
+              return (
+                <div style={{
+                  width: 80, height: 80, borderRadius: "50%", background: t.accent,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontFamily: "'Cormorant Garamond', serif", fontSize: 28, fontWeight: 700,
+                  color: isLight ? "#fff" : t.bg, flexShrink: 0,
+                }}>{initials}</div>
+              );
+            })()}
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 24, color: t.text, marginBottom: 4, fontWeight: 600 }}>
                 {data.agentName || "Jane Doe"}
