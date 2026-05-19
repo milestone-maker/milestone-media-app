@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../../supabaseClient";
 import { useAuth } from "../../lib/auth";
-import { MEDIA_ICONS, THEMES } from "../../lib/ui";
+import { MEDIA_ICONS, THEMES, THEME_LAYOUT } from "../../lib/ui";
 import { ADDONS } from "../../lib/pricing";
 import MicrositeRenderer from "../../components/MicrositeRenderer";
 
@@ -362,6 +362,21 @@ function MicrositeView() {
   }, [sourceType]);
 
   const theme = THEMES[themeIdx];
+
+  // Grouped theme picker — derived from THEME_LAYOUT so adding a new
+  // theme + layout entry shows up here automatically. Prestige is
+  // promoted to its own "Prestige" group at the top (it has
+  // THEME_LAYOUT === "cinematic" but visually deserves the flagship
+  // slot); every other theme falls into its THEME_LAYOUT bucket.
+  const themesWithIdx = THEMES.map((t, i) => ({ ...t, idx: i }));
+  const themeGroups = [
+    { id: "prestige",  label: "Prestige",  themes: themesWithIdx.filter(t => t.name === "Prestige"), premium: true },
+    { id: "cinematic", label: "Cinematic", themes: themesWithIdx.filter(t => THEME_LAYOUT[t.name] === "cinematic" && t.name !== "Prestige") },
+    { id: "split",     label: "Split",     themes: themesWithIdx.filter(t => THEME_LAYOUT[t.name] === "split") },
+    { id: "minimal",   label: "Minimal",   themes: themesWithIdx.filter(t => THEME_LAYOUT[t.name] === "minimal") },
+    { id: "editorial", label: "Editorial", themes: themesWithIdx.filter(t => THEME_LAYOUT[t.name] === "editorial") },
+  ];
+
   // Slug: if editing reuse the saved slug; for new microsites append the last 8 chars
   // of the agent's UUID so two agents with the same address never collide globally.
   const baseSlug = (data.address || "your-listing").split(" ").slice(0, 2).join("-").toLowerCase().replace(/[^a-z0-9-]/g, "");
@@ -985,30 +1000,68 @@ function MicrositeView() {
             {THEMES[themeIdx].name} — {THEMES[themeIdx].label}
           </span>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 8 }}>
-          {THEMES.map((t, i) => (
-            <div key={t.name} onClick={() => setThemeIdx(i)} style={{
-              borderRadius: 10, cursor: "pointer", overflow: "hidden",
-              border: themeIdx === i ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.08)",
-              transition: "border-color 0.2s", background: t.bg,
-            }}>
-              {/* Color swatch bar */}
-              <div style={{ display: "flex", height: 28 }}>
-                {t.swatches.map((s, si) => (
-                  <div key={si} style={{ flex: 1, background: s, borderRight: si < t.swatches.length - 1 ? "1px solid rgba(0,0,0,0.08)" : "none" }} />
-                ))}
-              </div>
-              {/* Name row */}
-              <div style={{ padding: "7px 10px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div>
-                  <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 13, color: t.text, fontWeight: 600 }}>{t.name}</div>
-                  <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 9, color: t.sub, letterSpacing: "0.06em" }}>{t.label}</div>
-                </div>
-                {themeIdx === i && (
-                  <div style={{ width: 16, height: 16, borderRadius: "50%", background: "#c9a84c", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <span style={{ fontSize: 8, color: "#0a1628", fontWeight: 900 }}>✓</span>
-                  </div>
+        {/* Grouped picker — Prestige (premium, full-width) then four
+            layout categories (2-column). Selection state and click
+            behavior are unchanged from the flat picker. */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {themeGroups.map(group => (
+            <div key={group.id}>
+              {/* Category label */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                <div style={{
+                  fontFamily: "'Jost', sans-serif", fontSize: 10,
+                  letterSpacing: "0.16em", textTransform: "uppercase",
+                  color: group.premium ? "#c9a84c" : "rgba(255,255,255,0.4)",
+                  fontWeight: group.premium ? 600 : 500,
+                }}>{group.label}</div>
+                {group.premium && (
+                  <div style={{ flex: 1, height: 1, background: "linear-gradient(90deg, rgba(201,168,76,0.6), rgba(201,168,76,0))" }} />
                 )}
+              </div>
+
+              {/* Theme cards: full-width single column for premium, 2-col grid otherwise */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: group.premium ? "1fr" : "repeat(2, 1fr)",
+                gap: 8,
+              }}>
+                {group.themes.map(t => (
+                  <div key={t.name} onClick={() => setThemeIdx(t.idx)} style={{
+                    borderRadius: 10, cursor: "pointer", overflow: "hidden",
+                    border: themeIdx === t.idx ? "2px solid #c9a84c" : "2px solid rgba(255,255,255,0.08)",
+                    transition: "border-color 0.2s", background: t.bg,
+                    position: "relative",
+                  }}>
+                    {/* ✦ Signature pill — Prestige only */}
+                    {group.premium && (
+                      <div style={{
+                        position: "absolute", top: 8, right: 8, zIndex: 1,
+                        background: "rgba(201,168,76,0.95)", color: "#0f0f1a",
+                        fontFamily: "'Jost', sans-serif", fontSize: 8, fontWeight: 700,
+                        letterSpacing: "0.14em", textTransform: "uppercase",
+                        padding: "3px 9px", borderRadius: 3,
+                      }}>✦ Signature</div>
+                    )}
+                    {/* Color swatch bar */}
+                    <div style={{ display: "flex", height: 28 }}>
+                      {t.swatches.map((s, si) => (
+                        <div key={si} style={{ flex: 1, background: s, borderRight: si < t.swatches.length - 1 ? "1px solid rgba(0,0,0,0.08)" : "none" }} />
+                      ))}
+                    </div>
+                    {/* Name row */}
+                    <div style={{ padding: "7px 10px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div>
+                        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 13, color: t.text, fontWeight: 600 }}>{t.name}</div>
+                        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 9, color: t.sub, letterSpacing: "0.06em" }}>{t.label}</div>
+                      </div>
+                      {themeIdx === t.idx && (
+                        <div style={{ width: 16, height: 16, borderRadius: "50%", background: "#c9a84c", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <span style={{ fontSize: 8, color: "#0a1628", fontWeight: 900 }}>✓</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ))}
