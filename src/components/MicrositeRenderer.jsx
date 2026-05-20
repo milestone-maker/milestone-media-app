@@ -266,6 +266,19 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
   const finalVideo      = videoUrl;
   const finalFloorplan  = floorplanUrl;
 
+  // Visitor-facing AI chat. Rendered in BOTH layout paths (Prestige
+  // cinematic + shared) — Prestige returns its own JSX so this used
+  // to be skipped on Prestige listings. Hoist into a shared element.
+  const chatEl = (mode === "live" && micrositeSlug) ? (
+    <MicrositeChat
+      micrositeSlug={micrositeSlug}
+      agentName={data.agent_name || agentBranding?.full_name}
+      brokerageName={brokerageName || agentBranding?.agency_name}
+      agentPhone={data.agent_phone}
+      agentEmail={data.agent_email}
+    />
+  ) : null;
+
   // Nav sections — different sets for Prestige vs shared layout
   const sections = isPrestige ? [
     { id: "photos",  label: "Gallery", ref: photoRef,   show: true },
@@ -640,6 +653,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
             <div style={{ position: "absolute", bottom: 30, color: "#fff", fontFamily: "'Jost', sans-serif", fontSize: 14 }}>{lightboxIndex + 1} / {presGallery.length}</div>
           </div>
         )}
+        {chatEl}
       </div>
     );
   }
@@ -1061,15 +1075,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
         </div>
       </div>
 
-      {mode === "live" && micrositeSlug ? (
-        <MicrositeChat
-          micrositeSlug={micrositeSlug}
-          agentName={data.agent_name || agentBranding?.full_name}
-          brokerageName={brokerageName || agentBranding?.agency_name}
-          agentPhone={data.agent_phone}
-          agentEmail={data.agent_email}
-        />
-      ) : null}
+      {chatEl}
     </div>
   );
 }
