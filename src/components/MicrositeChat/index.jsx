@@ -35,12 +35,12 @@ function useIsMobile() {
   return m;
 }
 
-function buildDisclosure(agentName, brokerageName) {
+function buildDisclosure(agentName, brokerageName, leadName) {
   const a = agentName || "the listing agent";
-  if (brokerageName) {
-    return `Hi! I'm an AI assistant for ${a} from ${brokerageName}. I can answer questions about this listing. For the actual agent, the contact info is on this page.`;
-  }
-  return `Hi! I'm an AI assistant for ${a}. I can answer questions about this listing. For the actual agent, the contact info is on this page.`;
+  const firstName = leadName ? String(leadName).trim().split(/\s+/)[0] : "";
+  const greeting = firstName ? `Hi ${firstName}!` : "Hi!";
+  const fromBrokerage = brokerageName ? ` from ${brokerageName}` : "";
+  return `${greeting} I'm an AI assistant for ${a}${fromBrokerage}. I can answer questions about this listing. For the actual agent, contact info is on this page.`;
 }
 
 export default function MicrositeChat({
@@ -195,7 +195,7 @@ export default function MicrositeChat({
 
   if (!slug || !bubbleVisible) return null;
 
-  const disclosure = buildDisclosure(agentName, brokerageName);
+  const disclosure = buildDisclosure(agentName, brokerageName, lead?.name);
   const cooldownLeft = rateLimitUntil ? Math.max(0, Math.ceil((rateLimitUntil - Date.now()) / 1000)) : 0;
   const inputDisabled = requestInFlight || cooldownLeft > 0 || capReached || chatDisabled;
   const inputHint = cooldownLeft > 0

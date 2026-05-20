@@ -147,7 +147,7 @@ function topicGuidance(t) {
   })[t] || "";
 }
 
-function buildSystemPrompt({ agentDisplayName, brokerageName, brokerageAbout, propertyData, comps, topicsEnabled }) {
+function buildSystemPrompt({ agentDisplayName, brokerageName, brokerageAbout, propertyData, comps, topicsEnabled, visitor }) {
   const enabled  = Object.entries(topicsEnabled || {}).filter(([, v]) => v).map(([k]) => k);
   const disabled = Object.entries(topicsEnabled || {}).filter(([, v]) => !v).map(([k]) => k);
 
@@ -159,6 +159,20 @@ function buildSystemPrompt({ agentDisplayName, brokerageName, brokerageAbout, pr
     lines.push("");
     lines.push(`About ${brokerageName}: ${brokerageAbout}`);
   }
+
+  if (visitor && (visitor.name || visitor.email || visitor.phone)) {
+    lines.push("");
+    lines.push("VISITOR IDENTITY:");
+    const parts = [`This visitor has identified themselves as ${visitor.name || "unknown"}`];
+    if (visitor.email) parts.push(`reachable at ${visitor.email}`);
+    if (visitor.phone) parts.push(`phone ${visitor.phone}`);
+    lines.push(
+      parts.join(", ") +
+      `. You may address them by their first name when natural — once or twice per conversation maximum, not in every reply. ` +
+      `Their contact info has been passed to ${agentDisplayName} for follow-up; do NOT ask the visitor for their name, email, or phone again.`
+    );
+  }
+
   lines.push("");
   lines.push("Your role:");
   lines.push("- Speak warmly, factually, and concisely (typically 2-4 sentences).");
@@ -497,6 +511,18 @@ export default async function handler(req, res, depsOverride) {
     const displayName = voiceProfile?.display_name || agentDisplayName;
     const brokerageName = voiceProfile?.brokerage_name || "our brokerage";
 
+    // Visitor identity for the prompt: this-request lead_info takes
+    // priority (freshest), otherwise fall back to the conversation row.
+    const visitor = (leadInfo && (leadInfo.name || leadInfo.email || leadInfo.phone))
+      ? {
+          name:  leadInfo.name  ? String(leadInfo.name).trim()  : null,
+          email: leadInfo.email ? String(leadInfo.email).trim() : null,
+          phone: leadInfo.phone ? String(leadInfo.phone).trim() : null,
+        }
+      : (conversation.lead_name || conversation.lead_email || conversation.lead_phone
+          ? { name: conversation.lead_name, email: conversation.lead_email, phone: conversation.lead_phone }
+          : null);
+
     const systemPrompt = buildSystemPrompt({
       agentDisplayName: displayName,
       brokerageName,
@@ -504,6 +530,7 @@ export default async function handler(req, res, depsOverride) {
       propertyData:     microsite.property_data,
       comps:            comps || [],
       topicsEnabled:    settings.topics_enabled,
+      visitor,
     });
 
     const apiMessages = (history || [])
