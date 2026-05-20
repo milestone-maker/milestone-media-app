@@ -446,6 +446,29 @@ export default async function handler(req, res, depsOverride) {
       if (updated) {
         conversation = updated;
         leadCaptured = true;
+
+        // Mirror into public.leads so the existing inbox sees it.
+        // Dedup: uq_leads_chat_conversation_id makes re-inserts a no-op
+        // (we swallow the unique-constraint error). listing_id is
+        // optional — pulled from property_data if present.
+        const listingId = microsite.property_data?.listing_id || null;
+        const { error: leadErr } = await supabase
+          .from("leads")
+          .insert({
+            listing_id: listingId,
+            microsite_id: microsite.id,
+            chat_conversation_id: conversation.id,
+            source: "chat",
+            name: update.lead_name || "",
+            email: update.lead_email,
+            phone: update.lead_phone,
+            message: message,
+          });
+        if (leadErr && leadErr.code !== "23505") {
+          // Log non-dedup failures but don't break the chat — agent
+          // still has the row in microsite_chat_conversations.
+          console.error("chat → leads mirror error:", leadErr);
+        }
       }
     }
 

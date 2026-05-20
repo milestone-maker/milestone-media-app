@@ -286,6 +286,7 @@ function AuthView() {
 function PublicMicrosite() {
   const [microsite, setMicrosite] = useState(null);
   const [agentBranding, setAgentBranding] = useState(null);
+  const [brokerageName, setBrokerageName] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -310,12 +311,21 @@ function PublicMicrosite() {
         setMicrosite(msData);
 
         if (msData.agent_id) {
-          const { data: ab } = await supabase
-            .from("agents")
-            .select("full_name, agency_name, agency_logo_url, profile_photo_url")
-            .eq("id", msData.agent_id)
-            .single();
+          const [{ data: ab }, { data: vp }] = await Promise.all([
+            supabase
+              .from("agents")
+              .select("full_name, agency_name, agency_logo_url, profile_photo_url")
+              .eq("id", msData.agent_id)
+              .single(),
+            supabase
+              .from("agent_voice_profiles")
+              .select("brokerage_name")
+              .eq("agent_id", msData.agent_id)
+              .limit(1)
+              .maybeSingle(),
+          ]);
           if (ab) setAgentBranding(ab);
+          if (vp?.brokerage_name) setBrokerageName(vp.brokerage_name);
         }
 
         setLoading(false);
@@ -367,6 +377,8 @@ function PublicMicrosite() {
       mode="live"
       micrositeId={microsite.id}
       listingId={microsite.property_data?.listing_id || microsite.listing_id}
+      micrositeSlug={microsite.slug}
+      brokerageName={brokerageName}
     />
   );
 }

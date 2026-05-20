@@ -23,6 +23,7 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabaseClient";
 import { THEMES, THEME_LAYOUT } from "../lib/ui";
+import MicrositeChat from "./MicrositeChat";
 
 // ============================================================
 // LEAD CAPTURE — live vs preview variants
@@ -60,6 +61,7 @@ export function PublicLeadCaptureForm({ theme: t, micrositeId, listingId }) {
         .insert({
           listing_id: listingId,
           microsite_id: micrositeId,
+          source: "contact_form",
           name: form.name,
           email: form.email,
           phone: form.phone,
@@ -228,7 +230,7 @@ function LeadCapture({ mode, theme, micrositeId, listingId }) {
 // MICROSITE RENDERER
 // ============================================================
 
-export default function MicrositeRenderer({ microsite, theme, agentBranding, mode = "live", micrositeId, listingId }) {
+export default function MicrositeRenderer({ microsite, theme, agentBranding, mode = "live", micrositeId, listingId, micrositeSlug, brokerageName }) {
   const data = microsite || {};
   const themeName = theme || "Obsidian";
 
@@ -1058,6 +1060,16 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
           © {new Date().getFullYear()} {agentBranding?.agency_name || "Milestone Media"}. All rights reserved.
         </div>
       </div>
+
+      {mode === "live" && micrositeSlug ? (
+        <MicrositeChat
+          micrositeSlug={micrositeSlug}
+          agentName={data.agent_name || agentBranding?.full_name}
+          brokerageName={brokerageName || agentBranding?.agency_name}
+          agentPhone={data.agent_phone}
+          agentEmail={data.agent_email}
+        />
+      ) : null}
     </div>
   );
 }
