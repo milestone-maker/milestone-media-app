@@ -396,6 +396,10 @@ function EditProfileModal({ onClose }) {
 
   // ── Agency branding
   const [agencyName, setAgencyName] = useState(profile?.agency_name || "");
+
+  // ── Brokerage info (consumed by the microsite chat assistant)
+  const [brokerageAbout, setBrokerageAbout] = useState(profile?.brokerage_about || "");
+  const [brokerageUrl, setBrokerageUrl] = useState(profile?.brokerage_url || "");
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState(profile?.agency_logo_url || null);
 
@@ -433,6 +437,8 @@ function EditProfileModal({ onClose }) {
       phone: phone.trim() || null,
       business_address: businessAddress.trim() || null,
       agency_name: agencyName.trim() || null,
+      brokerage_about: brokerageAbout.trim() || null,
+      brokerage_url: brokerageUrl.trim() || null,
     };
     if (logoFile) {
       const url = await uploadBranding(logoFile, "logo");
@@ -640,6 +646,54 @@ function EditProfileModal({ onClose }) {
               onChange={e => setAgencyName(e.target.value)}
               placeholder="e.g. Compass Real Estate · Keller Williams DFW"
             />
+          </div>
+
+          {divider}
+
+          {/* ── SECTION: Brokerage ── */}
+          {sectionTitle("💬", "Brokerage")}
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 18, lineHeight: 1.6 }}>
+            Used by the AI chat assistant on your microsites so it can speak about your brokerage.
+          </div>
+
+          {/* About the brokerage */}
+          {(() => {
+            const wordCount = brokerageAbout.trim() ? brokerageAbout.trim().split(/\s+/).length : 0;
+            const overLimit = wordCount > 500;
+            return (
+              <div style={{ marginBottom: 18 }}>
+                <label style={labelSt}>About the Brokerage</label>
+                <textarea
+                  style={{ ...inputSt, height: 120, resize: "vertical", lineHeight: 1.5 }}
+                  value={brokerageAbout}
+                  onChange={e => setBrokerageAbout(e.target.value)}
+                  placeholder="A short description of your brokerage — what you specialize in, the markets you serve, what sets your team apart."
+                />
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, gap: 12 }}>
+                  <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.2)", lineHeight: 1.5 }}>
+                    A short description of your brokerage shown to visitors in the chat assistant. Helps the chat feel like part of your team.
+                  </span>
+                  <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: overLimit ? "#f87171" : "rgba(255,255,255,0.25)", whiteSpace: "nowrap" }}>
+                    {wordCount} / 200–500 words
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Brokerage website */}
+          <div style={{ marginBottom: 0 }}>
+            <label style={labelSt}>Brokerage Website</label>
+            <input
+              style={inputSt}
+              type="url"
+              value={brokerageUrl}
+              onChange={e => setBrokerageUrl(e.target.value)}
+              placeholder="https://yourbrokerage.com"
+            />
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.2)", marginTop: 5 }}>
+              Optional. Used by the chat assistant when relevant.
+            </div>
           </div>
 
         </div>

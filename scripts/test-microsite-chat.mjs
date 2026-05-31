@@ -97,6 +97,7 @@ function makeFakeSupabase(seed = {}) {
     microsite_chat_conversations:  [...(seed.microsite_chat_conversations || [])],
     microsite_chat_messages:       [...(seed.microsite_chat_messages || [])],
     agent_voice_profiles:          [...(seed.agent_voice_profiles || [])],
+    agents:                        [...(seed.agents || [])],
     microsite_comps:               [...(seed.microsite_comps || [])],
   };
 
@@ -292,7 +293,12 @@ function baseSeed(overrides = {}) {
       display_name: "Tyshawn",
       full_name: "Tyshawn Miles",
       brokerage_name: "Test Brokerage",
+    }],
+    // brokerage_about moved to the agents table in migration 020.
+    agents: [{
+      id: AGENT_ID,
       brokerage_about: "A boutique Dallas brokerage.",
+      brokerage_url: "https://testbrokerage.example",
     }],
     microsite_comps: [
       { id: "c1", microsite_id: MICROSITE_ID, address: "1200 Test Ln", sale_price: 620000, sale_date: "2026-03-01", sqft: 2350, beds: 4, baths: 3, distance_miles: 0.2, sort_order: 1 },

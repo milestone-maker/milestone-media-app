@@ -4,6 +4,8 @@ import { useAuth } from "../../lib/auth";
 import { MEDIA_ICONS, THEMES, THEME_LAYOUT } from "../../lib/ui";
 import { ADDONS } from "../../lib/pricing";
 import MicrositeRenderer from "../../components/MicrositeRenderer";
+import ChatAssistantSection from "./ChatAssistantSection.jsx";
+import ComparableSalesSection from "./ComparableSalesSection.jsx";
 
 // Microsite add-on price, sourced from the central pricing config
 const MICROSITE_ADDON_PRICE = ADDONS.find(a => a.id === "microsite")?.price ?? 0;
@@ -979,6 +981,18 @@ function MicrositeView() {
           ))}
         </div>
       </div>
+
+      {/* Chat assistant + comparable sales — only meaningful for a
+          published microsite (both FK to microsites.id). publishedSlug
+          is the just-published or being-edited microsite. */}
+      {publishedSlug && (
+        <>
+          <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />
+          <ChatAssistantSection slug={publishedSlug} />
+          <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />
+          <ComparableSalesSection slug={publishedSlug} />
+        </>
+      )}
     </div>
   );
 
@@ -1457,6 +1471,18 @@ function MicrositeView() {
       }}>
         {generating ? "✨ Generating..." : publishedSlug ? "Preview Changes →" : "Preview Microsite →"}
       </button>
+
+      {/* When editing an already-published microsite, expose its chat
+          assistant + comparable sales config here too (these FK to an
+          existing microsites row, so they only apply once published). */}
+      {publishedSlug && (
+        <>
+          <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />
+          <ChatAssistantSection slug={publishedSlug} />
+          <div style={{ height: 1, background: "rgba(255,255,255,0.08)", margin: "4px 0" }} />
+          <ComparableSalesSection slug={publishedSlug} />
+        </>
+      )}
 
       </>}
     </div>

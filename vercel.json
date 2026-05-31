@@ -4,6 +4,7 @@
     { "source": "/(.*)", "destination": "/" }
   ],
   "functions": {
-    "api/content-generate.js": { "maxDuration": 60 }
+    "api/content-generate.js": { "maxDuration": 60 },
+    "api/parse-comps.js": { "maxDuration": 60 }
   }
 }

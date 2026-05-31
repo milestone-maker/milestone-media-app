@@ -486,12 +486,22 @@ export default async function handler(req, res, depsOverride) {
       }
     }
 
-    // ── 11. Load voice profile + comps + history ──
+    // ── 11. Load voice profile + brokerage info + comps + history ──
+    // display_name / brokerage_name still come from the voice profile
+    // (Phase 5b). brokerage_about / brokerage_url moved to the agents
+    // table in migration 020 — see EditProfileModal — because agents is
+    // 1:1 with the user and has no NOT NULL wall to seed around.
     const { data: voiceProfile } = await supabase
       .from("agent_voice_profiles")
-      .select("display_name, full_name, brokerage_name, brokerage_about, brokerage_url")
+      .select("display_name, full_name, brokerage_name")
       .eq("agent_id", microsite.agent_id)
       .limit(1)
+      .maybeSingle();
+
+    const { data: agentRow } = await supabase
+      .from("agents")
+      .select("brokerage_about, brokerage_url")
+      .eq("id", microsite.agent_id)
       .maybeSingle();
 
     const { data: comps } = await supabase
@@ -526,7 +536,7 @@ export default async function handler(req, res, depsOverride) {
     const systemPrompt = buildSystemPrompt({
       agentDisplayName: displayName,
       brokerageName,
-      brokerageAbout:   voiceProfile?.brokerage_about || null,
+      brokerageAbout:   agentRow?.brokerage_about || null,
       propertyData:     microsite.property_data,
       comps:            comps || [],
       topicsEnabled:    settings.topics_enabled,
