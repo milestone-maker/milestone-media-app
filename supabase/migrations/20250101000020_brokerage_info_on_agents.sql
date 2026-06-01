@@ -16,21 +16,19 @@
 -- Design decisions:
 --   • Both columns nullable — brokerage info is optional.
 --   • add column if not exists → safe to re-run.
---   • The unused columns on agent_voice_profiles are dropped here since
---     no code reads them anymore after the chat endpoint was repointed.
+--   • The brokerage_about / brokerage_url columns added to
+--     agent_voice_profiles in migration 018 are now UNUSED (the chat
+--     endpoint reads from agents instead). They are intentionally LEFT
+--     IN PLACE here rather than dropped — a non-destructive, reversible
+--     migration. They carry no data and no code references them. Drop
+--     them in a later cleanup migration once we're confident nothing
+--     external depends on them.  ⚠️ CLEANUP TODO: agent_voice_profiles
+--     .brokerage_about / .brokerage_url are dead columns.
 -- ============================================================
 
--- ── 1. agents: brokerage_about / brokerage_url ─────────────────────
+-- ── agents: brokerage_about / brokerage_url ────────────────────────
 alter table public.agents
   add column if not exists brokerage_about text;
 
 alter table public.agents
   add column if not exists brokerage_url text;
-
--- ── 2. Drop the now-unused columns from agent_voice_profiles ───────
--- Added in migration 018; superseded by the agents columns above.
-alter table public.agent_voice_profiles
-  drop column if exists brokerage_about;
-
-alter table public.agent_voice_profiles
-  drop column if exists brokerage_url;
