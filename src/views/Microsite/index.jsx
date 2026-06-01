@@ -6,6 +6,7 @@ import { ADDONS } from "../../lib/pricing";
 import MicrositeRenderer from "../../components/MicrositeRenderer";
 import ChatAssistantSection from "./ChatAssistantSection.jsx";
 import ComparableSalesSection from "./ComparableSalesSection.jsx";
+import { applyListingAutofill, applyBookingAutofill } from "./autofill.js";
 
 // Microsite add-on price, sourced from the central pricing config
 const MICROSITE_ADDON_PRICE = ADDONS.find(a => a.id === "microsite")?.price ?? 0;
@@ -191,19 +192,7 @@ function MicrositeView() {
     // Auto-populate form fields — but NOT when we're restoring an existing
     // microsite for edit (skipAutofillRef), or we'd clobber the saved
     // property_data the agent already curated (Bug A). Media still loads below.
-    if (!skipAutofillRef.current) {
-      setData(d => ({
-        ...d,
-        address: listing.address || "",
-        city: listing.city || "",
-        price: listing.price || "",
-        beds: listing.beds ? String(listing.beds) : "",
-        baths: listing.baths ? String(listing.baths) : "",
-        sqft: listing.sqft ? String(listing.sqft) : "",
-        matterportUrl: listing.matterport_url || "",
-        videoUrl: listing.youtube_url || "",
-      }));
-    }
+    setData(d => applyListingAutofill(d, listing, skipAutofillRef.current));
 
     // Fetch media files from storage
     const fetchMedia = async () => {
@@ -280,16 +269,7 @@ function MicrositeView() {
     // existing microsite for edit (skipAutofillRef), or re-editing would
     // overwrite the saved property_data with the raw booking row and silently
     // rewrite it on republish (Bug A). Media still loads below.
-    if (!skipAutofillRef.current) {
-      setData(d => ({
-        ...d,
-        address: booking.address || "",
-        city: [booking.city, booking.state, booking.zip].filter(Boolean).join(", ") || "",
-        agentName: booking.client_name || "",
-        matterportUrl: "",
-        videoUrl: "",
-      }));
-    }
+    setData(d => applyBookingAutofill(d, booking, skipAutofillRef.current));
 
     // Fetch media from booking_media table (private bucket, needs signed URLs)
     const fetchBookingMedia = async () => {
