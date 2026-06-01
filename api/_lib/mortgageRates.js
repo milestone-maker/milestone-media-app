@@ -157,3 +157,62 @@ export async function refreshMortgageRates(supabase) {
     return { status: "error", message: err.message };
   }
 }
+
+// ── read path (consumed by the chat prompt) ──────────────────────────
+
+/**
+ * Pure freshness check. True when the survey date is no more than
+ * maxAgeDays whole days old relative to `now` (16 inclusive by default —
+ * a little over two weekly survey cycles, so a single missed weekly
+ * refresh still reads as fresh). No side effects.
+ *
+ * @param {string} asOfDate    YYYY-MM-DD calendar date of the survey.
+ * @param {Date}   now
+ * @param {number} maxAgeDays  inclusive upper bound on age in whole days.
+ * @returns {boolean}
+ */
+export function isRateFresh(asOfDate, now = new Date(), maxAgeDays = 16) {
+  if (!asOfDate) return false;
+  // Parse as a UTC calendar date (midnight) and compare whole days against
+  // the UTC calendar date of `now`, so the result is timezone-stable.
+  const surveyMs = Date.parse(`${asOfDate}T00:00:00Z`);
+  if (Number.isNaN(surveyMs)) return false;
+  const nowUtcMidnight = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate()
+  );
+  const ageDays = Math.floor((nowUtcMidnight - surveyMs) / 86_400_000);
+  return ageDays <= maxAgeDays;
+}
+
+/**
+ * Read the most recent cached mortgage figure, but only if it's still
+ * fresh. Returns null when there's no row or the latest row is stale —
+ * the caller treats null as "no current figure, defer to the agent". This
+ * is the only DB read; takes supabase as an argument per house convention.
+ *
+ * @param {import('@supabase/supabase-js').SupabaseClient} supabase
+ * @returns {Promise<{as_of_date:string, rate_30yr:number, rate_15yr:number}|null>}
+ */
+export async function getFreshMortgageRates(supabase, { now = new Date() } = {}) {
+  const { data, error } = await supabase
+    .from("mortgage_rates")
+    .select("as_of_date, rate_30yr, rate_15yr")
+    .order("as_of_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("getFreshMortgageRates: read error:", error);
+    return null;
+  }
+  if (!data) return null;
+  if (!isRateFresh(data.as_of_date, now)) return null;
+
+  return {
+    as_of_date: data.as_of_date,
+    rate_30yr:  data.rate_30yr,
+    rate_15yr:  data.rate_15yr,
+  };
+}

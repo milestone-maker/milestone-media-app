@@ -34,6 +34,7 @@
 import { createClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
+import { getFreshMortgageRates } from "./_lib/mortgageRates.js";
 
 // ── constants ────────────────────────────────────────────────────────
 const MODEL                 = "claude-sonnet-4-6";
@@ -143,11 +144,11 @@ function topicGuidance(t) {
     schools:   "school district name and publicly available academic ratings only; if school data isn't included for this listing, defer to the agent",
     commute:   "factual driving distance and typical drive time when data is provided; if not, defer to the agent",
     comps:     "reference only the verified comps listed above; do not generate comparables from your own knowledge",
-    financing: "typical current mortgage rate ranges and rough monthly payment math from the listing price; never recommend a specific product, lender, or whether to buy; always recommend speaking with a qualified lender; defer to the agent if specific rate data isn't available",
+    financing: "typical current mortgage rate ranges and rough monthly payment math from the listing price; never recommend a specific product, lender, or whether to buy; always recommend speaking with a qualified lender; if no current rate figure is provided above, defer to the agent",
   })[t] || "";
 }
 
-function buildSystemPrompt({ agentDisplayName, brokerageName, brokerageAbout, propertyData, comps, topicsEnabled, visitor }) {
+export function buildSystemPrompt({ agentDisplayName, brokerageName, brokerageAbout, propertyData, comps, topicsEnabled, visitor, mortgageRates }) {
   const enabled  = Object.entries(topicsEnabled || {}).filter(([, v]) => v).map(([k]) => k);
   const disabled = Object.entries(topicsEnabled || {}).filter(([, v]) => !v).map(([k]) => k);
 
@@ -217,6 +218,24 @@ function buildSystemPrompt({ agentDisplayName, brokerageName, brokerageAbout, pr
     }
   }
 
+  // Current mortgage rates — only when financing is an enabled topic AND we
+  // have a fresh cached figure. Stale/missing rates fall through to the
+  // financing deferral wording (topicGuidance + compliance rule 3).
+  if (enabled.includes("financing") && mortgageRates) {
+    const dateLabel = new Date(`${mortgageRates.as_of_date}T00:00:00Z`).toLocaleDateString("en-US", {
+      year: "numeric", month: "long", day: "numeric", timeZone: "UTC",
+    });
+    lines.push("");
+    lines.push(
+      `CURRENT MORTGAGE RATES — national averages from Freddie Mac's weekly survey, as of ${dateLabel}: ` +
+      `30-year fixed ${mortgageRates.rate_30yr}%, 15-year fixed ${mortgageRates.rate_15yr}%. ` +
+      `Use these only as a general reference. They are national averages — not a quote, an offer, or a prediction of future rates. ` +
+      `A buyer's actual rate depends on their credit, down payment, loan type, and lender. ` +
+      `You may do rough monthly-payment math from the listing price if asked, but always tell the visitor to speak with a qualified lender for an accurate, personalized rate. ` +
+      `Never recommend a specific lender or loan product, and never advise on whether or when to buy or lock a rate.`
+    );
+  }
+
   if (enabled.length) {
     lines.push("");
     lines.push("TOPICS YOU CAN DISCUSS (per the agent's settings):");
@@ -250,7 +269,7 @@ function buildSystemPrompt({ agentDisplayName, brokerageName, brokerageAbout, pr
   lines.push("");
   lines.push(`If a visitor signals strong interest (asks about tour scheduling, offer specifics, closing timelines), encourage them to share contact info and let them know ${agentDisplayName} will follow up promptly.`);
   lines.push("");
-  lines.push("For Stage 1: schools, commute, and live financing rates may not yet have baked data. When asked and data isn't available, gracefully defer to the agent.");
+  lines.push("When asked about a topic and the relevant data isn't provided above, gracefully defer to the agent rather than guessing.");
 
   return lines.join("\n");
 }
@@ -517,6 +536,17 @@ export default async function handler(req, res, depsOverride) {
       .order("created_at", { ascending: true })
       .limit(HISTORY_LIMIT);
 
+    // Cached national mortgage figure (shared across microsites, refreshed
+    // weekly). Non-critical: any failure resolves to null so the chat still
+    // works — the prompt simply omits the rate section and defers.
+    let mortgageRates = null;
+    try {
+      mortgageRates = await getFreshMortgageRates(supabase);
+    } catch (rateErr) {
+      console.error("mortgage rates load error (non-fatal):", rateErr);
+      mortgageRates = null;
+    }
+
     // ── 12. Build prompt + call Anthropic ──
     const displayName = voiceProfile?.display_name || agentDisplayName;
     const brokerageName = voiceProfile?.brokerage_name || "our brokerage";
@@ -541,6 +571,7 @@ export default async function handler(req, res, depsOverride) {
       comps:            comps || [],
       topicsEnabled:    settings.topics_enabled,
       visitor,
+      mortgageRates,
     });
 
     const apiMessages = (history || [])
