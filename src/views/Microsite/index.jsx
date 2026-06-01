@@ -67,6 +67,13 @@ function MicrositeView() {
   const { user, profile } = useAuth();
   const isAdmin = profile?.role === "admin";
   const editLoadRef = useRef(false); // skip sourceType reset when loading for edit
+  // When loading a published microsite for edit, the listing/booking source
+  // effects must NOT overwrite the form fields we just restored from the
+  // saved property_data (Bug A: re-edit was clobbering address/city/agent/
+  // tour/video from the raw source row, silently rewriting on republish).
+  // Set true by loadMicrositeForEdit; cleared the moment the user manually
+  // picks a source from a dropdown, or starts a fresh build.
+  const skipAutofillRef = useRef(false);
   const [step, setStep] = useState("build");
   const [themeIdx, setThemeIdx] = useState(0);
   const [generating, setGenerating] = useState(false);
@@ -181,18 +188,22 @@ function MicrositeView() {
     const listing = listings.find(l => l.id === selectedListingId);
     if (!listing) return;
 
-    // Auto-populate form fields
-    setData(d => ({
-      ...d,
-      address: listing.address || "",
-      city: listing.city || "",
-      price: listing.price || "",
-      beds: listing.beds ? String(listing.beds) : "",
-      baths: listing.baths ? String(listing.baths) : "",
-      sqft: listing.sqft ? String(listing.sqft) : "",
-      matterportUrl: listing.matterport_url || "",
-      videoUrl: listing.youtube_url || "",
-    }));
+    // Auto-populate form fields — but NOT when we're restoring an existing
+    // microsite for edit (skipAutofillRef), or we'd clobber the saved
+    // property_data the agent already curated (Bug A). Media still loads below.
+    if (!skipAutofillRef.current) {
+      setData(d => ({
+        ...d,
+        address: listing.address || "",
+        city: listing.city || "",
+        price: listing.price || "",
+        beds: listing.beds ? String(listing.beds) : "",
+        baths: listing.baths ? String(listing.baths) : "",
+        sqft: listing.sqft ? String(listing.sqft) : "",
+        matterportUrl: listing.matterport_url || "",
+        videoUrl: listing.youtube_url || "",
+      }));
+    }
 
     // Fetch media files from storage
     const fetchMedia = async () => {
@@ -265,15 +276,20 @@ function MicrositeView() {
     const booking = bookings.find(b => b.id === selectedBookingId);
     if (!booking) return;
 
-    // Auto-populate form fields from booking data
-    setData(d => ({
-      ...d,
-      address: booking.address || "",
-      city: [booking.city, booking.state, booking.zip].filter(Boolean).join(", ") || "",
-      agentName: booking.client_name || "",
-      matterportUrl: "",
-      videoUrl: "",
-    }));
+    // Auto-populate form fields from booking data — but NOT when restoring an
+    // existing microsite for edit (skipAutofillRef), or re-editing would
+    // overwrite the saved property_data with the raw booking row and silently
+    // rewrite it on republish (Bug A). Media still loads below.
+    if (!skipAutofillRef.current) {
+      setData(d => ({
+        ...d,
+        address: booking.address || "",
+        city: [booking.city, booking.state, booking.zip].filter(Boolean).join(", ") || "",
+        agentName: booking.client_name || "",
+        matterportUrl: "",
+        videoUrl: "",
+      }));
+    }
 
     // Fetch media from booking_media table (private bucket, needs signed URLs)
     const fetchBookingMedia = async () => {
@@ -343,8 +359,12 @@ function MicrositeView() {
 
   // Reset state when switching source type
   useEffect(() => {
-    setSelectedListingId(null);
+    // During an edit-load, preserve BOTH source selections — loadMicrositeForEdit
+    // restores whichever applies and we must not null them out here (Bug B).
     if (editLoadRef.current) { editLoadRef.current = false; return; }
+    // Fresh source switch (not an edit-load) → allow autofill again.
+    skipAutofillRef.current = false;
+    setSelectedListingId(null);
     setSelectedBookingId(null);
     setListingPhotos([]);
     setListingVideo(null);
@@ -444,6 +464,10 @@ function MicrositeView() {
   const loadMicrositeForEdit = (ms) => {
     const pd = ms.property_data || {};
 
+    // We're restoring saved content — tell the source effects not to
+    // overwrite these fields from the raw listing/booking row (Bug A).
+    skipAutofillRef.current = true;
+
     // Populate all form fields from saved property_data
     setData({
       address: pd.address || "",
@@ -491,6 +515,14 @@ function MicrositeView() {
     // does NOT clobber the heroMediaId we just restored above.
     if (pd.booking_id) {
       setSelectedBookingId(pd.booking_id);
+    }
+
+    // Restore listing selection for listing-sourced microsites (Bug B —
+    // this was never restored, so re-editing a listing-built microsite lost
+    // its source binding and the media picker came up empty). The reset
+    // effect now preserves selectedListingId during an edit-load too.
+    if (pd.listing_id && (pd.source_type === "listing" || !pd.booking_id)) {
+      setSelectedListingId(pd.listing_id);
     }
 
     // Restore theme
@@ -867,7 +899,7 @@ function MicrositeView() {
             padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
             letterSpacing: "0.06em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600,
           }}>✏️ Edit</button>
-          <button onClick={() => { setStep("build"); setPublished(false); setPublishedSlug(null); setLeads([]); setData({ address: "", city: "", price: "", beds: "", baths: "", sqft: "", description: "", agentName: "", agentPhone: "", heroImg: "", features: ["","","",""], mediaTypes: ["Photos","Drone","3D Tour"] }); }} style={{
+          <button onClick={() => { skipAutofillRef.current = false; setSelectedBookingId(null); setSelectedListingId(null); setStep("build"); setPublished(false); setPublishedSlug(null); setLeads([]); setData({ address: "", city: "", price: "", beds: "", baths: "", sqft: "", description: "", agentName: "", agentPhone: "", heroImg: "", features: ["","","",""], mediaTypes: ["Photos","Drone","3D Tour"] }); }} style={{
             background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.35)",
             padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
             letterSpacing: "0.06em", textTransform: "uppercase", cursor: "pointer",
@@ -1188,7 +1220,7 @@ function MicrositeView() {
           <select
             style={{ ...inputStyle, cursor: "pointer" }}
             value={selectedListingId || ""}
-            onChange={e => setSelectedListingId(e.target.value || null)}
+            onChange={e => { skipAutofillRef.current = false; setSelectedListingId(e.target.value || null); }}
           >
             <option value="">— Choose a listing —</option>
             {listings.map(l => (
@@ -1199,7 +1231,7 @@ function MicrositeView() {
           <select
             style={{ ...inputStyle, cursor: "pointer" }}
             value={selectedBookingId || ""}
-            onChange={e => setSelectedBookingId(e.target.value || null)}
+            onChange={e => { skipAutofillRef.current = false; setSelectedBookingId(e.target.value || null); }}
           >
             <option value="">— Choose a listing —</option>
             {bookings.map(b => (
