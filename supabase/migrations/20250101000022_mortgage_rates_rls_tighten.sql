@@ -1,0 +1,21 @@
+-- ============================================================
+-- 022: Stage 4 — tighten RLS on mortgage_rates (drop anon SELECT)
+-- ============================================================
+-- Migration 021 added a permissive anon SELECT policy ("Public can view
+-- mortgage rates") on public.mortgage_rates, on the theory that the
+-- national rate figure is public information. It turns out anon access is
+-- unneeded: the only reader is the microsite chat endpoint, which uses the
+-- SUPABASE_SERVICE_ROLE_KEY. The service-role key BYPASSES RLS entirely, so
+-- dropping the anon policy does not affect any application read path.
+--
+-- After this migration:
+--   • RLS stays ENABLED on the table.
+--   • No SELECT policy remains → default-deny for anon/authenticated roles.
+--   • Service-role reads/writes (refresh endpoint + chat) are unaffected.
+--
+-- Dropping a policy is data-safe (no rows touched) and reversible (the
+-- policy can be re-created verbatim from migration 021). No table/column
+-- drops, no destructive statements.
+-- ============================================================
+
+drop policy if exists "Public can view mortgage rates" on public.mortgage_rates;
