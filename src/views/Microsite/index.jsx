@@ -11,6 +11,50 @@ import { applyListingAutofill, applyBookingAutofill } from "./autofill.js";
 // Microsite add-on price, sourced from the central pricing config
 const MICROSITE_ADDON_PRICE = ADDONS.find(a => a.id === "microsite")?.price ?? 0;
 
+// ── Lead helpers ───────────────────────────────────────────────────
+// The inbox UI renders pre-formatted `date` (M/D/YYYY) and `time`
+// (h:mm AM/PM) strings. Live rows carry a single `created_at`
+// timestamptz, so we format it into those two strings at map time
+// without changing how the UI renders lead.date / lead.time.
+function formatLeadDate(d) {
+  if (!d || isNaN(d.getTime())) return "";
+  return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
+}
+function formatLeadTime(d) {
+  if (!d || isNaN(d.getTime())) return "";
+  let h = d.getHours();
+  const m = d.getMinutes();
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${h}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
+// Map a public.leads row into the shape the existing inbox UI consumes.
+// Keeps the real `id` (updates depend on it) and carries source +
+// chatConversationId through even though 5a doesn't render them (5b
+// needs them to open the transcript). Chat leads have null tour_type /
+// possibly null email/phone — preserved as null here and handled
+// gracefully at render time.
+function mapLeadRow(row) {
+  const created = row.created_at ? new Date(row.created_at) : null;
+  return {
+    id:                 row.id,
+    name:               row.name || "",
+    email:              row.email || null,
+    phone:              row.phone || null,
+    message:            row.message || "",
+    tourType:           row.tour_type || null,
+    status:             row.status || "new",
+    read:               !!row.read,
+    source:             row.source || "contact_form",
+    chatConversationId: row.chat_conversation_id || null,
+    created_at:         row.created_at || null,
+    date:               formatLeadDate(created),
+    time:               formatLeadTime(created),
+  };
+}
+
 // ============================================================
 // MICROSITE PREVIEW — thin wrapper around the shared renderer
 // ============================================================
@@ -90,11 +134,7 @@ function MicrositeView() {
     smsEnabled: true, smsPhone: "(214) 744-3801",
     notifyOnNew: true, notifyOnOffer: true, notifyOnVirtual: false,
   });
-  const [leads, setLeads] = useState([
-    { name: "Marcus Johnson", email: "marcus@email.com", phone: "(214) 555-0182", message: "Interested in viewing this weekend.", tourType: "in-person", time: "9:14 AM", date: "3/21/2026", read: true, status: "scheduled" },
-    { name: "Priya Sharma", email: "priya.sharma@gmail.com", phone: "(469) 555-0347", message: "Can we schedule a virtual tour?", tourType: "virtual", time: "2:31 PM", date: "3/22/2026", read: false, status: "contacted" },
-    { name: "Derek & Alicia Tran", email: "dtran@outlook.com", phone: "(972) 555-0094", message: "Ready to make an offer. Please contact ASAP.", tourType: "offer", time: "8:03 AM", date: "3/23/2026", read: false, status: "new" },
-  ]);
+  const [leads, setLeads] = useState([]);
   const [selectedLead, setSelectedLead] = useState(null);
   const [listings, setListings] = useState([]);
   const [selectedListingId, setSelectedListingId] = useState(null);
@@ -160,6 +200,34 @@ function MicrositeView() {
     };
     fetchMyMicrosites();
   }, [user?.id]);
+
+  // Fetch the current published microsite's leads (live inbox). The
+  // published screen is single-microsite scoped: resolve the current
+  // microsite id from the slug already in scope, then load only that
+  // microsite's leads. RLS scopes further to the agent's own rows.
+  useEffect(() => {
+    if (step !== "published" || !publishedSlug) { setLeads([]); return; }
+    const micrositeId = myMicrosites.find(m => m.slug === publishedSlug)?.id;
+    if (!micrositeId) { setLeads([]); return; }
+    let cancelled = false;
+    const fetchLeads = async () => {
+      const { data: rows, error } = await supabase
+        .from("leads")
+        .select("id, name, email, phone, message, tour_type, status, read, created_at, source, chat_conversation_id")
+        .eq("microsite_id", micrositeId)
+        .order("created_at", { ascending: false });
+      if (cancelled) return;
+      if (error) {
+        // Don't crash the screen — log and show a neutral empty inbox.
+        console.error("leads fetch error:", error);
+        setLeads([]);
+        return;
+      }
+      setLeads((rows || []).map(mapLeadRow));
+    };
+    fetchLeads();
+    return () => { cancelled = true; };
+  }, [step, publishedSlug, myMicrosites]);
 
   // Check microsite addon request status when listing changes
   useEffect(() => {
@@ -397,7 +465,38 @@ function MicrositeView() {
     setTimeout(() => setToast(null), 4500);
   };
 
-  const updateLeadStatus = (idx, status) => setLeads(l => l.map((x, i) => i === idx ? { ...x, status } : x));
+  // Persist a status change. Optimistic local update, then write to
+  // the DB; on error, revert local state so the UI never lies about
+  // what was saved. (Null-listing leads rely on the new microsite-
+  // ownership UPDATE policy — see migration 024.)
+  const updateLeadStatus = async (idx, status) => {
+    const lead = leads[idx];
+    if (!lead || lead.status === status) return;
+    const prev = lead.status;
+    setLeads(l => l.map((x, i) => i === idx ? { ...x, status } : x));
+    if (!lead.id) return; // no real row to persist against
+    const { error } = await supabase.from("leads").update({ status }).eq("id", lead.id);
+    if (error) {
+      console.error("lead status update error:", error);
+      setLeads(l => l.map((x, i) => i === idx ? { ...x, status: prev } : x));
+      alert("Couldn't save the status change. Please try again.");
+    }
+  };
+
+  // Open a lead's detail view and, if unread, mark it read — locally
+  // and in the DB. Revert local state on error.
+  const openLead = async (idx) => {
+    setSelectedLead(idx);
+    const lead = leads[idx];
+    if (!lead || lead.read) return;
+    setLeads(l => l.map((x, i) => i === idx ? { ...x, read: true } : x));
+    if (!lead.id) return;
+    const { error } = await supabase.from("leads").update({ read: true }).eq("id", lead.id);
+    if (error) {
+      console.error("lead read update error:", error);
+      setLeads(l => l.map((x, i) => i === idx ? { ...x, read: false } : x));
+    }
+  };
 
   // Package tier gating helper — works for both listings and bookings
   const selectedListing = listings.find(l => l.id === selectedListingId);
@@ -617,6 +716,13 @@ function MicrositeView() {
   const tourColors = { "in-person": "#4ade80", virtual: "#5fb0d8", offer: "#c9a84c" };
   const tourLabels = { "in-person": "🏠 Showing", virtual: "🎥 Virtual", offer: "✍️ Offer" };
 
+  // Null-safe accessors. Contact-form leads render their tour type
+  // exactly as before; chat leads (tour_type = null / source "chat")
+  // fall back to a neutral gold accent and a clear "Chat" tag instead
+  // of an undefined color/label.
+  const leadAccent = (l) => tourColors[l?.tourType] || "#c9a84c";
+  const leadTag = (l) => (l?.tourType && tourLabels[l.tourType]) ? tourLabels[l.tourType] : "💬 Chat";
+
   const inputStyle = {
     width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.12)",
     borderRadius: 8, padding: "11px 14px", color: "#fff",
@@ -722,7 +828,7 @@ function MicrositeView() {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button onClick={() => { setSelectedLead(null); setLeads(l => l.map((x, i) => i === selectedLead ? { ...x, read: true } : x)); }} style={{
+          <button onClick={() => setSelectedLead(null)} style={{
             background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer",
             fontFamily: "'Jost', sans-serif", fontSize: 12, padding: 0, letterSpacing: "0.06em",
           }}>← Inbox</button>
@@ -738,15 +844,15 @@ function MicrositeView() {
           <div style={{ padding: "20px", background: "rgba(201,168,76,0.05)", borderBottom: "1px solid rgba(255,255,255,0.07)", display: "flex", alignItems: "center", gap: 14 }}>
             <div style={{
               width: 48, height: 48, borderRadius: "50%", flexShrink: 0,
-              background: `linear-gradient(135deg, ${tourColors[lead.tourType]}, ${tourColors[lead.tourType]}88)`,
+              background: `linear-gradient(135deg, ${leadAccent(lead)}, ${leadAccent(lead)}88)`,
               display: "flex", alignItems: "center", justifyContent: "center",
               fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: "#0a1628", fontWeight: 700,
             }}>{lead.name.split(" ").map(n => n[0]).join("").slice(0, 2)}</div>
             <div>
               <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#fff" }}>{lead.name}</div>
               <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
-                <span style={{ background: `${tourColors[lead.tourType]}20`, color: tourColors[lead.tourType], border: `1px solid ${tourColors[lead.tourType]}40`, padding: "2px 8px", borderRadius: 20, fontFamily: "'Jost', sans-serif", fontSize: 10 }}>
-                  {tourLabels[lead.tourType]}
+                <span style={{ background: `${leadAccent(lead)}20`, color: leadAccent(lead), border: `1px solid ${leadAccent(lead)}40`, padding: "2px 8px", borderRadius: 20, fontFamily: "'Jost', sans-serif", fontSize: 10 }}>
+                  {leadTag(lead)}
                 </span>
                 <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)" }}>{lead.date} · {lead.time}</span>
               </div>
@@ -754,7 +860,7 @@ function MicrositeView() {
           </div>
 
           {/* Contact rows */}
-          {[{ icon: "📧", label: "Email", val: lead.email }, { icon: "📱", label: "Phone", val: lead.phone }].map(row => (
+          {[{ icon: "📧", label: "Email", val: lead.email || "—" }, { icon: "📱", label: "Phone", val: lead.phone || "—" }].map(row => (
             <div key={row.label} style={{ padding: "13px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)", letterSpacing: "0.08em" }}>{row.icon} {row.label}</span>
               <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#fff" }}>{row.val}</span>
@@ -851,7 +957,7 @@ function MicrositeView() {
           <div style={{ flex: 1 }}>
             <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "#c9a84c", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 2 }}>🔔 New Lead!</div>
             <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff", fontWeight: 600 }}>{toast.name}</div>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.45)" }}>{tourLabels[toast.tourType]} · Just now</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.45)" }}>{leadTag(toast)} · Just now</div>
           </div>
           <button onClick={() => setToast(null)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.3)", cursor: "pointer", fontSize: 16 }}>×</button>
         </div>
@@ -943,7 +1049,7 @@ function MicrositeView() {
             {leads.map((lead, i) => {
               const st = STATUSES.find(s => s.key === lead.status) || STATUSES[0];
               return (
-                <div key={i} onClick={() => setSelectedLead(i)} style={{
+                <div key={lead.id ?? i} onClick={() => openLead(i)} style={{
                   background: lead.read ? "rgba(255,255,255,0.02)" : "rgba(201,168,76,0.05)",
                   border: `1px solid ${lead.read ? "rgba(255,255,255,0.07)" : "rgba(201,168,76,0.2)"}`,
                   borderRadius: 12, padding: "13px 15px", cursor: "pointer",
@@ -953,7 +1059,7 @@ function MicrositeView() {
                   onMouseLeave={e => e.currentTarget.style.borderColor = lead.read ? "rgba(255,255,255,0.07)" : "rgba(201,168,76,0.2)"}>
                   <div style={{
                     width: 38, height: 38, borderRadius: "50%", flexShrink: 0,
-                    background: `linear-gradient(135deg, ${tourColors[lead.tourType]}88, ${tourColors[lead.tourType]}44)`,
+                    background: `linear-gradient(135deg, ${leadAccent(lead)}88, ${leadAccent(lead)}44)`,
                     display: "flex", alignItems: "center", justifyContent: "center",
                     fontFamily: "'Cormorant Garamond', serif", fontSize: 13, color: "#fff", fontWeight: 700,
                   }}>{lead.name.split(" ").map(n => n[0]).join("").slice(0, 2)}</div>
