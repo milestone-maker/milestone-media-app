@@ -236,6 +236,27 @@ export async function getNearbySchools(address, { perLevel = 3 } = {}) {
   try {
     const geo = await geocodeAddress(address);
     if (!geo) return [];
+    return await getNearbySchoolsFromGeo(geo, { perLevel });
+  } catch (err) {
+    console.error("getNearbySchools: unexpected error:", err);
+    return [];
+  }
+}
+
+/**
+ * The post-geocode half of getNearbySchools: given an already-geocoded
+ * location, fetch the county directory, distance-rank, and format. Exposed
+ * separately so a caller that has already geocoded (e.g. the publish flow,
+ * which also wants the coordinates) doesn't geocode twice. Returns the same
+ * array shape as getNearbySchools; [] (never throws) on any error.
+ *
+ * @param {{lat:number, lng:number, state_fips:string, county_fips:string}} geo
+ * @param {{perLevel?:number}} [opts]
+ * @returns {Promise<Array<{name:string, level:string, type:string, distance_mi:number}>>}
+ */
+export async function getNearbySchoolsFromGeo(geo, { perLevel = 3 } = {}) {
+  try {
+    if (!geo) return [];
 
     const candidates = await fetchSchoolsInCounty({
       state_fips:  geo.state_fips,
@@ -269,7 +290,7 @@ export async function getNearbySchools(address, { perLevel = 3 } = {}) {
     );
     return out;
   } catch (err) {
-    console.error("getNearbySchools: unexpected error:", err);
+    console.error("getNearbySchoolsFromGeo: unexpected error:", err);
     return [];
   }
 }

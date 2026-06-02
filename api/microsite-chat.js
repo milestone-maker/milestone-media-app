@@ -35,6 +35,7 @@ import { createClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
 import { getFreshMortgageRates } from "./_lib/mortgageRates.js";
+import { getCommute } from "./_lib/commute.js";
 
 // ── constants ────────────────────────────────────────────────────────
 const MODEL                 = "claude-sonnet-4-6";
@@ -44,6 +45,29 @@ const RATE_LIMIT_WINDOW_SEC = 60;
 const RATE_LIMIT_MAX        = 10;
 const HISTORY_LIMIT         = 20;
 const APPROACHING_CAP_RATIO = 0.8;
+const COMMUTE_CAP           = 5;   // max live commute lookups per conversation
+const TOOL_LOOP_MAX         = 3;   // backstop on tool-use round trips per message
+
+// Anthropic tool — live driving distance/time from this listing to a
+// visitor-named destination. Offered only when commute is enabled AND the
+// listing has baked coordinates (see commuteAvailable in the handler).
+const COMMUTE_TOOL = {
+  name: "get_commute",
+  description:
+    "Get the driving distance and typical drive time from THIS property to a destination the visitor names " +
+    "(e.g. DFW Airport, downtown Dallas, a workplace address). Use this whenever the visitor asks how far, " +
+    "how long, or about the commute/drive to a specific place. Returns a typical (non-live-traffic) estimate.",
+  input_schema: {
+    type: "object",
+    properties: {
+      destination: {
+        type: "string",
+        description: "The destination in the visitor's own words (e.g. 'DFW Airport', 'downtown Dallas', '1200 Main St, Dallas').",
+      },
+    },
+    required: ["destination"],
+  },
+};
 
 const DEFAULT_CHAT_SETTINGS = {
   chat_enabled: true,
@@ -148,7 +172,7 @@ function topicGuidance(t) {
   })[t] || "";
 }
 
-export function buildSystemPrompt({ agentDisplayName, brokerageName, brokerageAbout, propertyData, comps, topicsEnabled, visitor, mortgageRates }) {
+export function buildSystemPrompt({ agentDisplayName, brokerageName, brokerageAbout, propertyData, comps, topicsEnabled, visitor, mortgageRates, commuteAvailable }) {
   const enabled  = Object.entries(topicsEnabled || {}).filter(([, v]) => v).map(([k]) => k);
   const disabled = Object.entries(topicsEnabled || {}).filter(([, v]) => !v).map(([k]) => k);
 
@@ -281,6 +305,10 @@ export function buildSystemPrompt({ agentDisplayName, brokerageName, brokerageAb
   lines.push("");
   lines.push("6. SCOPE. If a question is unrelated to this listing or real estate generally, politely redirect.");
   lines.push("");
+  if (commuteAvailable) {
+    lines.push("7. COMMUTE. You may use the get_commute tool to answer questions about driving distance or typical drive time from THIS property to a place the visitor names. Report the result as a TYPICAL estimate from Google Maps that varies with traffic and time of day, stated factually (e.g., \"about 30 miles, roughly 29 minutes in typical traffic\"). NEVER characterize the neighborhoods, areas, or routes between here and the destination, and never imply anything about the desirability, safety, or character of any area or route — that is Fair Housing-prohibited (see rule 1). If a destination can't be found, say so plainly and offer to pass the question to the agent.");
+    lines.push("");
+  }
   lines.push(`If a visitor signals strong interest (asks about tour scheduling, offer specifics, closing timelines), encourage them to share contact info and let them know ${agentDisplayName} will follow up promptly.`);
   lines.push("");
   lines.push("When asked about a topic and the relevant data isn't provided above, gracefully defer to the agent rather than guessing.");
@@ -577,6 +605,14 @@ export default async function handler(req, res, depsOverride) {
           ? { name: conversation.lead_name, email: conversation.lead_email, phone: conversation.lead_phone }
           : null);
 
+    // Commute availability: the live commute tool is offered only when the
+    // commute topic is enabled AND the listing has baked coordinates (from
+    // the publish-time geocode). No coords → no tool, existing deflection.
+    const coords = microsite.property_data?.coordinates;
+    const coordsValid =
+      coords && Number.isFinite(Number(coords.lat)) && Number.isFinite(Number(coords.lng));
+    const commuteAvailable = !!(settings.topics_enabled?.commute) && coordsValid;
+
     const systemPrompt = buildSystemPrompt({
       agentDisplayName: displayName,
       brokerageName,
@@ -586,6 +622,7 @@ export default async function handler(req, res, depsOverride) {
       topicsEnabled:    settings.topics_enabled,
       visitor,
       mortgageRates,
+      commuteAvailable,
     });
 
     const apiMessages = (history || [])
@@ -593,19 +630,82 @@ export default async function handler(req, res, depsOverride) {
       .map(m => ({ role: m.role, content: m.content }));
     apiMessages.push({ role: "user", content: message });
 
+    // Base request; the commute tool is attached only when available.
+    const createOpts = {
+      model:      MODEL,
+      max_tokens: MAX_TOKENS,
+      system:     systemPrompt,
+      messages:   apiMessages,
+    };
+    if (commuteAvailable) createOpts.tools = [COMMUTE_TOOL];
+
     let reply = "";
-    let tokensIn = null, tokensOut = null;
+    let tokensIn = 0, tokensOut = 0;
+    let commuteLookups = conversation.commute_lookups || 0;
     try {
-      const apiResp = await anthropic.messages.create({
-        model:      MODEL,
-        max_tokens: MAX_TOKENS,
-        system:     systemPrompt,
-        messages:   apiMessages,
-      });
+      let apiResp = await anthropic.messages.create(createOpts);
+      tokensIn  += apiResp?.usage?.input_tokens  ?? 0;
+      tokensOut += apiResp?.usage?.output_tokens ?? 0;
+
+      // Tool-use loop. Each visitor message may need a second Anthropic call:
+      // one returns tool_use, we run get_commute, return a tool_result, and
+      // call again for the final text. Bounded by TOOL_LOOP_MAX; the real cost
+      // bound is the per-conversation COMMUTE_CAP on actual Google calls.
+      let iterations = 0;
+      while (apiResp?.stop_reason === "tool_use" && iterations < TOOL_LOOP_MAX) {
+        iterations++;
+        const toolUses = (apiResp.content || []).filter(b => b.type === "tool_use");
+        const toolResults = [];
+
+        for (const tu of toolUses) {
+          if (tu.name !== "get_commute") {
+            toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: "Unknown tool." });
+            continue;
+          }
+          const dest = typeof tu.input?.destination === "string" ? tu.input.destination.trim() : "";
+
+          // Per-conversation cap: do NOT call Google once at/over the cap.
+          if (commuteLookups >= COMMUTE_CAP) {
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content: `The commute-lookup limit for this conversation has been reached. Do not look up more drive times; tell the visitor that ${displayName} can provide any further commute details.`,
+            });
+            continue;
+          }
+
+          // Actual lookup. Increment the persisted counter only on a real call.
+          const commute = dest
+            ? await getCommute({ originLat: coords.lat, originLng: coords.lng, destination: dest })
+            : null;
+          if (dest) {
+            commuteLookups++;
+            await supabase
+              .from("microsite_chat_conversations")
+              .update({ commute_lookups: commuteLookups })
+              .eq("id", conversation.id);
+          }
+
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: tu.id,
+            content: commute
+              ? `Driving from this property to "${dest}": about ${commute.distance_text}, roughly ${commute.duration_text} in typical traffic. This is a Google Maps estimate that varies with traffic and time of day.`
+              : `Could not find a driving route to "${dest || "that destination"}". The destination may be unrecognized, or commute info isn't available for it — offer to pass the question to the agent.`,
+          });
+        }
+
+        // Append the assistant tool_use turn + the user tool_result turn, then
+        // call again (tool stays available). Intermediate turns are NOT persisted.
+        apiMessages.push({ role: "assistant", content: apiResp.content });
+        apiMessages.push({ role: "user", content: toolResults });
+        apiResp = await anthropic.messages.create(createOpts);
+        tokensIn  += apiResp?.usage?.input_tokens  ?? 0;
+        tokensOut += apiResp?.usage?.output_tokens ?? 0;
+      }
+
       const block = (apiResp?.content || []).find(b => b.type === "text");
-      reply     = block?.text || "";
-      tokensIn  = apiResp?.usage?.input_tokens  ?? null;
-      tokensOut = apiResp?.usage?.output_tokens ?? null;
+      reply = block?.text || "";
     } catch (apiErr) {
       console.error("anthropic call error:", apiErr);
       return res.status(500).json({ error: "Something went wrong. Please try again." });

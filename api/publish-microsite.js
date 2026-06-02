@@ -18,30 +18,45 @@
 //                               and calendar.js — same variable, no new secrets)
 //
 // External calls: as of Stage 4 schools, this endpoint makes a best-effort
-// call to bake nearby-school directory data onto the microsite — the US
-// Census geocoder + the Urban Institute NCES CCD directory (both FREE, NO
-// API key). The lookup is strictly non-blocking: it is wrapped in a timeout
-// and try/catch so any slowness or failure resolves to schools:[] and can
-// NEVER delay or fail a publish.
+// call to bake nearby-school directory data AND the listing's geocoded
+// coordinates onto the microsite — the US Census geocoder + the Urban
+// Institute NCES CCD directory (both FREE, NO API key). The listing is
+// geocoded ONCE; both schools and coordinates come from that single geocode.
+// The coordinates are baked so the live commute tool (Stage 4 commute) has an
+// origin without geocoding mid-conversation. The lookup is strictly
+// non-blocking: it is wrapped in a timeout and try/catch so any slowness or
+// failure resolves to schools:[] / coordinates:null and can NEVER delay or
+// fail a publish.
 
 import { createClient } from "@supabase/supabase-js";
 import { checkMicrositeEntitlement } from "./_lib/entitlement.js";
-import { getNearbySchools } from "./_lib/schools.js";
+import { geocodeAddress, getNearbySchoolsFromGeo } from "./_lib/schools.js";
 
-// Best-effort, strictly non-blocking schools bake. Races the lookup against
-// a timeout and swallows every failure → always resolves to an array, never
-// throws, never delays the publish beyond SCHOOLS_TIMEOUT_MS.
+// Best-effort, strictly non-blocking bake of schools + coordinates. Geocodes
+// ONCE, then derives both from that geo. Races the whole thing against a
+// timeout and swallows every failure → always resolves to
+// { schools:[], coordinates:null } on any error/timeout, never throws, never
+// delays the publish beyond SCHOOLS_TIMEOUT_MS.
 const SCHOOLS_TIMEOUT_MS = 10000;
-async function bakeSchools(fullAddress) {
+async function bakeSchoolsAndCoordinates(fullAddress) {
+  const EMPTY = { schools: [], coordinates: null };
   try {
     const result = await Promise.race([
-      getNearbySchools(fullAddress),
+      (async () => {
+        const geo = await geocodeAddress(fullAddress);
+        if (!geo) return EMPTY;
+        return {
+          schools: await getNearbySchoolsFromGeo(geo),
+          coordinates: { lat: geo.lat, lng: geo.lng },
+        };
+      })(),
       new Promise((resolve) => setTimeout(() => resolve(null), SCHOOLS_TIMEOUT_MS)),
     ]);
-    return Array.isArray(result) ? result : [];
+    if (!result || !Array.isArray(result.schools)) return EMPTY;
+    return { schools: result.schools, coordinates: result.coordinates || null };
   } catch (err) {
-    console.error("bakeSchools: non-fatal error, baking []:", err);
-    return [];
+    console.error("bakeSchoolsAndCoordinates: non-fatal error, baking empty:", err);
+    return EMPTY;
   }
 }
 
@@ -249,15 +264,18 @@ export default async function handler(req, res, depsOverride) {
     const tourRow = (mediaRows || []).find(m => m.file_type === "3d_tour");
     const matterportUrl = tourRow?.tour_url || tourRow?.url || propertyData.matterportUrl || "";
 
-    // Nearby schools — baked once at publish (a snapshot), read back by the
-    // chat. Build the full address from the street + the city field (which
-    // holds city/state/zip together, e.g. "Prosper, Texas, 75078"). Strictly
-    // non-blocking: bakeSchools never throws and is capped by a timeout.
+    // Nearby schools + coordinates — baked once at publish (a snapshot), read
+    // back by the chat. Build the full address from the street + the city
+    // field (which holds city/state/zip together, e.g. "Prosper, Texas,
+    // 75078"). One geocode yields both. Strictly non-blocking:
+    // bakeSchoolsAndCoordinates never throws and is capped by a timeout.
     const fullAddress = [propertyData.address, propertyData.city]
       .map((p) => (p || "").trim())
       .filter(Boolean)
       .join(", ");
-    const bakedSchools = fullAddress ? await bakeSchools(fullAddress) : [];
+    const { schools: bakedSchools, coordinates: bakedCoordinates } = fullAddress
+      ? await bakeSchoolsAndCoordinates(fullAddress)
+      : { schools: [], coordinates: null };
 
     const finalPropertyData = {
       address: propertyData.address || "",
@@ -282,6 +300,7 @@ export default async function handler(req, res, depsOverride) {
       floorplan_url: propertyData.floorplanUrl || null,
       gallery_photos: galleryPhotos,
       schools: bakedSchools,
+      coordinates: bakedCoordinates,
     };
 
     // ── 9. Upsert microsite row (service-role; bypasses RLS) ──
