@@ -16,9 +16,34 @@
 //   SUPABASE_URL              — https://cbpnjuotoxtmefmedpmj.supabase.co
 //   SUPABASE_SERVICE_ROLE_KEY — service role key (also used by stripe-webhook.js
 //                               and calendar.js — same variable, no new secrets)
+//
+// External calls: as of Stage 4 schools, this endpoint makes a best-effort
+// call to bake nearby-school directory data onto the microsite — the US
+// Census geocoder + the Urban Institute NCES CCD directory (both FREE, NO
+// API key). The lookup is strictly non-blocking: it is wrapped in a timeout
+// and try/catch so any slowness or failure resolves to schools:[] and can
+// NEVER delay or fail a publish.
 
 import { createClient } from "@supabase/supabase-js";
 import { checkMicrositeEntitlement } from "./_lib/entitlement.js";
+import { getNearbySchools } from "./_lib/schools.js";
+
+// Best-effort, strictly non-blocking schools bake. Races the lookup against
+// a timeout and swallows every failure → always resolves to an array, never
+// throws, never delays the publish beyond SCHOOLS_TIMEOUT_MS.
+const SCHOOLS_TIMEOUT_MS = 10000;
+async function bakeSchools(fullAddress) {
+  try {
+    const result = await Promise.race([
+      getNearbySchools(fullAddress),
+      new Promise((resolve) => setTimeout(() => resolve(null), SCHOOLS_TIMEOUT_MS)),
+    ]);
+    return Array.isArray(result) ? result : [];
+  } catch (err) {
+    console.error("bakeSchools: non-fatal error, baking []:", err);
+    return [];
+  }
+}
 
 const PUBLIC_APP_BASE = "https://app.milestonemediaphotography.com";
 
@@ -224,6 +249,16 @@ export default async function handler(req, res, depsOverride) {
     const tourRow = (mediaRows || []).find(m => m.file_type === "3d_tour");
     const matterportUrl = tourRow?.tour_url || tourRow?.url || propertyData.matterportUrl || "";
 
+    // Nearby schools — baked once at publish (a snapshot), read back by the
+    // chat. Build the full address from the street + the city field (which
+    // holds city/state/zip together, e.g. "Prosper, Texas, 75078"). Strictly
+    // non-blocking: bakeSchools never throws and is capped by a timeout.
+    const fullAddress = [propertyData.address, propertyData.city]
+      .map((p) => (p || "").trim())
+      .filter(Boolean)
+      .join(", ");
+    const bakedSchools = fullAddress ? await bakeSchools(fullAddress) : [];
+
     const finalPropertyData = {
       address: propertyData.address || "",
       city: propertyData.city || "",
@@ -246,6 +281,7 @@ export default async function handler(req, res, depsOverride) {
       video_url: videoUrl,
       floorplan_url: propertyData.floorplanUrl || null,
       gallery_photos: galleryPhotos,
+      schools: bakedSchools,
     };
 
     // ── 9. Upsert microsite row (service-role; bypasses RLS) ──

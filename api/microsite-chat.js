@@ -141,7 +141,7 @@ function topicLabel(t) {
 function topicGuidance(t) {
   return ({
     listing:   "factual answers drawn from the listing details above",
-    schools:   "school district name and publicly available academic ratings only; if school data isn't included for this listing, defer to the agent",
+    schools:   "names, levels, public/charter type, and approximate distances of nearby schools ONLY when that data is provided above; you do NOT have ratings, test scores, or demographics; always tell visitors to confirm zoning and enrollment eligibility with the district; if no school data is provided above, defer to the agent",
     commute:   "factual driving distance and typical drive time when data is provided; if not, defer to the agent",
     comps:     "reference only the verified comps listed above; do not generate comparables from your own knowledge",
     financing: "typical current mortgage rate ranges and rough monthly payment math from the listing price; never recommend a specific product, lender, or whether to buy; always recommend speaking with a qualified lender; if no current rate figure is provided above, defer to the agent",
@@ -198,6 +198,7 @@ export function buildSystemPrompt({ agentDisplayName, brokerageName, brokerageAb
     "address","city","price","beds","baths","sqft","year_built","description","features",
     "agent_name","agent_phone","agent_email","hero_img","hero_media_id","listing_id","booking_id",
     "source_type","matterport_url","video_url","floorplan_url","gallery_photos","media_types",
+    "schools",
   ]);
   for (const [k, v] of Object.entries(pd)) {
     if (known.has(k) || v == null || v === "" || (Array.isArray(v) && v.length === 0)) continue;
@@ -236,6 +237,19 @@ export function buildSystemPrompt({ agentDisplayName, brokerageName, brokerageAb
     );
   }
 
+  // Nearby schools — only when schools is an enabled topic AND a baked list
+  // exists on the listing. Directory data only (name/level/type/distance);
+  // the disclaimer forbids any zoning, ratings, or demographics claims.
+  if (enabled.includes("schools") && Array.isArray(pd.schools) && pd.schools.length) {
+    lines.push("");
+    lines.push(
+      "NEARBY SCHOOLS — these are the closest schools by straight-line distance from the listing, NOT a statement of attendance zones. School assignment and attendance boundaries are set by the district and can differ from simple distance. Always tell the visitor to confirm enrollment eligibility and zoning directly with the school district. You do NOT have school demographics, test scores, or quality ratings — never discuss, imply, or speculate about any of those."
+    );
+    for (const s of pd.schools) {
+      lines.push(`- ${s.name} (${s.level}, ${s.type}, ${s.distance_mi} mi)`);
+    }
+  }
+
   if (enabled.length) {
     lines.push("");
     lines.push("TOPICS YOU CAN DISCUSS (per the agent's settings):");
@@ -261,7 +275,7 @@ export function buildSystemPrompt({ agentDisplayName, brokerageName, brokerageAb
   lines.push("");
   lines.push("3. FINANCING. You may share factual information about typical current mortgage rates and rough monthly payment math from the listing price. You may NOT recommend a loan product, lender, lock-in timing, or whether to buy. Always recommend speaking with a qualified lender before any decision.");
   lines.push("");
-  lines.push("4. SCHOOLS. You may share school district name, school names, and publicly available academic ratings. Do NOT discuss school demographics or characterize the student body.");
+  lines.push("4. SCHOOLS. You may share the names, levels, public/charter type, and approximate straight-line distances of nearby schools when that data is provided above. You do NOT have school ratings, test scores, or demographics — never provide, imply, or speculate about any of those, and never characterize the student body. School proximity is NOT an attendance guarantee; always direct zoning and enrollment-eligibility questions to the school district.");
   lines.push("");
   lines.push(`5. COMPS. You may reference only the verified comps listed above. Do not estimate market value, generate comparables from your own knowledge, or predict the sale price of this listing. If asked for a value estimate, defer to ${agentDisplayName}.`);
   lines.push("");
