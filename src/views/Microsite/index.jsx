@@ -6,6 +6,7 @@ import { ADDONS } from "../../lib/pricing";
 import MicrositeRenderer from "../../components/MicrositeRenderer";
 import ChatAssistantSection from "./ChatAssistantSection.jsx";
 import ComparableSalesSection from "./ComparableSalesSection.jsx";
+import Modal from "./Modal.jsx";
 import { applyListingAutofill, applyBookingAutofill } from "./autofill.js";
 
 // Microsite add-on price, sourced from the central pricing config
@@ -53,6 +54,130 @@ function mapLeadRow(row) {
     date:               formatLeadDate(created),
     time:               formatLeadTime(created),
   };
+}
+
+// ============================================================
+// CHAT TRANSCRIPT MODAL — read-only view of a chat lead's conversation
+// ============================================================
+//
+// The agent's anon client can SELECT these rows directly — migration
+// 018 RLS scopes microsite_chat_messages by microsite ownership — so no
+// endpoint is needed. We render EXACTLY the persisted rows: only user +
+// final-assistant turns are stored (intermediate tool turns are not),
+// and a conversation may legitimately end on a user message with no
+// assistant reply. We don't reconstruct anything.
+function TranscriptModal({ lead, onClose }) {
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setError(false);
+      const { data: rows, error: err } = await supabase
+        .from("microsite_chat_messages")
+        .select("id, role, content, flagged_topic, created_at")
+        .eq("conversation_id", lead.chatConversationId)
+        .order("created_at", { ascending: true });
+      if (cancelled) return;
+      if (err) {
+        console.error("transcript fetch error:", err);
+        setError(true);
+        setMessages([]);
+        setLoading(false);
+        return;
+      }
+      // Deterministic order: created_at ascending, then "user" before
+      // "assistant" for a turn's two rows — they're batch-inserted with
+      // an identical timestamp, so created_at alone can't order them.
+      const rolePriority = { user: 0, assistant: 1, system: 2 };
+      const sorted = [...(rows || [])].sort((a, b) => {
+        const ta = a.created_at || "";
+        const tb = b.created_at || "";
+        if (ta < tb) return -1;
+        if (ta > tb) return 1;
+        return (rolePriority[a.role] ?? 9) - (rolePriority[b.role] ?? 9);
+      });
+      setMessages(sorted);
+      setLoading(false);
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [lead.chatConversationId]);
+
+  // Header fields derived from the messages + the lead already in scope
+  // (no second query). Started = first message time.
+  const firstCreated = messages.length ? new Date(messages[0].created_at) : null;
+  const startedStr = firstCreated ? `${formatLeadDate(firstCreated)} · ${formatLeadTime(firstCreated)}` : "—";
+  const topics = [...new Set(messages.map(m => m.flagged_topic).filter(Boolean))];
+
+  const labelStyle = { fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.08em", textTransform: "uppercase" };
+
+  return (
+    <Modal title="Conversation" onClose={onClose} maxWidth={560}>
+      {/* Header */}
+      <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#fff" }}>{lead.name || "Visitor"}</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", marginTop: 6 }}>
+          <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.6)" }}>📧 {lead.email || "—"}</span>
+          <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.6)" }}>📱 {lead.phone || "—"}</span>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px", marginTop: 8 }}>
+          <span style={labelStyle}>Started <span style={{ color: "rgba(255,255,255,0.7)", textTransform: "none", letterSpacing: 0 }}>{startedStr}</span></span>
+          <span style={labelStyle}>Messages <span style={{ color: "rgba(255,255,255,0.7)" }}>{messages.length}</span></span>
+        </div>
+        {topics.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+            {topics.map(t => (
+              <span key={t} style={{ background: "rgba(201,168,76,0.12)", color: "#c9a84c", border: "1px solid rgba(201,168,76,0.3)", padding: "2px 8px", borderRadius: 20, fontFamily: "'Jost', sans-serif", fontSize: 10 }}>{t}</span>
+            ))}
+          </div>
+        )}
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 9, color: "rgba(255,255,255,0.3)", fontStyle: "italic", marginTop: 10 }}>
+          Automated conversation with the microsite AI assistant.
+        </div>
+      </div>
+
+      {/* Body */}
+      {loading ? (
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)", textAlign: "center", padding: "24px 0" }}>Loading conversation…</div>
+      ) : error ? (
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.5)", textAlign: "center", padding: "24px 0" }}>Couldn't load this conversation. Please try again.</div>
+      ) : messages.length === 0 ? (
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)", textAlign: "center", padding: "24px 0" }}>No messages in this conversation.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {messages.map(m => {
+            const isUser = m.role === "user";
+            const text = (m.content || "").trim();
+            return (
+              <div key={m.id} style={{ display: "flex", flexDirection: "column", alignItems: isUser ? "flex-start" : "flex-end" }}>
+                <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 9, color: "rgba(255,255,255,0.35)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 3 }}>
+                  {isUser ? "Visitor" : "AI Assistant"}
+                </span>
+                <div style={{
+                  maxWidth: "82%",
+                  background: isUser ? "rgba(255,255,255,0.05)" : "rgba(201,168,76,0.12)",
+                  border: `1px solid ${isUser ? "rgba(255,255,255,0.1)" : "rgba(201,168,76,0.3)"}`,
+                  borderRadius: 12, padding: "10px 13px",
+                  fontFamily: "'Jost', sans-serif", fontSize: 13, lineHeight: 1.5,
+                  color: isUser ? "rgba(255,255,255,0.85)" : "#f5ecd7",
+                  whiteSpace: "pre-wrap", wordBreak: "break-word",
+                }}>
+                  {text || <span style={{ fontStyle: "italic", color: "rgba(255,255,255,0.3)" }}>(no message text)</span>}
+                </div>
+                <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 9, color: "rgba(255,255,255,0.25)", marginTop: 3 }}>
+                  {formatLeadTime(new Date(m.created_at))}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Modal>
+  );
 }
 
 // ============================================================
@@ -136,6 +261,7 @@ function MicrositeView() {
   });
   const [leads, setLeads] = useState([]);
   const [selectedLead, setSelectedLead] = useState(null);
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [listings, setListings] = useState([]);
   const [selectedListingId, setSelectedListingId] = useState(null);
   const [listingPhotos, setListingPhotos] = useState([]);
@@ -487,6 +613,7 @@ function MicrositeView() {
   // and in the DB. Revert local state on error.
   const openLead = async (idx) => {
     setSelectedLead(idx);
+    setTranscriptOpen(false); // never carry a stale open modal between leads
     const lead = leads[idx];
     if (!lead || lead.read) return;
     setLeads(l => l.map((x, i) => i === idx ? { ...x, read: true } : x));
@@ -846,6 +973,9 @@ function MicrositeView() {
 
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {transcriptOpen && lead.chatConversationId && (
+          <TranscriptModal lead={lead} onClose={() => setTranscriptOpen(false)} />
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button onClick={() => setSelectedLead(null)} style={{
             background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer",
@@ -891,6 +1021,17 @@ function MicrositeView() {
             <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
               <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>Message</div>
               <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 15, color: "rgba(255,255,255,0.85)", lineHeight: 1.6, fontStyle: "italic" }}>"{lead.message}"</div>
+            </div>
+          )}
+
+          {/* View Conversation — chat leads only */}
+          {lead.source === "chat" && lead.chatConversationId && (
+            <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              <button onClick={() => setTranscriptOpen(true)} style={{
+                width: "100%", background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.3)",
+                borderRadius: 8, padding: "12px", fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 700,
+                letterSpacing: "0.1em", textTransform: "uppercase", color: "#c9a84c", cursor: "pointer",
+              }}>💬 View Conversation</button>
             </div>
           )}
 
