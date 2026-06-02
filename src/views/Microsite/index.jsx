@@ -540,7 +540,10 @@ function MicrositeView() {
     }
   };
 
-  const loadMicrositeForEdit = (ms) => {
+  // Shared loader: restores all the state the published screen reads
+  // from a saved microsite row. Both "Edit" and "Leads" use this and
+  // differ ONLY in the final step they land on (set by the callers).
+  const loadMicrositeData = (ms) => {
     const pd = ms.property_data || {};
 
     // We're restoring saved content — tell the source effects not to
@@ -610,7 +613,23 @@ function MicrositeView() {
 
     setPublishedSlug(ms.slug);
     setPublished(true);
+  };
+
+  // Edit: load the microsite into the editor (unchanged behavior).
+  const loadMicrositeForEdit = (ms) => {
+    loadMicrositeData(ms);
     setStep("build");
+  };
+
+  // Leads: load the same data but land directly on the published
+  // screen (the inbox). selectedLead is cleared so the inbox list
+  // shows, not a stale detail view. The 5a leads loader keys off
+  // publishedSlug → myMicrosites → microsite_id and runs on step
+  // "published", so it fetches this microsite's real leads.
+  const openLeadsForMicrosite = (ms) => {
+    loadMicrositeData(ms);
+    setSelectedLead(null);
+    setStep("published");
   };
 
   const handleGenerate = () => {
@@ -1266,6 +1285,14 @@ function MicrositeView() {
                       fontFamily: "'Jost', sans-serif", fontSize: 10,
                       letterSpacing: "0.08em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600,
                     }}>{isEditing ? "Editing" : "✏️ Edit"}</button>
+                    <button onClick={() => openLeadsForMicrosite(ms)} style={{
+                      background: "rgba(255,255,255,0.06)",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      color: "rgba(255,255,255,0.6)",
+                      padding: "6px 12px", borderRadius: 7,
+                      fontFamily: "'Jost', sans-serif", fontSize: 10,
+                      letterSpacing: "0.08em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600,
+                    }}>📬 Leads</button>
                     <a href={`/p/${ms.slug}`} target="_blank" rel="noreferrer" style={{
                       background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)",
                       color: "rgba(255,255,255,0.4)", padding: "6px 10px", borderRadius: 7,
