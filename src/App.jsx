@@ -16,6 +16,7 @@ import { PRICING, PACKAGES, SQFT_TIERS, ESSENTIAL_PRICING, INDIVIDUAL_SERVICES, 
 import { AuthContext, useAuth } from "./lib/auth";
 import { MEDIA_ICONS, THEMES, StatusBadge, PackageBadge } from "./lib/ui";
 import MicrositeRenderer from "./components/MicrositeRenderer";
+import VoiceProfileModal from "./components/VoiceProfileModal";
 
 const NAV = ["Showcase", "Book", "My Media", "Analytics"];
 
@@ -732,6 +733,7 @@ function AppShell() {
   const setTab = (n) => { setTabRaw(n); setExtraView(null); };
   const tab = tabRaw;
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showVoiceProfile, setShowVoiceProfile] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
 
@@ -834,6 +836,26 @@ function AppShell() {
           <div>
             <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", fontWeight: 600, letterSpacing: "0.03em" }}>Edit Profile & Branding</div>
             <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>Photo · contact info · agency logo</div>
+          </div>
+        </button>
+      </div>
+
+      {/* Voice Profile CTA */}
+      <div style={{ padding: "0 12px 6px" }}>
+        <button
+          onClick={() => { setShowVoiceProfile(true); setShowProfile(false); }}
+          style={{
+            width: "100%", padding: "11px 14px", borderRadius: 9,
+            border: "1px solid rgba(201,168,76,0.25)",
+            background: "rgba(201,168,76,0.07)",
+            display: "flex", alignItems: "center", gap: 10,
+            cursor: "pointer", textAlign: "left",
+          }}
+        >
+          <span style={{ fontSize: 16 }}>🗣</span>
+          <div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", fontWeight: 600, letterSpacing: "0.03em" }}>Voice Profile</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>The voice your AI content is written in</div>
           </div>
         </button>
       </div>
@@ -998,6 +1020,7 @@ function AppShell() {
           </div>
         </div>
       {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
+      {showVoiceProfile && <VoiceProfileModal onClose={() => setShowVoiceProfile(false)} />}
     </div>
     );
   }
@@ -1068,6 +1091,7 @@ function AppShell() {
         ))}
       </div>
       {showEditProfile && <EditProfileModal onClose={() => setShowEditProfile(false)} />}
+      {showVoiceProfile && <VoiceProfileModal onClose={() => setShowVoiceProfile(false)} />}
     </div>
   );
 }
