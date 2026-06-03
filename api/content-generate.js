@@ -288,7 +288,58 @@ export default async function handler(req, res, depsOverride) {
       });
     }
 
-    return res.status(200).json(finalParsed);
+    // ── 9. Persist the generation (best-effort) ──
+    //
+    // Save a history row for the agent. agent_id is the server-resolved
+    // caller id (authUser.id) — the same id used for the ownership checks
+    // above — never a client-supplied value. This is wrapped in its own
+    // try/catch: a save failure is logged but must NOT deny the caller
+    // their generated content, so we fall through to the 200 response
+    // either way. `saved_id` is added to the payload on success without
+    // touching any existing field.
+    let savedId = null;
+    try {
+      const insertRow = {
+        agent_id:         authUser.id,
+        listing_id:       listing_id,
+        voice_profile_id: voice_profile_id,
+        platform:         platform,
+        content_type:     content_type,
+        framework_name:   framework_name,
+        caption:          finalParsed.caption,
+        hook_line:        finalParsed.hook_line ?? null,
+        cta_line:         finalParsed.cta_line ?? null,
+        hashtags:         Array.isArray(finalParsed.hashtags) ? finalParsed.hashtags : [],
+        license_number:   finalParsed.license_number ?? null,
+      };
+      // slides is only emitted by the walkthrough_carousel framework —
+      // include the column only when present so non-carousel rows stay null.
+      if (finalParsed.slides !== undefined && finalParsed.slides !== null) {
+        insertRow.slides = finalParsed.slides;
+      }
+
+      const { data: savedRow, error: saveErr } = await supabase
+        .from("generated_content")
+        .insert(insertRow)
+        .select("id")
+        .maybeSingle();
+
+      if (saveErr) {
+        console.error("[content-generate] generated_content save failed (returning content anyway)", {
+          framework: framework_name,
+          message:   saveErr.message,
+        });
+      } else if (savedRow?.id) {
+        savedId = savedRow.id;
+      }
+    } catch (saveCatch) {
+      console.error("[content-generate] generated_content save threw (returning content anyway)", {
+        framework: framework_name,
+        message:   saveCatch?.message,
+      });
+    }
+
+    return res.status(200).json(savedId ? { ...finalParsed, saved_id: savedId } : finalParsed);
   } catch (err) {
     console.error("[content-generate] fatal:", err);
     return res.status(500).json({ error: err.message || "internal error" });
