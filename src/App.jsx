@@ -14,6 +14,7 @@ import SubscriptionsView from "./views/Subscriptions";
 // Production minification turned that cycle into a TDZ runtime error.
 import { PRICING, PACKAGES, SQFT_TIERS, ESSENTIAL_PRICING, INDIVIDUAL_SERVICES, ADDONS, SUBSCRIPTIONS, PROMOS, STRIPE_IDS } from "./lib/pricing";
 import { AuthContext, useAuth } from "./lib/auth";
+import { isSubscribed } from "./lib/subscription";
 import { MEDIA_ICONS, THEMES, StatusBadge, PackageBadge } from "./lib/ui";
 import MicrositeRenderer from "./components/MicrositeRenderer";
 import VoiceProfileModal from "./components/VoiceProfileModal";
@@ -843,7 +844,13 @@ function AppShell() {
       {/* Voice Profile CTA */}
       <div style={{ padding: "0 12px 6px" }}>
         <button
-          onClick={() => { setShowVoiceProfile(true); setShowProfile(false); }}
+          onClick={() => {
+            setShowProfile(false);
+            // Gate behind an active subscription (admins exempt). Unsubscribed
+            // non-admins are routed to the subscription page instead of the modal.
+            if (!isAdmin && !isSubscribed(profile)) { setExtraView("Subscriptions"); return; }
+            setShowVoiceProfile(true);
+          }}
           style={{
             width: "100%", padding: "11px 14px", borderRadius: 9,
             border: "1px solid rgba(201,168,76,0.25)",

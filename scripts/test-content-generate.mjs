@@ -142,6 +142,8 @@ const VALID_TOKEN = "fake-bearer-token";
 function makeSupabaseMock({
   user             = { id: AGENT_ID },
   authError        = null,
+  agent            = { role: "agent", subscription_status: "active" }, // subscribed by default
+  agentErr         = null,
   voiceProfile     = SARAH_VOICE_PROFILE,
   voiceProfileErr  = null,
   listing          = LAKEWOOD_LISTING,
@@ -162,6 +164,9 @@ function makeSupabaseMock({
           }),
         }),
       });
+      if (table === "agents") {
+        return thenable({ data: agent, error: agentErr });
+      }
       if (table === "agent_voice_profiles") {
         return thenable({ data: voiceProfile, error: voiceProfileErr });
       }
@@ -342,6 +347,47 @@ console.log("\n── api/content-generate.js — story_driven_listing ──\n"
     supabaseOverride: makeSupabaseMock({ voiceProfile: null }),
   });
   check("voice profile missing → 404", res.statusCode === 404);
+}
+
+// 7b. Subscription gate — unsubscribed non-admin → 402 (before engine runs)
+{
+  for (const status of [null, "canceled", "incomplete", "unpaid", "paused"]) {
+    const res = await callHandler({
+      body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "story_driven_listing" },
+      supabaseOverride: makeSupabaseMock({ agent: { role: "agent", subscription_status: status } }),
+    });
+    check(`unsubscribed non-admin (status=${status}) → 402`, res.statusCode === 402, `got ${res.statusCode}`);
+    check(`unsubscribed → subscription_required body`, res.body?.error === "subscription_required");
+  }
+}
+
+// 7c. Subscription gate — active/grace statuses pass through to 200
+{
+  for (const status of ["trialing", "active", "past_due"]) {
+    const res = await callHandler({
+      body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "story_driven_listing" },
+      supabaseOverride: makeSupabaseMock({ agent: { role: "agent", subscription_status: status } }),
+    });
+    check(`subscribed (status=${status}) → 200`, res.statusCode === 200, `got ${res.statusCode}`);
+  }
+}
+
+// 7d. Admin bypass — admin with NO subscription still passes
+{
+  const res = await callHandler({
+    body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "story_driven_listing" },
+    supabaseOverride: makeSupabaseMock({ agent: { role: "admin", subscription_status: null } }),
+  });
+  check("admin with no subscription → 200 (bypass)", res.statusCode === 200, `got ${res.statusCode}`);
+}
+
+// 7e. Missing agent profile → 401
+{
+  const res = await callHandler({
+    body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "story_driven_listing" },
+    supabaseOverride: makeSupabaseMock({ agent: null }),
+  });
+  check("no agent profile row → 401", res.statusCode === 401, `got ${res.statusCode}`);
 }
 
 // 8. story_angle column used when request body omits it
