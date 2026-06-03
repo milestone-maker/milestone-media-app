@@ -4,7 +4,7 @@ import AdminView from "./views/Admin";
 import BookingsManagerView from "./views/Bookings";
 import ShowcaseView from "./views/Showcase";
 import BookView from "./views/Book";
-import MediaView from "./views/Media";
+import ContentView from "./views/Content";
 import MicrositeView from "./views/Microsite";
 import AnalyticsView from "./views/Analytics";
 import SubscriptionsView from "./views/Subscriptions";
@@ -757,7 +757,7 @@ function AppShell() {
   const baseNavItems = [
     { label: "Showcase", icon: "✦" },
     { label: "Book", icon: "+" },
-    { label: "Media", icon: "⊞" },
+    { label: "Content", icon: "⊞" },
     { label: "Analytics", icon: "↗" },
     { label: "Microsite", icon: "🌐" },
   ];
@@ -768,7 +768,7 @@ function AppShell() {
   const viewMap = {
     Showcase: <ShowcaseView onBook={handleBook} />,
     Book: <BookView />,
-    Media: <MediaView />,
+    Content: <ContentView />,
     Analytics: <AnalyticsView />,
     Microsite: <MicrositeView />,
     // Subscriptions is reachable only from the profile dropdown — not in navItems.
