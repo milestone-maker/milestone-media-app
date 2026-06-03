@@ -7,7 +7,8 @@
 // Content tab reads (its query is scoped to listings by agent_id).
 //
 // Column types (public.listings, verified against the live schema):
-//   beds, baths            integer   → parseInt, null when blank/non-numeric
+//   beds                   integer   → parseInt, null when blank/non-numeric
+//   baths                  numeric   → parseFloat (migration 026), null when blank
 //   sqft, price            text      → passed through as-is
 //   features, media_types  jsonb     → arrays passed through
 //   address/city/neighborhood/description/hero_img/matterport_url/status  text
@@ -18,13 +19,24 @@
 // so it maps to null.
 
 // Coerce a maybe-string ("4", "", null, "2500") into an integer or null.
-// listings.beds/baths are int4 — a non-numeric or blank value must become
-// null rather than NaN (which Postgres would reject).
+// listings.beds is int4 — a non-numeric or blank value must become null
+// rather than NaN (which Postgres would reject).
 function toIntOrNull(v) {
   if (v === null || v === undefined) return null;
   const s = String(v).trim();
   if (s === "") return null;
   const n = parseInt(s, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Coerce a maybe-string ("3.5", "5", "", null) into a number or null.
+// listings.baths is numeric (migration 026 widened it from int4), so
+// fractional baths must be preserved — parseFloat, not parseInt.
+function toNumberOrNull(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  if (s === "") return null;
+  const n = parseFloat(s);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -48,7 +60,7 @@ export function listingPayloadFromMicrosite({ propertyData, agentId }) {
     city:           pd.city || null,
     price:          pd.price || null,
     beds:           toIntOrNull(pd.beds),
-    baths:          toIntOrNull(pd.baths),
+    baths:          toNumberOrNull(pd.baths),
     sqft:           pd.sqft || null,
     neighborhood:   pd.neighborhood || null,
     description:    pd.description || null,
