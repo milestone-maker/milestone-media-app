@@ -30,6 +30,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { checkMicrositeEntitlement } from "./_lib/entitlement.js";
+import { listingPayloadFromMicrosite } from "./_lib/listingFromMicrosite.js";
 import { geocodeAddress, getNearbySchoolsFromGeo } from "./_lib/schools.js";
 
 // Best-effort, strictly non-blocking bake of schools + coordinates. Geocodes
@@ -345,11 +346,78 @@ export default async function handler(req, res, depsOverride) {
       return res.status(500).json({ error: "failed to save microsite: " + writeErr.message });
     }
 
+    // ── 9b. Additively mirror the microsite into a public.listings row ──
+    //
+    //   In the target model a published microsite IS a listing (1:1), and the
+    //   Content tab reads listings (scoped by agent_id). So after the microsite
+    //   write we keep a linked listings row in sync, using the SAME service-role
+    //   client that just wrote the microsite.
+    //
+    //   STRICTLY NON-BLOCKING / additive: the microsite is the source of truth.
+    //   The entire block is wrapped in try/catch — on ANY failure we log a
+    //   warning and fall through; the publish still succeeds and the existing
+    //   response shape is preserved. `linked_listing_id` is added to the
+    //   response additively (null on failure) and never replaces a field.
+    //
+    //   Republish-safe idempotency: if the microsite already links a listings
+    //   row that still exists → UPDATE it; otherwise INSERT a fresh row and set
+    //   microsites.listing_id to it. Repeated republishes never duplicate.
+    let linkedListingId = null;
+    try {
+      const listingPayload = listingPayloadFromMicrosite({
+        propertyData: saved.property_data,
+        agentId:      saved.agent_id,
+      });
+
+      let existingListing = null;
+      if (saved.listing_id) {
+        const { data: lr } = await supabase
+          .from("listings")
+          .select("id")
+          .eq("id", saved.listing_id)
+          .maybeSingle();
+        existingListing = lr || null;
+      }
+
+      if (existingListing?.id) {
+        // Linked listing still exists → update it from the mapping (no insert).
+        const { error: updErr } = await supabase
+          .from("listings")
+          .update(listingPayload)
+          .eq("id", existingListing.id);
+        if (updErr) throw updErr;
+        linkedListingId = existingListing.id;
+      } else {
+        // No (or stale) link → create a fresh listings row and link it back.
+        const { data: newListing, error: insErr } = await supabase
+          .from("listings")
+          .insert({ ...listingPayload, created_at: new Date().toISOString() })
+          .select("id")
+          .single();
+        if (insErr) throw insErr;
+        linkedListingId = newListing.id;
+
+        const { error: linkErr } = await supabase
+          .from("microsites")
+          .update({ listing_id: linkedListingId })
+          .eq("id", saved.id);
+        if (linkErr) throw linkErr;
+      }
+    } catch (listingErr) {
+      // Best-effort mirror — never deny the agent their published microsite.
+      console.warn(
+        "[publish-microsite] listing mirror failed (publish still succeeded):",
+        listingErr?.message || listingErr
+      );
+      linkedListingId = null;
+    }
+
     // ── 10. Done ──
     return res.json({
       slug,
       liveUrl: `${PUBLIC_APP_BASE}/p/${slug}`,
       microsite: saved,
+      linked_listing_id: linkedListingId,
     });
   } catch (err) {
     console.error("publish-microsite error:", err);
