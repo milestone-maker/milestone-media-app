@@ -17,7 +17,9 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
 import { useAuth } from "../../lib/auth";
+import { isSubscribed } from "../../lib/subscription";
 import VoiceProfileModal from "../../components/VoiceProfileModal";
+import SubscriptionsView from "../Subscriptions";
 
 // Friendly label → exact framework_name slug the endpoint expects.
 const FRAMEWORKS = [
@@ -36,6 +38,7 @@ const labelForSlug = (slug) => FRAMEWORKS.find((f) => f.slug === slug)?.label ||
 function friendlyError(status, serverMsg) {
   switch (status) {
     case 401: return "Your session expired. Please sign in again.";
+    case 402: return "An active subscription is required to generate content. Open Subscriptions from your profile menu to get started.";
     case 422: return "Your voice profile needs a license number before you can generate. Open your Voice Profile to add it.";
     case 403: return "This listing or voice profile isn't available to your account. Pick one of your own listings and try again.";
     case 404: return "That listing or voice profile couldn't be found. Refresh and try again.";
@@ -95,7 +98,10 @@ function CopyButton({ text, label = "Copy" }) {
 }
 
 function ContentView() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  // Admins always pass; otherwise an active subscription is required.
+  const isAdmin = profile?.role === "admin";
+  const canGenerate = isAdmin || isSubscribed(profile);
 
   // Data
   const [listings, setListings] = useState([]);
@@ -242,6 +248,14 @@ function ContentView() {
         </div>
       </div>
     );
+  }
+
+  // ── Render: subscription gate (FIRST gate; admins exempt) ──
+  // Unsubscribed non-admins see the existing subscription page in place —
+  // tier picker + Stripe checkout, self-contained. Subscribed agents and
+  // admins fall through to the voice-profile gate below.
+  if (!canGenerate) {
+    return <SubscriptionsView />;
   }
 
   // ── Render: voice-profile gate ──

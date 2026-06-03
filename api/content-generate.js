@@ -23,6 +23,7 @@
 //   ANTHROPIC_API_KEY            (read by @anthropic-ai/sdk inside engine)
 
 import { createClient } from "@supabase/supabase-js";
+import { isSubscribed } from "./_lib/subscription.js";
 import { findPrompt } from "./_content/registry.js";
 import { canonicalizeHashtags } from "./_content/post-processors.js";
 import { UNIVERSAL_REQUIRED_OUTPUT_FIELDS } from "./_content/prompts/_helpers.js";
@@ -145,6 +146,28 @@ export default async function handler(req, res, depsOverride) {
       return res.status(401).json({ error: "invalid or expired session" });
     }
     const authUser = authData.user;
+
+    // ── 1b. Subscription gate (mirrors publish-microsite.js; admins exempt) ──
+    //
+    // Load the caller's role + subscription_status and reject unsubscribed
+    // non-admins BEFORE running the engine. Tier-agnostic — any active status
+    // qualifies (see api/_lib/subscription.js). The server is the real lock;
+    // the Content-tab UI gate is defense-in-depth.
+    const { data: agentRow, error: agentErr } = await supabase
+      .from("agents")
+      .select("role, subscription_status")
+      .eq("id", authUser.id)
+      .maybeSingle();
+    if (agentErr) {
+      console.error("[content-generate] agent lookup error:", agentErr);
+      return res.status(500).json({ error: "agent lookup failed", details: agentErr.message });
+    }
+    if (!agentRow) {
+      return res.status(401).json({ error: "no agent profile for this user" });
+    }
+    if (agentRow.role !== "admin" && !isSubscribed(agentRow)) {
+      return res.status(402).json({ error: "subscription_required" });
+    }
 
     // ── 2. Validate request body ──
     //
