@@ -270,8 +270,12 @@ function MicrositeView() {
   const [mediaLoading, setMediaLoading] = useState(false);
   const [addonRequested, setAddonRequested] = useState(false);
   const [addonStatus, setAddonStatus] = useState(null); // null | 'pending' | 'approved' | 'denied'
-  // Source toggle: "listing" or "booking" — agents always use bookings
-  const [sourceType, setSourceType] = useState(isAdmin ? "listing" : "booking");
+  // Source is always "booking" — Bookings is the sole microsite source.
+  // The listing source (admin-only) was retired (Bug C: it had no working
+  // publish path). Kept as state so the dead listing-only effects/branches
+  // below remain inert without restructuring; nothing can set it to
+  // "listing" anymore. Dead-code pruning deferred to post-demo cleanup.
+  const [sourceType, setSourceType] = useState("booking");
   const [bookings, setBookings] = useState([]);
   const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [data, setData] = useState({
@@ -1448,53 +1452,24 @@ function MicrositeView() {
         </div>
       )}
 
-      {/* Source Toggle: Admin only — agents always use bookings */}
-      {isAdmin && (
-        <div>
-          <div style={labelStyle}>Source</div>
-          <div style={{ display: "flex", gap: 0, borderRadius: 10, overflow: "hidden", border: "1px solid rgba(255,255,255,0.12)" }}>
-            {[{ key: "listing", label: "Listings" }, { key: "booking", label: "Bookings" }].map(s => (
-              <button key={s.key} onClick={() => setSourceType(s.key)} style={{
-                flex: 1, padding: "10px 0", border: "none", cursor: "pointer",
-                background: sourceType === s.key ? "rgba(201,168,76,0.2)" : "rgba(255,255,255,0.03)",
-                color: sourceType === s.key ? "#c9a84c" : "rgba(255,255,255,0.4)",
-                fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: sourceType === s.key ? 600 : 400,
-                letterSpacing: "0.08em", transition: "all 0.2s",
-                borderRight: s.key === "listing" ? "1px solid rgba(255,255,255,0.12)" : "none",
-              }}>{s.label}</button>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Source is always Bookings — the listing source was retired (Bug C). */}
 
-      {/* Property Selector */}
+      {/* Property Selector — Bookings is the sole source: convert a completed
+          shoot into a microsite. */}
       <div>
-        <div style={labelStyle}>{sourceType === "listing" && isAdmin ? "Select Listing" : "Select a Listing"}</div>
-        {sourceType === "listing" && isAdmin ? (
-          <select
-            style={{ ...inputStyle, cursor: "pointer" }}
-            value={selectedListingId || ""}
-            onChange={e => { skipAutofillRef.current = false; setSelectedListingId(e.target.value || null); }}
-          >
-            <option value="">— Choose a listing —</option>
-            {listings.map(l => (
-              <option key={l.id} value={l.id}>{l.address} — {l.city}</option>
-            ))}
-          </select>
-        ) : (
-          <select
-            style={{ ...inputStyle, cursor: "pointer" }}
-            value={selectedBookingId || ""}
-            onChange={e => { skipAutofillRef.current = false; setSelectedBookingId(e.target.value || null); }}
-          >
-            <option value="">— Choose a listing —</option>
-            {bookings.map(b => (
-              <option key={b.id} value={b.id}>
-                {b.address || "No address"}{b.city ? ` — ${b.city}` : ""}
-              </option>
-            ))}
-          </select>
-        )}
+        <div style={labelStyle}>Convert a completed shoot into a microsite</div>
+        <select
+          style={{ ...inputStyle, cursor: "pointer" }}
+          value={selectedBookingId || ""}
+          onChange={e => { skipAutofillRef.current = false; setSelectedBookingId(e.target.value || null); }}
+        >
+          <option value="">— Choose a booking —</option>
+          {bookings.map(b => (
+            <option key={b.id} value={b.id}>
+              {b.address || "No address"}{b.city ? ` — ${b.city}` : ""}
+            </option>
+          ))}
+        </select>
         {/* Package info display */}
         {hasSourceSelection && (
           <div style={{ marginTop: 6, fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
