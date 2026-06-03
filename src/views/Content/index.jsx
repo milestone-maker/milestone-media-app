@@ -20,6 +20,7 @@ import { useAuth } from "../../lib/auth";
 import { isSubscribed } from "../../lib/subscription";
 import VoiceProfileModal from "../../components/VoiceProfileModal";
 import SubscriptionsView from "../Subscriptions";
+import PhotosPanel from "./PhotosPanel";
 
 // Friendly label → exact framework_name slug the endpoint expects.
 const FRAMEWORKS = [
@@ -452,7 +453,10 @@ function ContentView() {
         </div>
       )}
 
-      {/* ── FUTURE: photo-intelligence panel slots in here (next stage) ── */}
+      {/* ── PHOTO INTELLIGENCE PANEL ── */}
+      {selectedListingId && (
+        <PhotosPanel listingId={selectedListingId} listingAddress={selectedListing?.address} />
+      )}
 
       {/* ── HISTORY PANEL ── */}
       <div style={panelSt}>
