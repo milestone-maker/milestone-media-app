@@ -875,9 +875,9 @@ console.log("\n── api/content-generate.js — walkthrough_carousel photo wir
 // (so total = 1 cover + nSubjects + 1 final). Fresh object each call — the
 // handler MUTATES slides in place when zipping.
 function cannedCarousel(nSubjects) {
-  const slides = [{ slide_number: 1, subject: "cover", text: "Cover hook" }];
-  for (let k = 0; k < nSubjects; k++) slides.push({ slide_number: k + 2, subject: `subj${k}`, text: `overlay ${k}` });
-  slides.push({ slide_number: nSubjects + 2, subject: "final", text: "DM me to tour" });
+  const slides = [{ slide_number: 1, subject: "cover", text: "Cover hook", statement: "A home that ends the search" }];
+  for (let k = 0; k < nSubjects; k++) slides.push({ slide_number: k + 2, subject: `subj${k}`, text: `overlay ${k}`, statement: `Statement card ${k}` });
+  slides.push({ slide_number: nSubjects + 2, subject: "final", text: "DM me to tour", statement: "Schedule your private tour" });
   return { ...CANNED_MODEL_OUTPUT, framework_used: "walkthrough_carousel", slides };
 }
 
@@ -977,6 +977,47 @@ const CAROUSEL_LABELS = [
   });
   check("P3e: non-carousel framework unaffected by labels → 200", res.statusCode === 200);
   check("P3e: non-carousel has no slides", res.body?.slides === undefined || res.body?.slides === null);
+}
+
+// P3f — Style B card `statement` fields round-trip through the endpoint
+{
+  cannedOverride = cannedCarousel(3);
+  const res = await callHandler({
+    body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "walkthrough_carousel" },
+    supabaseOverride: makeSupabaseMock({ photoLabels: CAROUSEL_LABELS }),
+  });
+  cannedOverride = null;
+  const s = res.body?.slides || [];
+  check("P3f: cover card statement preserved", s[0]?.statement === "A home that ends the search");
+  check("P3f: room card statement preserved", s[1]?.statement === "Statement card 0");
+  check("P3f: final CTA statement preserved", s[4]?.statement === "Schedule your private tour");
+  check("P3f: terse text also preserved alongside statement", s[1]?.text === "overlay 0");
+}
+
+// P3g — Style B budget: endpoint passes maxSubjects:3, so even with many
+// qualifying rooms only 3 subject photos are selected (cover + 3).
+{
+  // drone cover + 5 rooms qualifying; selection should yield exactly 3 subjects.
+  const manyLabels = [
+    { id: "g1", listing_id: LISTING_ID, photo_url: "DRONE", category: "drone",        confidence: 0.9, agent_corrected: false, sort_order: 0, features: [] },
+    { id: "g2", listing_id: LISTING_ID, photo_url: "FRONT", category: "front_facade", confidence: 0.9, agent_corrected: false, sort_order: 1, features: [] },
+    { id: "g3", listing_id: LISTING_ID, photo_url: "BACK",  category: "backyard",     confidence: 0.9, agent_corrected: false, sort_order: 2, features: [] },
+    { id: "g4", listing_id: LISTING_ID, photo_url: "LIV",   category: "living",       confidence: 0.9, agent_corrected: false, sort_order: 3, features: [] },
+    { id: "g5", listing_id: LISTING_ID, photo_url: "DIN",   category: "dining",       confidence: 0.9, agent_corrected: false, sort_order: 4, features: [] },
+    { id: "g6", listing_id: LISTING_ID, photo_url: "KIT",   category: "kitchen",      confidence: 0.9, agent_corrected: false, sort_order: 5, features: [] },
+  ];
+  cannedOverride = cannedCarousel(3); // 5 slides — matches the 3-subject budget
+  const res = await callHandler({
+    body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "walkthrough_carousel" },
+    supabaseOverride: makeSupabaseMock({ photoLabels: manyLabels }),
+  });
+  cannedOverride = null;
+  const s = res.body?.slides || [];
+  check("P3g: 200", res.statusCode === 200);
+  check("P3g: exactly 5 slides (cover + 3 + final) — budget honored", s.length === 5, `got ${s.length}`);
+  check("P3g: no count-mismatch warning (selection matched model)", res.body?.photo_warnings === undefined);
+  check("P3g: 3 subject photos = FRONT, BACK, LIV (locked order, budget 3)",
+    s[1]?.photo_url === "FRONT" && s[2]?.photo_url === "BACK" && s[3]?.photo_url === "LIV");
 }
 
 // ── Unit tests: canonicalizeHashtags ─────────────────────────────────

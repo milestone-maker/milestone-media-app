@@ -36,6 +36,9 @@ export const CAROUSEL_CATEGORY_ORDER = [
 
 const SHOWCASE_FILL_PRIORITY = ["kitchen", "living", "backyard", "primary_bedroom"];
 const CONFIDENCE_FLOOR = 0.7;
+// Default subject-photo budget. Style B (statement-then-reveal) passes a smaller
+// budget (~3) since each beat costs two carousel slots (card + photo); a future
+// Style A can pass a larger one. Parameterized via opts.maxSubjects.
 const MAX_PHOTO_SLIDES = 8;
 
 function includable(l) {
@@ -64,7 +67,10 @@ const keyOf = (l) => (l.id != null ? `id:${l.id}` : `url:${l.photo_url}`);
  *   finalPhotoUrl: string | null,
  * }}
  */
-export function selectCarouselPhotos(photoLabels) {
+export function selectCarouselPhotos(photoLabels, opts = {}) {
+  const maxSubjects = Number.isInteger(opts.maxSubjects) && opts.maxSubjects >= 0
+    ? opts.maxSubjects
+    : MAX_PHOTO_SLIDES;
   const labels = Array.isArray(photoLabels) ? photoLabels.filter(includable) : [];
 
   // Group by category (only the eight carousel categories; 'other' dropped).
@@ -83,9 +89,11 @@ export function selectCarouselPhotos(photoLabels) {
   const used = new Set();
   if (coverRow) used.add(keyOf(coverRow));
 
-  // SUBJECT SLIDES: one best per present category in order, excluding cover cat.
+  // SUBJECT SLIDES: one best per present category in order, excluding cover cat,
+  // up to the budget (maxSubjects).
   const subjectSlides = [];
   for (const cat of CAROUSEL_CATEGORY_ORDER) {
+    if (subjectSlides.length >= maxSubjects) break;
     if (cat === coverCategory) continue;
     const top = byCat.get(cat).find((l) => !used.has(keyOf(l)));
     if (top) {
@@ -98,13 +106,13 @@ export function selectCarouselPhotos(photoLabels) {
     }
   }
 
-  // FILL: round-robin over showcase categories, next-best each pass, until cap.
+  // FILL: round-robin over showcase categories, next-best each pass, until budget.
   if (subjectSlides.length > 0) {
     let added = true;
-    while (subjectSlides.length < MAX_PHOTO_SLIDES && added) {
+    while (subjectSlides.length < maxSubjects && added) {
       added = false;
       for (const cat of SHOWCASE_FILL_PRIORITY) {
-        if (subjectSlides.length >= MAX_PHOTO_SLIDES) break;
+        if (subjectSlides.length >= maxSubjects) break;
         const next = byCat.get(cat).find((l) => !used.has(keyOf(l)));
         if (next) {
           used.add(keyOf(next));
@@ -120,7 +128,7 @@ export function selectCarouselPhotos(photoLabels) {
   }
 
   // Hard cap (defensive; the loop already bounds it).
-  if (subjectSlides.length > MAX_PHOTO_SLIDES) subjectSlides.length = MAX_PHOTO_SLIDES;
+  if (subjectSlides.length > maxSubjects) subjectSlides.length = maxSubjects;
 
   return {
     coverPhoto: coverRow ? { photo_url: coverRow.photo_url, category: coverCategory } : null,

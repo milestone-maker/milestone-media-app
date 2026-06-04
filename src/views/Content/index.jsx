@@ -21,6 +21,7 @@ import { isSubscribed } from "../../lib/subscription";
 import VoiceProfileModal from "../../components/VoiceProfileModal";
 import SubscriptionsView from "../Subscriptions";
 import PhotosPanel from "./PhotosPanel";
+import CarouselView from "./CarouselView";
 
 // Friendly label → exact framework_name slug the endpoint expects.
 const FRAMEWORKS = [
@@ -204,6 +205,18 @@ function ContentView() {
 
   const selectedListing = listings.find((l) => l.id === selectedListingId) || null;
   const hasUsableProfile = !!voiceProfile && !!String(voiceProfile.license_number || "").trim();
+
+  // Stats + brand footer for carousel cards (shared by Result + History).
+  const carouselStats = selectedListing ? {
+    beds: selectedListing.beds, baths: selectedListing.baths,
+    sqft: selectedListing.sqft, city: selectedListing.city,
+  } : null;
+  const carouselFooter = (licenseOverride) => (voiceProfile ? {
+    agentName: voiceProfile.display_name || voiceProfile.full_name || "",
+    brokerage: voiceProfile.brokerage_name || "",
+    license: licenseOverride || voiceProfile.license_number || "",
+    contact: voiceProfile.social_instagram || "",
+  } : null);
 
   // ── Generate ──
   const handleGenerate = async () => {
@@ -430,34 +443,17 @@ function ContentView() {
             }}>{result.caption}</div>
           </div>
 
-          {/* Slides (walkthrough_carousel only) */}
+          {/* Carousel — Style B sequence + download (walkthrough_carousel only) */}
           {Array.isArray(result.slides) && result.slides.length > 0 && (
             <div style={{ marginBottom: 18 }}>
-              <label style={labelSt}>Carousel Slides</label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {result.slides.map((s, i) => {
-                  const photoUrl = (s && typeof s === "object") ? s.photo_url : null;
-                  const isCover  = (s && typeof s === "object") ? s.is_cover : false;
-                  return (
-                    <div key={i} style={{
-                      display: "flex", gap: 12, alignItems: "center", background: "rgba(0,0,0,0.2)", borderRadius: 8,
-                      padding: "10px 14px", border: "1px solid rgba(255,255,255,0.06)",
-                    }}>
-                      <span style={{ color: "#c9a84c", fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{i + 1}</span>
-                      {photoUrl && (
-                        <img src={photoUrl} alt="" loading="lazy" style={{
-                          width: 56, height: 42, objectFit: "cover", borderRadius: 5, flexShrink: 0,
-                          border: isCover ? "1px solid #c9a84c" : "1px solid rgba(255,255,255,0.1)",
-                        }} />
-                      )}
-                      <span style={{ color: "#ECE7DC", fontFamily: "'Jost', sans-serif", fontSize: 12.5, lineHeight: 1.6 }}>
-                        {isCover && <span style={{ color: "#c9a84c", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", marginRight: 8 }}>Cover</span>}
-                        {typeof s === "string" ? s : (s.text || s.subject || JSON.stringify(s))}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+              <CarouselView
+                slides={result.slides}
+                caption={result.caption}
+                hashtags={result.hashtags}
+                address={selectedListing?.address}
+                stats={carouselStats}
+                footer={carouselFooter(result.license_number)}
+              />
             </div>
           )}
 
@@ -550,6 +546,19 @@ function ContentView() {
                               color: "#e8c97a", borderRadius: 6, padding: "3px 8px", fontFamily: "'Jost', sans-serif", fontSize: 11,
                             }}>{tag}</span>
                           ))}
+                        </div>
+                      )}
+                      {/* Saved carousel — same renderer as the Result panel (persistence fix) */}
+                      {Array.isArray(h.slides) && h.slides.length > 0 && (
+                        <div style={{ marginTop: 14 }}>
+                          <CarouselView
+                            slides={h.slides}
+                            caption={h.caption}
+                            hashtags={h.hashtags}
+                            address={selectedListing?.address}
+                            stats={carouselStats}
+                            footer={carouselFooter(h.license_number)}
+                          />
                         </div>
                       )}
                     </div>

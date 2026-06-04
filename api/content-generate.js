@@ -287,7 +287,10 @@ export default async function handler(req, res, depsOverride) {
       if (plErr) {
         console.error("[content-generate] photo_labels fetch error (continuing text-only):", plErr);
       } else {
-        const sel = selectCarouselPhotos(photoLabels || []);
+        // Style B "statement-then-reveal": each beat costs two carousel slots
+        // (statement card + clean photo), so budget the cover + ~3 rooms →
+        // 9-slide structure (hook card → cover photo → 3 room beats → CTA card).
+        const sel = selectCarouselPhotos(photoLabels || [], { maxSubjects: 3 });
         if (sel.subjectSlides.length > 0) carouselSelection = sel;
       }
     }
