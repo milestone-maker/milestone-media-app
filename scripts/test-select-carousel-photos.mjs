@@ -138,5 +138,38 @@ console.log("\n── selectCarouselPhotos ──\n");
   check("subject carries features", JSON.stringify(r.subjectSlides[0].features) === JSON.stringify(["marble island", "white cabinets"]));
 }
 
+// 11. Style-aware budget — Style B: cover + ~3 rooms (maxSubjects:3) → 9-slide target
+{
+  // drone cover + 6 qualifying rooms; budget 3 → exactly 3 subject slides.
+  const rows = [
+    L("drone", { conf: 0.9 }),
+    L("front_facade", { conf: 0.9 }), L("backyard", { conf: 0.9 }),
+    L("living", { conf: 0.9 }), L("dining", { conf: 0.9 }),
+    L("kitchen", { conf: 0.9 }), L("primary_bedroom", { conf: 0.9 }),
+  ];
+  const r = selectCarouselPhotos(rows, { maxSubjects: 3 });
+  check("Style B: cover = drone", r.coverPhoto?.category === "drone");
+  check("Style B: exactly 3 subject slides", r.subjectSlides.length === 3, `got ${r.subjectSlides.length}`);
+  // 9-slide structure: hook card + cover photo + 3×(card+photo) + CTA card = 9
+  const renderedSlides = 1 /*hook card*/ + 1 /*cover photo*/ + r.subjectSlides.length * 2 + 1 /*cta card*/;
+  check("Style B: composes to 9 rendered slides", renderedSlides === 9, `got ${renderedSlides}`);
+  check("Style B: subjects follow locked order (excl. cover)",
+    JSON.stringify(cats(r)) === JSON.stringify(["front_facade", "backyard", "living"]));
+}
+
+// 12. Budget=0 → no subject slides (defensive)
+{
+  const r = selectCarouselPhotos([L("kitchen", { conf: 0.9 }), L("living", { conf: 0.9 })], { maxSubjects: 0 });
+  check("maxSubjects 0 → no subjects", r.subjectSlides.length === 0);
+}
+
+// 13. Default budget unchanged (no opts → up to 8) — back-compat
+{
+  const rows = [];
+  for (let i = 0; i < 12; i++) rows.push(L("kitchen", { conf: 0.9 - i * 0.01, sort: i }));
+  const r = selectCarouselPhotos(rows); // no opts
+  check("default budget still caps at 8", r.subjectSlides.length === 8, `got ${r.subjectSlides.length}`);
+}
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

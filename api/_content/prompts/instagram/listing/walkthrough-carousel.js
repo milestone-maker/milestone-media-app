@@ -114,10 +114,13 @@ FRAMEWORK: WALK-THROUGH CAROUSEL
 
 Generate TWO outputs:
 
-A. SLIDE OVERLAYS — One short text per slide, each maximum 8 words:
-- Cover slide (slide 1): A hook line in the agent's voice that makes swiping feel earned, grounded in the cover shot above. Should land in 2 seconds.
-- Subject slides (one per slide subject in order): Name the room and use ITS listed features for one teaser sensory detail. The subject field for each slide must name the room from the corresponding slide_subjects entry.
-- Final slide (last slide): A 1-line take combined with the agent's CTA verb. Should make the viewer want to reach out.
+A. SLIDE TEXT — for EACH slide emit BOTH a short "text" and a fuller "statement":
+- "text" — the terse overlay, maximum 8 words (kept for future overlay layouts).
+- "statement" — the headline that goes on a designed text card preceding the photo (this is the "statement-then-reveal" card). One sentence, ~6-14 words, polished and brand-voiced. It should make the next photo feel earned.
+Per slide:
+- Cover slide (slide 1): "text" = a 2-second hook; "statement" = a bold opening headline for the home, grounded in the cover shot.
+- Subject slides (one per slide subject in order): "text" = a teaser using the room's features; "statement" = a "statement-then-reveal" line that names the room and teases what the photo shows (use the room's listed features). The subject field must name the room from the corresponding slide_subjects entry.
+- Final slide (last slide): "text" = a 1-line take + CTA verb; "statement" = a closing CTA statement that makes the viewer want to reach out.
 
 B. MAIN CAPTION (the text under the post):
 1. OPEN (1 sentence): Tease the home in the agent's voice without revealing every room.
@@ -137,10 +140,10 @@ OUTPUT FORMAT (return only valid JSON, no other text):
 {
   "caption": "<main caption with sections joined by line breaks>",
   "slides": [
-    {"slide_number": 1, "subject": "cover", "text": "<cover hook>"},
-    {"slide_number": 2, "subject": "<first subject from slide_subjects>", "text": "<overlay text>"},
-    {"slide_number": N+1, "subject": "<last subject from slide_subjects>", "text": "<overlay text>"},
-    {"slide_number": N+2, "subject": "final", "text": "<take + CTA>"}
+    {"slide_number": 1, "subject": "cover", "text": "<cover hook>", "statement": "<bold opening headline>"},
+    {"slide_number": 2, "subject": "<first subject from slide_subjects>", "text": "<overlay text>", "statement": "<statement-then-reveal line for this room>"},
+    {"slide_number": N+1, "subject": "<last subject from slide_subjects>", "text": "<overlay text>", "statement": "<statement-then-reveal line>"},
+    {"slide_number": N+2, "subject": "final", "text": "<take + CTA>", "statement": "<closing CTA statement>"}
   ],
   "hook_line": "<text from the cover slide>",
   "cta_line": "<text from the final slide>",
