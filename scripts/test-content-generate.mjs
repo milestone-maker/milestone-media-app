@@ -148,6 +148,8 @@ function makeSupabaseMock({
   voiceProfileErr  = null,
   listing          = LAKEWOOD_LISTING,
   listingErr       = null,
+  photoLabels      = [],   // walkthrough_carousel reads photo_labels (P3)
+  photoLabelsErr   = null,
 } = {}) {
   return {
     auth: {
@@ -172,6 +174,17 @@ function makeSupabaseMock({
       }
       if (table === "listings") {
         return thenable({ data: listing, error: listingErr });
+      }
+      if (table === "photo_labels") {
+        // select(...).eq(...).order(...) then awaited as a list.
+        const b = {
+          select: () => b,
+          eq: () => b,
+          order: () => b,
+          then: (resolve, reject) =>
+            Promise.resolve({ data: photoLabelsErr ? null : photoLabels, error: photoLabelsErr }).then(resolve, reject),
+        };
+        return b;
       }
       throw new Error(`Unexpected table: ${table}`);
     },
@@ -847,6 +860,123 @@ if (LIVE) {
     console.log(resN.body?.hashtags?.join(" "));
     console.log("");
   }
+}
+
+// ── P3 — photo-driven walkthrough_carousel ───────────────────────────
+//
+// Injects a fake photo_labels read (via makeSupabaseMock photoLabels) and a
+// canned engine slides array (via cannedOverride). Asserts the deterministic
+// selection → positional zip, the slide-count-mismatch best-effort + warning,
+// and that the no-labels path is byte-for-byte the legacy behavior.
+
+console.log("\n── api/content-generate.js — walkthrough_carousel photo wiring (P3) ──\n");
+
+// Build a canned carousel output with exactly nSubjects subject slides
+// (so total = 1 cover + nSubjects + 1 final). Fresh object each call — the
+// handler MUTATES slides in place when zipping.
+function cannedCarousel(nSubjects) {
+  const slides = [{ slide_number: 1, subject: "cover", text: "Cover hook" }];
+  for (let k = 0; k < nSubjects; k++) slides.push({ slide_number: k + 2, subject: `subj${k}`, text: `overlay ${k}` });
+  slides.push({ slide_number: nSubjects + 2, subject: "final", text: "DM me to tour" });
+  return { ...CANNED_MODEL_OUTPUT, framework_used: "walkthrough_carousel", slides };
+}
+
+// photo_labels fixture → selection: cover=DRONE(drone); subjects in locked
+// order = front_facade(FRONT), living(LIVING), kitchen(KITCHEN); final=DRONE.
+const CAROUSEL_LABELS = [
+  { id: "p1", listing_id: LISTING_ID, photo_url: "DRONE",   category: "drone",        confidence: 0.9, agent_corrected: false, sort_order: 0, features: [] },
+  { id: "p2", listing_id: LISTING_ID, photo_url: "FRONT",   category: "front_facade", confidence: 0.9, agent_corrected: false, sort_order: 1, features: [] },
+  { id: "p3", listing_id: LISTING_ID, photo_url: "LIVING",  category: "living",       confidence: 0.9, agent_corrected: false, sort_order: 2, features: [] },
+  { id: "p4", listing_id: LISTING_ID, photo_url: "KITCHEN", category: "kitchen",      confidence: 0.9, agent_corrected: false, sort_order: 3, features: ["marble waterfall island"] },
+];
+
+// P3a — happy photo-driven path: positional zip aligns, final reuses cover
+{
+  capturedBuilders = null;
+  cannedOverride = cannedCarousel(3); // selection expects exactly 3 subjects
+  const res = await callHandler({
+    body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "walkthrough_carousel" },
+    supabaseOverride: makeSupabaseMock({ photoLabels: CAROUSEL_LABELS }),
+  });
+  cannedOverride = null;
+  const s = res.body?.slides || [];
+  check("P3a: 200", res.statusCode === 200, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
+  check("P3a: 5 slides (cover + 3 + final)", s.length === 5);
+  check("P3a: cover photo = DRONE + is_cover", s[0]?.photo_url === "DRONE" && s[0]?.is_cover === true);
+  check("P3a: cover category = drone", s[0]?.category === "drone");
+  check("P3a: subject 1 = FRONT/front_facade", s[1]?.photo_url === "FRONT" && s[1]?.category === "front_facade");
+  check("P3a: subject 2 = LIVING/living", s[2]?.photo_url === "LIVING" && s[2]?.category === "living");
+  check("P3a: subject 3 = KITCHEN/kitchen", s[3]?.photo_url === "KITCHEN" && s[3]?.category === "kitchen");
+  check("P3a: final reuses cover photo (DRONE)", s[4]?.photo_url === "DRONE");
+  check("P3a: no photo_warnings on exact match", res.body?.photo_warnings === undefined);
+  // Prompt used the photo template: cover context + room-referencing features.
+  check("P3a: prompt has Cover shot line", capturedBuilders?.userMessage?.includes("Cover shot: a drone aerial shot"));
+  check("P3a: prompt references kitchen feature", capturedBuilders?.userMessage?.includes("Kitchen — marble waterfall island"));
+  check("P3a: slide_subjects excludes the cover (no Aerial subject)", !capturedBuilders?.userMessage?.includes("Aerial view —") && !/Slide subjects[^\n]*Aerial/.test(capturedBuilders?.userMessage || ""));
+}
+
+// P3b — slide-count mismatch: model returns 4 subjects, selection has 3 →
+// best-effort zip (first 3) + non-fatal warning; extra subject slide gets no photo.
+{
+  capturedBuilders = null;
+  cannedOverride = cannedCarousel(4); // 6 slides; selection still expects 3
+  const res = await callHandler({
+    body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "walkthrough_carousel" },
+    supabaseOverride: makeSupabaseMock({ photoLabels: CAROUSEL_LABELS }),
+  });
+  cannedOverride = null;
+  const s = res.body?.slides || [];
+  check("P3b: 200 (non-fatal)", res.statusCode === 200, `got ${res.statusCode}`);
+  check("P3b: 6 slides", s.length === 6);
+  check("P3b: photo_warnings present", Array.isArray(res.body?.photo_warnings) && res.body.photo_warnings.length >= 1);
+  check("P3b: warning mentions mismatch", res.body?.photo_warnings?.some((w) => /mismatch/i.test(w)));
+  check("P3b: first 3 subjects zipped", s[1]?.photo_url === "FRONT" && s[2]?.photo_url === "LIVING" && s[3]?.photo_url === "KITCHEN");
+  check("P3b: 4th (extra) subject has no photo", s[4]?.photo_url === undefined);
+  check("P3b: final still reuses cover", s[5]?.photo_url === "DRONE");
+}
+
+// P3c — no labels → byte-for-byte legacy path (no zip, default subjects)
+{
+  capturedBuilders = null;
+  cannedOverride = cannedCarousel(5); // legacy default has 5 subjects → 7 slides
+  const res = await callHandler({
+    body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "walkthrough_carousel" },
+    supabaseOverride: makeSupabaseMock({ photoLabels: [] }), // no labels
+  });
+  cannedOverride = null;
+  const s = res.body?.slides || [];
+  check("P3c: 200", res.statusCode === 200);
+  check("P3c: no photo_url on any slide (no zip)", s.every((x) => x.photo_url === undefined));
+  check("P3c: no is_cover marker", s.every((x) => x.is_cover === undefined));
+  check("P3c: no photo_warnings", res.body?.photo_warnings === undefined);
+  check("P3c: legacy default slide_subjects used", capturedBuilders?.userMessage?.includes("kitchen, primary suite, primary bathroom, living area, outdoor space"));
+  check("P3c: legacy template has NO Cover shot line", !capturedBuilders?.userMessage?.includes("Cover shot:"));
+}
+
+// P3d — photo_labels read error → graceful text-only fallback (no crash)
+{
+  capturedBuilders = null;
+  cannedOverride = cannedCarousel(5);
+  const res = await callHandler({
+    body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "walkthrough_carousel" },
+    supabaseOverride: makeSupabaseMock({ photoLabelsErr: { message: "labels boom" } }),
+  });
+  cannedOverride = null;
+  check("P3d: 200 despite labels read error", res.statusCode === 200, `got ${res.statusCode}`);
+  check("P3d: fell back to legacy (no zip)", (res.body?.slides || []).every((x) => x.photo_url === undefined));
+  check("P3d: legacy default subjects", capturedBuilders?.userMessage?.includes("kitchen, primary suite, primary bathroom, living area, outdoor space"));
+}
+
+// P3e — other frameworks never read photo_labels (mock would serve [], but the
+// path is gated). Confirm a non-carousel framework still works with labels present.
+{
+  capturedBuilders = null;
+  const res = await callHandler({
+    body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "story_driven_listing" },
+    supabaseOverride: makeSupabaseMock({ photoLabels: CAROUSEL_LABELS }),
+  });
+  check("P3e: non-carousel framework unaffected by labels → 200", res.statusCode === 200);
+  check("P3e: non-carousel has no slides", res.body?.slides === undefined || res.body?.slides === null);
 }
 
 // ── Unit tests: canonicalizeHashtags ─────────────────────────────────
