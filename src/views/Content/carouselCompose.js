@@ -224,12 +224,56 @@ export async function renderCardSlide(beat, bt = DEFAULT_BRAND_TOKENS, logoImg =
   return canvas;
 }
 
-// ── Clean photo renderer — NO text ───────────────────────────────────
-export async function renderPhotoSlide(photoUrl) {
+// ── Photo renderer — fit the WHOLE photo onto the branded background ──
+// Contain-fit (no cover-crop) so the entire room is visible, on the same cream
+// card background, with an uppercase room label beneath. Always 1080x1350.
+export async function renderPhotoSlide(photoUrl, { category, brandTokens } = {}) {
+  const bt = { ...DEFAULT_BRAND_TOKENS, ...(brandTokens || {}) };
   const img = await loadImage(photoUrl, "anonymous");
   const canvas = document.createElement("canvas");
   canvas.width = SLIDE_W; canvas.height = SLIDE_H;
-  coverCrop(canvas.getContext("2d"), img, SLIDE_W, SLIDE_H);
+  const ctx = canvas.getContext("2d");
+
+  // Branded background (matches the cards).
+  ctx.fillStyle = bt.bgColor;
+  ctx.fillRect(0, 0, SLIDE_W, SLIDE_H);
+
+  const label = category ? (HUMAN_SUBJECT[category] || "") : "";
+  const margin = 64;
+  const labelBand = label ? 110 : 0;       // reserved space at the bottom
+  const availW = SLIDE_W - margin * 2;       // ~952 — fit to width
+  const availH = SLIDE_H - margin * 2 - labelBand;
+
+  // Contain-fit: show the whole photo, never crop. For typical landscape
+  // listing shots width is the binding constraint (fit-to-width); portraits
+  // fall back to height so nothing is cut off.
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  const scale = Math.min(availW / iw, availH / ih);
+  const dw = iw * scale;
+  const dh = ih * scale;
+  const dx = (SLIDE_W - dw) / 2;
+  const dy = margin + (availH - dh) / 2;     // centered in the area above the label
+  ctx.drawImage(img, dx, dy, dw, dh);
+
+  // Room label beneath the photo — uppercase Jost in the accent color, with a
+  // short thin hairline above it (matches the card kicker treatment).
+  if (label) {
+    const cx = SLIDE_W / 2;
+    ctx.strokeStyle = bt.accentColor;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 40, SLIDE_H - 112);
+    ctx.lineTo(cx + 40, SLIDE_H - 112);
+    ctx.stroke();
+
+    ctx.font = `600 30px "${bt.fontBody}"`;
+    ctx.fillStyle = bt.accentColor;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(label.toUpperCase(), cx, SLIDE_H - 66, SLIDE_W - 240);
+  }
+
   return canvas;
 }
 
@@ -248,13 +292,13 @@ export function buildSlideSequence(slides, { stats, footer } = {}) {
     const isFinal = s.subject === "final";
     if (isCover) {
       seq.push({ type: "card", kind: "hook", statement, stats, footer });
-      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url });
+      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category });
     } else if (isFinal) {
       seq.push({ type: "card", kind: "cta", statement, footer, contact: footer?.contact || "" });
-      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url });
+      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category });
     } else {
       seq.push({ type: "card", kind: "room", statement, kicker: HUMAN_SUBJECT[s.category] || "", footer });
-      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url });
+      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category });
     }
   }
   return seq;
@@ -280,7 +324,7 @@ export async function composeCarousel({ slides, stats, footer, brandTokens } = {
       files.push({ name: `${num}_card.png`, blob });
     } else {
       try {
-        const canvas = await renderPhotoSlide(item.photo_url);
+        const canvas = await renderPhotoSlide(item.photo_url, { category: item.category, brandTokens: bt });
         const blob = await canvasToBlob(canvas, "image/jpeg", 0.92);
         files.push({ name: `${num}_photo.jpg`, blob });
       } catch {
