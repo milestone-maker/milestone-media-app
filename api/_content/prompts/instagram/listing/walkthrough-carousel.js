@@ -88,7 +88,101 @@ OUTPUT FORMAT (return only valid JSON, no other text):
   "content_type": "listing"
 }`;
 
+// Photo-driven variant. Identical to TEMPLATE except it (a) names the cover
+// shot and (b) tells the model each subject is "Room — notable features" so
+// overlays reference real rooms/details. Kept SEPARATE so the legacy TEMPLATE
+// (and its output) stays byte-for-byte unchanged when there are no photo labels.
+const TEMPLATE_PHOTO = `You are writing an Instagram carousel post for {agent_name}. A carousel has multiple swipeable slides — your job is to generate the text overlay for each slide AND the main caption that appears under the post.
+
+VOICE PROFILE
+- Tone descriptors: {tone_descriptors}
+- CTA style: {cta_style}
+- Signature phrases: {signature_phrases}
+- Words to avoid: {avoided_words}
+- License number: {license_number}
+- Brokerage: {brokerage_name}
+
+LISTING
+- Neighborhood: {neighborhood}
+- City: {city}
+- Beds: {beds} | Baths: {baths} | Sqft: {sqft}
+- Standout features: {features}
+- Cover shot: {cover_context}
+- Slide subjects (ordered, one slide per subject; each is formatted "Room — notable features"): {slide_subjects}
+
+FRAMEWORK: WALK-THROUGH CAROUSEL
+
+Generate TWO outputs:
+
+A. SLIDE OVERLAYS — One short text per slide, each maximum 8 words:
+- Cover slide (slide 1): A hook line in the agent's voice that makes swiping feel earned, grounded in the cover shot above. Should land in 2 seconds.
+- Subject slides (one per slide subject in order): Name the room and use ITS listed features for one teaser sensory detail. The subject field for each slide must name the room from the corresponding slide_subjects entry.
+- Final slide (last slide): A 1-line take combined with the agent's CTA verb. Should make the viewer want to reach out.
+
+B. MAIN CAPTION (the text under the post):
+1. OPEN (1 sentence): Tease the home in the agent's voice without revealing every room.
+2. MIDDLE (2-3 sentences): Name 2-3 standout features that match the carousel content.
+3. SWIPE PROMPT (1 sentence): Direct the viewer to swipe through.
+4. COMPLIANCE: Format exactly as: "{agent_name} | {brokerage_name} | TREC License #{license_number}"
+5. HASHTAGS: 8-12 hashtags. Weight toward neighborhood, city, and DFW tags. Include 1-2 niche tags for home style or buyer type. No generic spam tags.
+
+RULES
+- Never use words in the avoided_words list.
+- Naturally incorporate 1-2 signature phrases if they fit; do not force them.
+- Do not use emojis unless the voice profile explicitly enables them.
+- Slide overlay text must be SHORT — every slide overlay max 8 words. Long overlay text defeats the carousel format.
+- Total slide count must equal: 1 cover + N subjects + 1 final, where N is the count of slide_subjects entries.
+
+OUTPUT FORMAT (return only valid JSON, no other text):
+{
+  "caption": "<main caption with sections joined by line breaks>",
+  "slides": [
+    {"slide_number": 1, "subject": "cover", "text": "<cover hook>"},
+    {"slide_number": 2, "subject": "<first subject from slide_subjects>", "text": "<overlay text>"},
+    {"slide_number": N+1, "subject": "<last subject from slide_subjects>", "text": "<overlay text>"},
+    {"slide_number": N+2, "subject": "final", "text": "<take + CTA>"}
+  ],
+  "hook_line": "<text from the cover slide>",
+  "cta_line": "<text from the final slide>",
+  "hashtags": ["tag1", "tag2", ...],
+  "framework_used": "walkthrough_carousel",
+  "license_number": "{license_number}",
+  "platform": "instagram",
+  "content_type": "listing"
+}`;
+
 const SYSTEM_PROMPT = INSTAGRAM_CAPTION_SYSTEM_PROMPT;
+
+// Default text-only subjects — the legacy (no-photos) fallback. Extracted to a
+// const so the fallback path's value is provably identical to before.
+const DEFAULT_SLIDE_SUBJECTS = "kitchen, primary suite, primary bathroom, living area, outdoor space";
+
+// Canonical photo_labels category → human-readable room name for prompt text.
+const HUMAN_SUBJECT = {
+  drone:            "Aerial view",
+  front_facade:     "Front exterior",
+  backyard:         "Backyard",
+  living:           "Living room",
+  dining:           "Dining room",
+  kitchen:          "Kitchen",
+  primary_bedroom:  "Primary bedroom",
+  primary_bathroom: "Primary bathroom",
+};
+
+// Establishing-shot phrasing for the cover, by the cover photo's category.
+function coverContextFor(coverPhoto) {
+  if (!coverPhoto) return "the home's best establishing shot";
+  if (coverPhoto.category === "drone")        return "a drone aerial shot of the property";
+  if (coverPhoto.category === "front_facade") return "a front exterior shot of the home";
+  return "the home's best establishing shot";
+}
+
+// "Kitchen — marble waterfall island, white cabinetry" (up to 3 features).
+function subjectWithFeatures(s) {
+  const name = HUMAN_SUBJECT[s.category] || s.category;
+  const feats = (Array.isArray(s.features) ? s.features : []).filter(Boolean).slice(0, 3);
+  return feats.length ? `${name} — ${feats.join(", ")}` : name;
+}
 
 // Stable list of placeholder keys the template uses — kept in sync with
 // TEMPLATE above. Used by the substituter to flag missing required fields.
@@ -109,6 +203,9 @@ const REQUIRED_VARS = [
   "slide_subjects",
 ];
 
+// Photo-driven path also requires cover_context (TEMPLATE_PHOTO placeholder).
+const REQUIRED_VARS_PHOTO = [...REQUIRED_VARS, "cover_context"];
+
 /**
  * Build {systemPrompt, userMessage} for the Walk-Through Carousel prompt.
  *
@@ -120,7 +217,7 @@ const REQUIRED_VARS = [
  *                                   column); resolveOverride falls through
  *                                   to the default fallback when absent.
  */
-function build({ voiceProfile, listing, extras = {} }) {
+function build({ voiceProfile, listing, extras = {}, carouselSelection = null }) {
   requireBuildInputs({ voiceProfile, listing }, "walkthrough-carousel");
 
   // TEMPORARY MAPPING (Stage 5c MVP):
@@ -134,14 +231,34 @@ function build({ voiceProfile, listing, extras = {} }) {
     "(none specified — match overall tone)"
   );
 
-  const vars = {
+  const base = {
     ...mapVoiceProfileToPromptVars(voiceProfile),
     ...mapListingToPromptVars(listing),
     signature_phrases: signaturePhrases,
-    slide_subjects: resolveOverride(
-      extras, listing, "slide_subjects",
-      "kitchen, primary suite, primary bathroom, living area, outdoor space"
-    ),
+  };
+
+  // PHOTO-DRIVEN PATH — only when the caller supplied a selection that yielded
+  // subject slides. Derive slide_subjects from the chosen rooms + features and
+  // give the cover its establishing context (TEMPLATE_PHOTO variant).
+  const photoMode =
+    carouselSelection &&
+    Array.isArray(carouselSelection.subjectSlides) &&
+    carouselSelection.subjectSlides.length > 0;
+
+  if (photoMode) {
+    const vars = {
+      ...base,
+      slide_subjects: carouselSelection.subjectSlides.map(subjectWithFeatures).join(" | "),
+      cover_context:  coverContextFor(carouselSelection.coverPhoto),
+    };
+    requirePromptVars(vars, REQUIRED_VARS_PHOTO, "walkthrough-carousel");
+    return { systemPrompt: SYSTEM_PROMPT, userMessage: substituteTemplate(TEMPLATE_PHOTO, vars) };
+  }
+
+  // LEGACY (no photos) PATH — byte-for-byte identical to the pre-P3 behavior.
+  const vars = {
+    ...base,
+    slide_subjects: resolveOverride(extras, listing, "slide_subjects", DEFAULT_SLIDE_SUBJECTS),
   };
 
   requirePromptVars(vars, REQUIRED_VARS, "walkthrough-carousel");

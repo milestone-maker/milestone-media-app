@@ -27,6 +27,42 @@ import { isSubscribed } from "./_lib/subscription.js";
 import { findPrompt } from "./_content/registry.js";
 import { canonicalizeHashtags } from "./_content/post-processors.js";
 import { UNIVERSAL_REQUIRED_OUTPUT_FIELDS } from "./_content/prompts/_helpers.js";
+import { selectCarouselPhotos } from "./_content/selectCarouselPhotos.js";
+
+const CAROUSEL_FRAMEWORK = "walkthrough_carousel";
+
+// Zip deterministically-chosen photo URLs onto the model's slides array by
+// POSITION — the engine/model never assign photos. slides shape:
+// [cover, ...subjectSlides, final]. Mutates `slides` in place; pushes any
+// non-fatal anomalies onto `warnings`.
+function zipCarouselPhotos(slides, selection, listing, warnings) {
+  if (!Array.isArray(slides) || slides.length < 2) {
+    warnings.push("carousel had fewer than 2 slides; photos not zipped");
+    return;
+  }
+  const heroFallback = listing?.hero_img || null;
+  const n = slides.length;
+
+  // Cover (first) + final (last).
+  slides[0].photo_url = selection.coverPhoto?.photo_url ?? heroFallback;
+  if (selection.coverPhoto?.category) slides[0].category = selection.coverPhoto.category;
+  slides[0].is_cover = true;
+  slides[n - 1].photo_url = selection.finalPhotoUrl ?? selection.coverPhoto?.photo_url ?? heroFallback;
+
+  // Subject slides = the middle ones; align positionally with subjectSlides.
+  const modelSubjectCount = n - 2;
+  const expected = selection.subjectSlides.length;
+  if (modelSubjectCount !== expected) {
+    warnings.push(
+      `carousel subject-slide count mismatch: model returned ${modelSubjectCount}, expected ${expected}; zipped best-effort by position`
+    );
+  }
+  const count = Math.min(modelSubjectCount, expected);
+  for (let k = 0; k < count; k++) {
+    slides[k + 1].photo_url = selection.subjectSlides[k].photo_url;
+    slides[k + 1].category  = selection.subjectSlides[k].category;
+  }
+}
 
 // Engine is CommonJS; lazy-imported on first use so test runs that inject
 // a mock generator (via depsOverride.generate) don't require the package
@@ -234,6 +270,28 @@ export default async function handler(req, res, depsOverride) {
       return res.status(403).json({ error: "listing does not belong to caller" });
     }
 
+    // ── 5b. (walkthrough_carousel only) Load photo labels → compute selection.
+    //
+    // Photo-driven carousels order/sequence slides from the listing's
+    // classified photos. Only this framework reads photo_labels; every other
+    // path is byte-for-byte unchanged. A read failure, no labels, or a
+    // selection with zero subject slides all leave carouselSelection null →
+    // build() + the post-parse zip take the legacy (text-only) path.
+    let carouselSelection = null;
+    if (framework_name === CAROUSEL_FRAMEWORK) {
+      const { data: photoLabels, error: plErr } = await supabase
+        .from("photo_labels")
+        .select("*")
+        .eq("listing_id", listing_id)
+        .order("sort_order", { ascending: true });
+      if (plErr) {
+        console.error("[content-generate] photo_labels fetch error (continuing text-only):", plErr);
+      } else {
+        const sel = selectCarouselPhotos(photoLabels || []);
+        if (sel.subjectSlides.length > 0) carouselSelection = sel;
+      }
+    }
+
     // ── 6. Build prompt strings ──
     let built;
     try {
@@ -241,6 +299,7 @@ export default async function handler(req, res, depsOverride) {
         voiceProfile,
         listing,
         extras,
+        carouselSelection,
       });
     } catch (buildErr) {
       console.error("[content-generate] prompt build error:", buildErr);
@@ -285,6 +344,18 @@ export default async function handler(req, res, depsOverride) {
     // hashtags[] array can never disagree on casing or content. Runs
     // before validation so the validated caption is the canonical one.
     const finalParsed = canonicalizeHashtags(parsed);
+
+    // ── 8b. (walkthrough_carousel, photo-driven) Zip the deterministically
+    //        chosen photo URLs onto the model's slides BY POSITION, using the
+    //        SAME selection that drove the prompt. Skipped entirely on the
+    //        legacy path (carouselSelection null). Non-fatal: a slide-count
+    //        deviation zips best-effort and surfaces a warning rather than
+    //        crashing.
+    if (carouselSelection && Array.isArray(finalParsed.slides)) {
+      const photoWarnings = [];
+      zipCarouselPhotos(finalParsed.slides, carouselSelection, listing, photoWarnings);
+      if (photoWarnings.length) finalParsed.photo_warnings = photoWarnings;
+    }
 
     // Per-framework union: the universal minimum every Instagram
     // listing template emits, plus any extra fields the framework

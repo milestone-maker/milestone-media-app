@@ -117,6 +117,10 @@ function ContentView() {
   const [framework, setFramework] = useState(FRAMEWORKS[0].slug);
   const [storyAngle, setStoryAngle] = useState("");
 
+  // Photo-label count for the selected listing — drives the carousel nudge.
+  // null = unknown / not applicable; a number once checked.
+  const [photoLabelCount, setPhotoLabelCount] = useState(null);
+
   // Generation state
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null);
@@ -179,6 +183,24 @@ function ContentView() {
     loadHistory(selectedListingId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedListingId]);
+
+  // ── Carousel nudge: does the selected listing have any photo labels? ──
+  // Only checked for the walkthrough_carousel framework (cheap head count).
+  useEffect(() => {
+    let cancelled = false;
+    if (framework !== "walkthrough_carousel" || !selectedListingId) {
+      setPhotoLabelCount(null);
+      return;
+    }
+    (async () => {
+      const { count } = await supabase
+        .from("photo_labels")
+        .select("id", { count: "exact", head: true })
+        .eq("listing_id", selectedListingId);
+      if (!cancelled) setPhotoLabelCount(typeof count === "number" ? count : null);
+    })();
+    return () => { cancelled = true; };
+  }, [framework, selectedListingId]);
 
   const selectedListing = listings.find((l) => l.id === selectedListingId) || null;
   const hasUsableProfile = !!voiceProfile && !!String(voiceProfile.license_number || "").trim();
@@ -350,6 +372,17 @@ function ContentView() {
           placeholder="e.g. a porch that catches the late-afternoon light"
         />
 
+        {/* Carousel nudge — photo-matched slides need labels first */}
+        {framework === "walkthrough_carousel" && photoLabelCount === 0 && (
+          <div style={{
+            marginBottom: 16, fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#e8c97a",
+            background: "rgba(201,168,76,0.08)", border: "1px solid rgba(201,168,76,0.25)",
+            borderRadius: 8, padding: "10px 12px", lineHeight: 1.5,
+          }}>
+            Analyze photos first for photo-matched carousels — scroll down to the Listing Photos panel and run analysis.
+          </div>
+        )}
+
         {/* Generate */}
         <button onClick={handleGenerate} disabled={generating} style={goldBtn(generating)}>
           {generating ? "Generating…" : "✦ Generate Content"}
@@ -402,17 +435,28 @@ function ContentView() {
             <div style={{ marginBottom: 18 }}>
               <label style={labelSt}>Carousel Slides</label>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {result.slides.map((s, i) => (
-                  <div key={i} style={{
-                    display: "flex", gap: 12, background: "rgba(0,0,0,0.2)", borderRadius: 8,
-                    padding: "10px 14px", border: "1px solid rgba(255,255,255,0.06)",
-                  }}>
-                    <span style={{ color: "#c9a84c", fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{i + 1}</span>
-                    <span style={{ color: "#ECE7DC", fontFamily: "'Jost', sans-serif", fontSize: 12.5, lineHeight: 1.6 }}>
-                      {typeof s === "string" ? s : (s.text || s.subject || JSON.stringify(s))}
-                    </span>
-                  </div>
-                ))}
+                {result.slides.map((s, i) => {
+                  const photoUrl = (s && typeof s === "object") ? s.photo_url : null;
+                  const isCover  = (s && typeof s === "object") ? s.is_cover : false;
+                  return (
+                    <div key={i} style={{
+                      display: "flex", gap: 12, alignItems: "center", background: "rgba(0,0,0,0.2)", borderRadius: 8,
+                      padding: "10px 14px", border: "1px solid rgba(255,255,255,0.06)",
+                    }}>
+                      <span style={{ color: "#c9a84c", fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 700, flexShrink: 0 }}>{i + 1}</span>
+                      {photoUrl && (
+                        <img src={photoUrl} alt="" loading="lazy" style={{
+                          width: 56, height: 42, objectFit: "cover", borderRadius: 5, flexShrink: 0,
+                          border: isCover ? "1px solid #c9a84c" : "1px solid rgba(255,255,255,0.1)",
+                        }} />
+                      )}
+                      <span style={{ color: "#ECE7DC", fontFamily: "'Jost', sans-serif", fontSize: 12.5, lineHeight: 1.6 }}>
+                        {isCover && <span style={{ color: "#c9a84c", fontSize: 9, letterSpacing: "0.1em", textTransform: "uppercase", marginRight: 8 }}>Cover</span>}
+                        {typeof s === "string" ? s : (s.text || s.subject || JSON.stringify(s))}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
