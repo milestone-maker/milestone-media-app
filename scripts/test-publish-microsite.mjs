@@ -40,7 +40,8 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = "placeholder";
 // Mutable per-test mock state — each test resets via resetMock().
 let mockState = {
   authUser:        { id: "agent-1" },
-  agent:           { id: "agent-1", role: "agent", subscription_tier: "elite", subscription_status: "active" },
+  agent:           { id: "agent-1", role: "agent", subscription_tier: "elite", subscription_status: "active", agency_name: "Bluebonnet Realty", agency_logo_url: "https://example.test/logo.png", profile_photo_url: "https://example.test/photo.png", full_name: "Dana Agent" },
+  voiceProfile:    { brokerage_name: "Bluebonnet Brokerage" },
   booking:         { id: "booking-1", agent_id: "agent-1", invoice_paid: true, selected_package: "luxury", selected_addons: [], address: "5912 Velasco" },
   mediaRows:       [],
   storageBlobs:    {},          // { file_path → fake blob }
@@ -52,7 +53,8 @@ let mockState = {
 function resetMock(overrides = {}) {
   mockState = {
     authUser:        { id: "agent-1" },
-    agent:           { id: "agent-1", role: "agent", subscription_tier: "elite", subscription_status: "active" },
+    agent:           { id: "agent-1", role: "agent", subscription_tier: "elite", subscription_status: "active", agency_name: "Bluebonnet Realty", agency_logo_url: "https://example.test/logo.png", profile_photo_url: "https://example.test/photo.png", full_name: "Dana Agent" },
+    voiceProfile:    { brokerage_name: "Bluebonnet Brokerage" },
     booking:         { id: "booking-1", agent_id: "agent-1", invoice_paid: true, selected_package: "luxury", selected_addons: [], address: "5912 Velasco" },
     mediaRows:       [],
     storageBlobs:    {},
@@ -74,6 +76,19 @@ function makeFakeClient() {
         return {
           select: () => ({
             eq: () => ({ single: async () => ({ data: mockState.agent, error: null }) }),
+          }),
+        };
+      }
+      if (table === "agent_voice_profiles") {
+        // Stage 6 white-label: handler reads brokerage_name to snapshot it.
+        // Chain: select → eq → limit → maybeSingle.
+        return {
+          select: () => ({
+            eq: () => ({
+              limit: () => ({
+                maybeSingle: async () => ({ data: mockState.voiceProfile, error: null }),
+              }),
+            }),
           }),
         };
       }
@@ -369,6 +384,43 @@ const BASE_PROPERTY_DATA = {
     pd?.hero_media_id === "media-OK");
   check("gallery_photos has only the surviving 1 photo",
     Array.isArray(pd?.gallery_photos) && pd.gallery_photos.length === 1);
+}
+
+// ── Scenario 6 — Stage 6 white-label: branding snapshotted into property_data
+{
+  console.log("\n── Scenario 6: agency branding + brokerage_name snapshot into property_data ──\n");
+  resetMock();
+  const req = makeReq({
+    bookingId: "booking-1",
+    theme:     "Prestige",
+    slug:      "5912-velasco-deadbeef",
+    propertyData: { ...BASE_PROPERTY_DATA },
+  });
+  const res = makeRes();
+  await handler(req, res);
+
+  check("status 200", res.statusCode === 200, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
+  const pd = mockState.micrositeWrites[0]?.row?.property_data;
+  check("agency_name snapshotted",       pd?.agency_name === "Bluebonnet Realty");
+  check("agency_logo_url snapshotted",   pd?.agency_logo_url === "https://example.test/logo.png");
+  check("profile_photo_url snapshotted", pd?.profile_photo_url === "https://example.test/photo.png");
+  check("brokerage_name snapshotted",    pd?.brokerage_name === "Bluebonnet Brokerage");
+
+  // Empty-branding agent → keys present but "" (fallback path, never undefined)
+  resetMock({
+    agent:        { id: "agent-1", role: "agent", subscription_tier: "elite", subscription_status: "active" },
+    voiceProfile: null,
+  });
+  const req2 = makeReq({
+    bookingId: "booking-1", theme: "Prestige", slug: "5912-velasco-deadbeef",
+    propertyData: { ...BASE_PROPERTY_DATA },
+  });
+  const res2 = makeRes();
+  await handler(req2, res2);
+  const pd2 = mockState.micrositeWrites[0]?.row?.property_data;
+  check("status 200 (empty branding)",   res2.statusCode === 200, `got ${res2.statusCode}`);
+  check("agency_name === '' when absent", pd2?.agency_name === "");
+  check("brokerage_name === '' when absent", pd2?.brokerage_name === "");
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

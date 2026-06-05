@@ -312,6 +312,23 @@ function PublicMicrosite() {
 
         setMicrosite(msData);
 
+        // Stage 6 white-label: prefer branding snapshotted into property_data
+        // at publish time. The agents / agent_voice_profiles tables are NOT
+        // anon-readable, so for a real anonymous visitor the snapshot is the
+        // only source that resolves. The live reads below remain as a fallback
+        // for authenticated self-preview and pre-snapshot legacy microsites.
+        const pd = msData.property_data || {};
+        const hasSnapshot = !!(pd.agency_name || pd.agency_logo_url || pd.profile_photo_url);
+        if (hasSnapshot) {
+          setAgentBranding({
+            full_name:         pd.agent_name || "",
+            agency_name:       pd.agency_name || "",
+            agency_logo_url:   pd.agency_logo_url || "",
+            profile_photo_url: pd.profile_photo_url || "",
+          });
+        }
+        if (pd.brokerage_name) setBrokerageName(pd.brokerage_name);
+
         if (msData.agent_id) {
           const [{ data: ab }, { data: vp }] = await Promise.all([
             supabase
@@ -326,8 +343,9 @@ function PublicMicrosite() {
               .limit(1)
               .maybeSingle(),
           ]);
-          if (ab) setAgentBranding(ab);
-          if (vp?.brokerage_name) setBrokerageName(vp.brokerage_name);
+          // Fallback only — never overwrite a resolved snapshot.
+          if (ab && !hasSnapshot) setAgentBranding(ab);
+          if (vp?.brokerage_name && !pd.brokerage_name) setBrokerageName(vp.brokerage_name);
         }
 
         setLoading(false);
@@ -338,6 +356,44 @@ function PublicMicrosite() {
     };
     fetchMicrosite();
   }, [slug]);
+
+  // ── Stage 6a white-label: reflect the agent's brand in the browser tab ──
+  // Sets the document title + favicon to the agent's agency branding while a
+  // published microsite is mounted, and restores the Milestone defaults on
+  // unmount so navigating back into the dashboard never leaves an agent's
+  // brand stuck in the tab.
+  useEffect(() => {
+    const iconEl = document.querySelector('link[rel="icon"]');
+    const appleEl = document.querySelector('link[rel="apple-touch-icon"]');
+
+    // Capture originals so cleanup restores exactly what was there.
+    const origTitle = document.title;
+    const origIconHref = iconEl ? iconEl.getAttribute("href") : null;
+    const origAppleHref = appleEl ? appleEl.getAttribute("href") : null;
+
+    const agencyName = agentBranding?.agency_name;
+    const address = microsite?.property_data?.address;
+    const logoUrl = agentBranding?.agency_logo_url;
+
+    if (agencyName && address) {
+      document.title = `${agencyName} — ${address}`;
+    } else if (agencyName) {
+      document.title = agencyName;
+    } else {
+      document.title = "Milestone Media & Photography";
+    }
+
+    if (logoUrl) {
+      if (iconEl) iconEl.setAttribute("href", logoUrl);
+      if (appleEl) appleEl.setAttribute("href", logoUrl);
+    }
+
+    return () => {
+      document.title = origTitle;
+      if (iconEl && origIconHref !== null) iconEl.setAttribute("href", origIconHref);
+      if (appleEl && origAppleHref !== null) appleEl.setAttribute("href", origAppleHref);
+    };
+  }, [agentBranding, microsite]);
 
   if (loading) {
     return (
@@ -357,10 +413,10 @@ function PublicMicrosite() {
   if (error || !microsite) {
     return (
       <div style={{
-        minHeight: "100vh", background: "#0f0f1a", display: "flex",
+        minHeight: "100vh", background: "#1a1a1a", display: "flex",
         alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16, padding: 20,
       }}>
-        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 80, color: "#C9A84C", fontWeight: 700 }}>404</div>
+        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 80, color: "#9ca3af", fontWeight: 700 }}>404</div>
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: "#fff", textAlign: "center" }}>
           Microsite not found
         </div>
