@@ -444,6 +444,20 @@ function PublicMicrosite() {
 // ============================================================
 // EDIT PROFILE & BRANDING MODAL
 // ============================================================
+// Mirror of DEFAULT_BRAND_TOKENS (src/views/Content/carouselCompose.js) —
+// used to seed the brand color/font pickers. Mirrored rather than imported
+// to avoid pulling a view module into App.jsx (circular-import sensitivity,
+// see the import note at the top of this file).
+const CAROUSEL_BRAND_DEFAULTS = {
+  bgColor:      "#FBF7EE",
+  textColor:    "#1A1A1A",
+  mutedColor:   "#6B6256",
+  accentColor:  "#C9A84C",
+  fontHeadline: "Cormorant Garamond",
+  fontBody:     "Jost",
+};
+const BRAND_FONT_OPTIONS = ["Cormorant Garamond", "Jost"];
+
 function EditProfileModal({ onClose }) {
   const { user, profile, fetchProfile } = useAuth();
 
@@ -454,6 +468,14 @@ function EditProfileModal({ onClose }) {
 
   // ── Agency branding
   const [agencyName, setAgencyName] = useState(profile?.agency_name || "");
+
+  // ── Brand tokens (color/font picker — consumed by the carousel composer)
+  const [brandBgColor, setBrandBgColor]       = useState(profile?.brand_bg_color      ?? CAROUSEL_BRAND_DEFAULTS.bgColor);
+  const [brandTextColor, setBrandTextColor]   = useState(profile?.brand_text_color    ?? CAROUSEL_BRAND_DEFAULTS.textColor);
+  const [brandMutedColor, setBrandMutedColor] = useState(profile?.brand_muted_color   ?? CAROUSEL_BRAND_DEFAULTS.mutedColor);
+  const [brandAccentColor, setBrandAccentColor] = useState(profile?.brand_accent_color ?? CAROUSEL_BRAND_DEFAULTS.accentColor);
+  const [brandFontHeadline, setBrandFontHeadline] = useState(profile?.brand_font_headline ?? CAROUSEL_BRAND_DEFAULTS.fontHeadline);
+  const [brandFontBody, setBrandFontBody]     = useState(profile?.brand_font_body     ?? CAROUSEL_BRAND_DEFAULTS.fontBody);
 
   // ── Brokerage info (consumed by the microsite chat assistant)
   const [brokerageAbout, setBrokerageAbout] = useState(profile?.brokerage_about || "");
@@ -495,6 +517,12 @@ function EditProfileModal({ onClose }) {
       phone: phone.trim() || null,
       business_address: businessAddress.trim() || null,
       agency_name: agencyName.trim() || null,
+      brand_bg_color: brandBgColor || null,
+      brand_text_color: brandTextColor || null,
+      brand_muted_color: brandMutedColor || null,
+      brand_accent_color: brandAccentColor || null,
+      brand_font_headline: brandFontHeadline || null,
+      brand_font_body: brandFontBody || null,
       brokerage_about: brokerageAbout.trim() || null,
       brokerage_url: brokerageUrl.trim() || null,
     };
@@ -696,7 +724,7 @@ function EditProfileModal({ onClose }) {
           </div>
 
           {/* Agency Name */}
-          <div style={{ marginBottom: 0 }}>
+          <div style={{ marginBottom: 18 }}>
             <label style={labelSt}>Agency Name <span style={{ color: "rgba(255,255,255,0.2)" }}>— text fallback if no logo</span></label>
             <input
               style={inputSt}
@@ -704,6 +732,50 @@ function EditProfileModal({ onClose }) {
               onChange={e => setAgencyName(e.target.value)}
               placeholder="e.g. Compass Real Estate · Keller Williams DFW"
             />
+          </div>
+
+          {/* Brand Colors & Fonts — applied to your generated content carousels */}
+          <div style={{ marginBottom: 0 }}>
+            <label style={labelSt}>Brand Colors &amp; Fonts <span style={{ color: "rgba(255,255,255,0.2)" }}>— used on your content carousels</span></label>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginTop: 4 }}>
+              {[
+                { label: "Background", value: brandBgColor,     setter: setBrandBgColor },
+                { label: "Text",       value: brandTextColor,   setter: setBrandTextColor },
+                { label: "Muted",      value: brandMutedColor,  setter: setBrandMutedColor },
+                { label: "Accent",     value: brandAccentColor, setter: setBrandAccentColor },
+              ].map(({ label, value, setter }) => (
+                <div key={label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <input
+                    type="color"
+                    value={value}
+                    onChange={e => setter(e.target.value)}
+                    aria-label={`${label} color`}
+                    style={{
+                      width: 38, height: 32, padding: 0, border: "1px solid rgba(255,255,255,0.1)",
+                      borderRadius: 6, background: "transparent", cursor: "pointer", flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.75)" }}>{label}</div>
+                    <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)" }}>{value}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10, marginTop: 12 }}>
+              <div>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>Headline Font</div>
+                <select style={inputSt} value={brandFontHeadline} onChange={e => setBrandFontHeadline(e.target.value)}>
+                  {BRAND_FONT_OPTIONS.map(f => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>Body Font</div>
+                <select style={inputSt} value={brandFontBody} onChange={e => setBrandFontBody(e.target.value)}>
+                  {BRAND_FONT_OPTIONS.map(f => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </div>
+            </div>
           </div>
 
           {divider}

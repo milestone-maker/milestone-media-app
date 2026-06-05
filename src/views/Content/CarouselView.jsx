@@ -62,7 +62,14 @@ function CardTile({ item, bt }) {
 }
 
 function CarouselView({ slides, caption, hashtags, address, stats, footer, brandTokens }) {
-  const bt = { ...DEFAULT_BRAND_TOKENS, ...(brandTokens || {}) };
+  // Merge over the Milestone defaults, but IGNORE null/undefined token values so
+  // an agent who hasn't set a given color/font falls back to the default rather
+  // than overriding it with null (a plain spread copies the nullish value and
+  // would break canvas fillStyle / font strings).
+  const bt = { ...DEFAULT_BRAND_TOKENS };
+  for (const [k, v] of Object.entries(brandTokens || {})) {
+    if (v != null) bt[k] = v;
+  }
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
 
