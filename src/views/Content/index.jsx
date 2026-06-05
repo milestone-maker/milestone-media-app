@@ -453,6 +453,12 @@ function ContentView() {
                 address={selectedListing?.address}
                 stats={carouselStats}
                 footer={carouselFooter(result.license_number)}
+                brandTokens={{
+                  bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
+                  mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
+                  fontHeadline: profile?.brand_font_headline, fontBody: profile?.brand_font_body,
+                  logoUrl: profile?.agency_logo_url || undefined,
+                }}
               />
             </div>
           )}
@@ -558,6 +564,12 @@ function ContentView() {
                             address={selectedListing?.address}
                             stats={carouselStats}
                             footer={carouselFooter(h.license_number)}
+                            brandTokens={{
+                              bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
+                              mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
+                              fontHeadline: profile?.brand_font_headline, fontBody: profile?.brand_font_body,
+                              logoUrl: profile?.agency_logo_url || undefined,
+                            }}
                           />
                         </div>
                       )}
