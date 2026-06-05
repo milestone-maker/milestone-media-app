@@ -70,7 +70,10 @@ function CardTile({ item, bt }) {
 // used at download) for the open slide and appends the <canvas> element to the
 // modal. Display-only: we never call toBlob/toDataURL here, so there is no taint
 // concern at all. Lazy — only the open slide composes; prev/next re-render.
-function SlidePreviewModal({ seq, index, bt, onClose, onPrev, onNext }) {
+const STATEMENT_MAX = 200;   // hard cap to prevent pathological overflow
+const STATEMENT_WARN = 140;  // soft warning — past this, lines may shrink/overflow
+
+function SlidePreviewModal({ seq, index, bt, onClose, onPrev, onNext, onUpdateStatement, canPersist }) {
   const containerRef = useRef(null);
   const logoRef  = useRef({ loaded: false, img: null }); // logo loaded once, cached
   const fontsRef = useRef(false);                         // ensureFonts run once
@@ -80,6 +83,20 @@ function SlidePreviewModal({ seq, index, bt, onClose, onPrev, onNext }) {
   const count = seq.length;
   const atFirst = index <= 0;
   const atLast  = index >= count - 1;
+  const isCard  = item.type === "card";
+  const canEdit = isCard && typeof onUpdateStatement === "function";
+
+  // Inline edit state. Re-seeded whenever the open slide changes.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(isCard ? (item.statement || "") : "");
+  useEffect(() => {
+    setEditing(false);
+    setDraft(item.type === "card" ? (item.statement || "") : "");
+  }, [index]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-fire the canvas render when the statement changes (an edit), not just on
+  // index/bt. statementKey is "" for photo slides (no editable text).
+  const statementKey = isCard ? (item.statement || "") : "";
 
   // Render the current slide on demand. Keyed on index + bt-by-value (bt is
   // rebuilt each parent render, so stringify it to avoid spurious re-renders).
@@ -119,18 +136,23 @@ function SlidePreviewModal({ seq, index, bt, onClose, onPrev, onNext }) {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index, btKey]);
+  }, [index, btKey, statementKey]);
 
-  // Keyboard: ←/→ step, Esc closes.
+  // Keyboard: ←/→ step, Esc closes. While editing, don't navigate/close — Esc
+  // cancels the edit and arrows move the cursor inside the textarea.
   useEffect(() => {
     const onKey = (e) => {
+      if (editing) {
+        if (e.key === "Escape") { setEditing(false); setDraft(item.statement || ""); }
+        return; // swallow arrows/Esc so they don't step/close while editing
+      }
       if (e.key === "Escape") onClose();
       else if (e.key === "ArrowLeft" && !atFirst) onPrev();
       else if (e.key === "ArrowRight" && !atLast) onNext();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, onPrev, onNext, atFirst, atLast]);
+  }, [onClose, onPrev, onNext, atFirst, atLast, editing, item]);
 
   const navBtn = (disabled) => ({
     background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.18)",
@@ -182,11 +204,68 @@ function SlidePreviewModal({ seq, index, bt, onClose, onPrev, onNext }) {
 
         <button onClick={onNext} disabled={atLast} title="Next (→)" style={navBtn(atLast)}>›</button>
       </div>
+
+      {/* Card text editor (card slides only) */}
+      {canEdit && (
+        <div onClick={(e) => e.stopPropagation()} style={{ width: "min(95vw, 520px)" }}>
+          {!editing ? (
+            <button
+              onClick={() => { setDraft(item.statement || ""); setEditing(true); }}
+              style={{
+                background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.3)",
+                color: "#e8c97a", borderRadius: 8, padding: "8px 14px", cursor: "pointer",
+                fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: "0.04em",
+              }}
+            >✎ Edit text</button>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <textarea
+                value={draft}
+                maxLength={STATEMENT_MAX}
+                autoFocus
+                onChange={(e) => setDraft(e.target.value)}
+                rows={3}
+                style={{
+                  width: "100%", background: "rgba(255,255,255,0.06)",
+                  border: "1px solid rgba(255,255,255,0.18)", borderRadius: 8, padding: "10px 12px",
+                  color: "#fff", fontFamily: "'Jost', sans-serif", fontSize: 14, lineHeight: 1.4,
+                  outline: "none", resize: "vertical", boxSizing: "border-box",
+                }}
+              />
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: draft.length > STATEMENT_WARN ? "#e8c97a" : "rgba(255,255,255,0.4)" }}>
+                  {draft.length}/{STATEMENT_MAX}
+                  {draft.length > STATEMENT_WARN && " · Long lines may shrink or overflow the card"}
+                  {!canPersist && " · edit not saved (regenerate to enable saving)"}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={() => { setDraft(item.statement || ""); setEditing(false); }}
+                    style={{
+                      background: "transparent", border: "1px solid rgba(255,255,255,0.18)",
+                      color: "rgba(255,255,255,0.6)", borderRadius: 8, padding: "7px 14px", cursor: "pointer",
+                      fontFamily: "'Jost', sans-serif", fontSize: 12,
+                    }}
+                  >Cancel</button>
+                  <button
+                    onClick={() => { onUpdateStatement(item.sourceIndex, draft.trim()); setEditing(false); }}
+                    style={{
+                      background: "linear-gradient(135deg, #C9A84C 0%, #e8c97a 100%)", border: "none",
+                      color: "#0a1628", borderRadius: 8, padding: "7px 16px", cursor: "pointer",
+                      fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 700, letterSpacing: "0.04em",
+                    }}
+                  >Save</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function CarouselView({ slides, caption, hashtags, address, stats, footer, brandTokens }) {
+function CarouselView({ slides, caption, hashtags, address, stats, footer, brandTokens, rowId, onUpdateStatement }) {
   // Merge over the Milestone defaults, but IGNORE null/undefined token values so
   // an agent who hasn't set a given color/font falls back to the default rather
   // than overriding it with null (a plain spread copies the nullish value and
@@ -285,6 +364,12 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
           onClose={() => setLightboxIndex(null)}
           onPrev={() => setLightboxIndex((i) => Math.max(0, i - 1))}
           onNext={() => setLightboxIndex((i) => Math.min(seq.length - 1, i + 1))}
+          canPersist={!!rowId}
+          onUpdateStatement={
+            typeof onUpdateStatement === "function"
+              ? (sourceIndex, text) => onUpdateStatement(rowId, sourceIndex, text)
+              : undefined
+          }
         />
       )}
     </div>
