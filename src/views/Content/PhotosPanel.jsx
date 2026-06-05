@@ -43,6 +43,29 @@ const CATEGORY_LABELS = {
 
 const LOW_CONFIDENCE = 0.7; // below this → flagged for the agent's attention
 
+// ── Per-photo feature editing (Stage 1) ──
+const MAX_FEATURE_LEN = 40;  // a "feature" is a short phrase, e.g. "marble island"
+const MAX_FEATURES    = 8;   // keep the array tidy (generation only uses the first 3)
+
+// Normalize a features array before persisting: trim each entry, drop
+// empty/whitespace-only, de-duplicate case-insensitively (keep the first
+// occurrence's casing), cap each entry's length, and cap the count. An empty
+// array is valid (means "no features noted").
+export function normalizeFeatures(arr) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of Array.isArray(arr) ? arr : []) {
+    const v = String(raw == null ? "" : raw).trim().slice(0, MAX_FEATURE_LEN).trim();
+    if (!v) continue;
+    const key = v.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(v);
+    if (out.length >= MAX_FEATURES) break;
+  }
+  return out;
+}
+
 // ── Duplicated style tokens (match Content/index.jsx) ──
 const panelSt = {
   background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)",
@@ -176,6 +199,27 @@ function PhotosPanel({ listingId, listingAddress }) {
     }
   };
 
+  // ── Correction: edit a photo's features (direct client update; RLS ok) ──
+  //    Mirrors correctCategory exactly: optimistic update, per-tile saving
+  //    state, revert on error. Marks the row agent_corrected so re-analyze
+  //    won't overwrite the agent's edits.
+  const updateFeatures = async (label, nextFeatures) => {
+    const features = normalizeFeatures(nextFeatures);
+    const prev = labels;
+    setLabels((ls) => ls.map((l) => (l.id === label.id ? { ...l, features, agent_corrected: true } : l)));
+    setSavingId(label.id);
+    const { error: upErr } = await supabase
+      .from("photo_labels")
+      .update({ features, agent_corrected: true, updated_at: new Date().toISOString() })
+      .eq("id", label.id);
+    setSavingId(null);
+    if (upErr) {
+      console.error("[PhotosPanel] features save error:", upErr);
+      setLabels(prev); // revert
+      setError("Couldn't save that change. Please try again.");
+    }
+  };
+
   // ── Reset a correction back to auto (re-opens it to future re-analysis) ──
   const resetToAuto = async (label) => {
     const prev = labels;
@@ -303,6 +347,7 @@ function PhotosPanel({ listingId, listingAddress }) {
                   onSelect={() => setSelectedId(selectedId === l.id ? null : l.id)}
                   onCorrect={(cat2) => correctCategory(l, cat2)}
                   onReset={() => resetToAuto(l)}
+                  onUpdateFeatures={(arr) => updateFeatures(l, arr)}
                 />
               ))}
             </div>
@@ -321,11 +366,26 @@ function PhotosPanel({ listingId, listingAddress }) {
 }
 
 // ── Single photo tile ──
-function PhotoTile({ label, selected, saving, onSelect, onCorrect, onReset }) {
+function PhotoTile({ label, selected, saving, onSelect, onCorrect, onReset, onUpdateFeatures }) {
   const conf = typeof label.confidence === "number" ? label.confidence : null;
   const flagged = conf !== null && conf < LOW_CONFIDENCE; // 'other' flags only if also low-confidence (same rule)
   const corrected = !!label.agent_corrected;
   const features = Array.isArray(label.features) ? label.features : [];
+
+  // Local text for the "add a feature" input (committed on Enter / +).
+  const [featInput, setFeatInput] = useState("");
+  const stop = (e) => e.stopPropagation();
+  const addFeature = () => {
+    const v = featInput.trim();
+    if (!v) return;
+    // No-op if it's a case-insensitive duplicate of an existing chip.
+    if (features.some((f) => String(f).toLowerCase() === v.toLowerCase())) { setFeatInput(""); return; }
+    onUpdateFeatures([...features, v]);
+    setFeatInput("");
+  };
+  const removeFeature = (idx) => {
+    onUpdateFeatures(features.filter((_, i) => i !== idx));
+  };
 
   return (
     <div style={{ width: 150 }}>
@@ -366,17 +426,6 @@ function PhotoTile({ label, selected, saving, onSelect, onCorrect, onReset }) {
           }}>review</span>
         )}
 
-        {/* Selected → features overlay */}
-        {selected && (
-          <div style={{
-            position: "absolute", inset: 0, background: "rgba(8,18,40,0.82)", padding: "8px 9px",
-            display: "flex", flexDirection: "column", justifyContent: "center", gap: 4,
-          }}>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 9.5, color: "rgba(255,255,255,0.85)", lineHeight: 1.45 }}>
-              {features.length ? features.join(", ") : "No features noted"}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Category dropdown (readable labels, canonical values) */}
@@ -406,6 +455,69 @@ function PhotoTile({ label, selected, saving, onSelect, onCorrect, onReset }) {
             textDecoration: "underline", padding: 0,
           }}
         >reset to auto</button>
+      )}
+
+      {/* Selected → editable feature chips. Sized to content (sits below the
+          thumbnail, not clipped inside it). All interactions stopPropagation so
+          they don't toggle tile selection; disabled while a save is in flight. */}
+      {selected && (
+        <div onClick={stop} style={{ width: 150, marginTop: 6, opacity: saving ? 0.6 : 1 }}>
+          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 9, color: "rgba(255,255,255,0.4)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>
+            Features
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+            {features.length === 0 && (
+              <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 9.5, color: "rgba(255,255,255,0.3)" }}>No features noted</span>
+            )}
+            {features.map((f, i) => (
+              <span key={`${f}-${i}`} style={{
+                display: "inline-flex", alignItems: "center", gap: 4,
+                background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.3)",
+                borderRadius: 999, padding: "2px 6px 2px 8px",
+                fontFamily: "'Jost', sans-serif", fontSize: 9.5, color: "#e8c97a",
+              }}>
+                {f}
+                <button
+                  onClick={(e) => { stop(e); removeFeature(i); }}
+                  disabled={saving}
+                  title="Remove"
+                  style={{
+                    background: "none", border: "none", cursor: saving ? "default" : "pointer",
+                    color: "rgba(232,201,122,0.7)", fontSize: 11, lineHeight: 1, padding: 0,
+                  }}
+                >×</button>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 4 }}>
+            <input
+              value={featInput}
+              maxLength={MAX_FEATURE_LEN}
+              disabled={saving}
+              onClick={stop}
+              onChange={(e) => setFeatInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { stop(e); e.preventDefault(); addFeature(); } }}
+              placeholder="Add a detail (e.g. marble island)"
+              style={{
+                flex: 1, minWidth: 0, background: "rgba(255,255,255,0.05)",
+                border: "1px solid rgba(255,255,255,0.12)", borderRadius: 7, padding: "5px 7px",
+                color: "#fff", fontFamily: "'Jost', sans-serif", fontSize: 10, outline: "none",
+              }}
+            />
+            <button
+              onClick={(e) => { stop(e); addFeature(); }}
+              disabled={saving || !featInput.trim()}
+              title="Add feature"
+              style={{
+                flexShrink: 0, width: 28, background: "rgba(201,168,76,0.12)",
+                border: "1px solid rgba(201,168,76,0.3)", borderRadius: 7,
+                color: "#e8c97a", fontFamily: "'Jost', sans-serif", fontSize: 14, lineHeight: 1,
+                cursor: saving || !featInput.trim() ? "default" : "pointer",
+                opacity: saving || !featInput.trim() ? 0.5 : 1,
+              }}
+            >+</button>
+          </div>
+        </div>
       )}
     </div>
   );
