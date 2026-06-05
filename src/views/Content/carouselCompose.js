@@ -310,7 +310,14 @@ export async function composeCarousel({ slides, stats, footer, brandTokens } = {
   await ensureFonts(bt);
 
   let logoImg = null;
-  if (bt.logoUrl) { try { logoImg = await loadImage(bt.logoUrl, null); } catch { logoImg = null; } }
+  // Load the logo in CORS mode ("anonymous"), NOT null. A non-CORS request taints
+  // the card canvas (drawImage of a cross-origin image), and the later toBlob then
+  // throws SecurityError ("The operation is insecure" / "Tainted canvases may not
+  // be exported"), failing the whole download. The agent-branding bucket sends
+  // Access-Control-Allow-Origin: *, so the CORS load succeeds. If a logo host has
+  // no CORS, the load fails and the catch leaves logoImg = null (card renders
+  // without a logo) — strictly better than tainting the export.
+  if (bt.logoUrl) { try { logoImg = await loadImage(bt.logoUrl, "anonymous"); } catch { logoImg = null; } }
 
   const seq = buildSlideSequence(slides, { stats, footer });
   const files = [];
@@ -319,16 +326,23 @@ export async function composeCarousel({ slides, stats, footer, brandTokens } = {
     idx += 1;
     const num = String(idx).padStart(2, "0");
     if (item.type === "card") {
-      const canvas = await renderCardSlide(item, bt, logoImg);
-      const blob = await canvasToBlob(canvas, "image/png");
-      files.push({ name: `${num}_card.png`, blob });
+      try {
+        const canvas = await renderCardSlide(item, bt, logoImg);
+        const blob = await canvasToBlob(canvas, "image/png");
+        files.push({ name: `${num}_card.png`, blob });
+      } catch (e) {
+        // Skip a card that fails to compose/export (e.g. a tainted canvas) rather
+        // than failing the whole ZIP. Numbering stays monotonic.
+        console.warn(`[composeCarousel] skipped slide ${num} (card, kind=${item.kind || "?"}):`, e?.message || e);
+      }
     } else {
       try {
         const canvas = await renderPhotoSlide(item.photo_url, { category: item.category, brandTokens: bt });
         const blob = await canvasToBlob(canvas, "image/jpeg", 0.92);
         files.push({ name: `${num}_photo.jpg`, blob });
-      } catch {
+      } catch (e) {
         // Skip a photo that fails to load; keep numbering monotonic.
+        console.warn(`[composeCarousel] skipped slide ${num} (photo, category=${item.category || "?"}):`, e?.message || e);
       }
     }
   }
