@@ -122,7 +122,7 @@ export default async function handler(req, res, depsOverride) {
     // ── 2. Resolve agent profile (for role + subscription state) ──
     const { data: profile, error: profileErr } = await supabase
       .from("agents")
-      .select("id, role, subscription_tier, subscription_status")
+      .select("id, role, subscription_tier, subscription_status, agency_name, agency_logo_url, profile_photo_url, full_name")
       .eq("id", authUser.id)
       .single();
     if (profileErr || !profile) {
@@ -133,6 +133,18 @@ export default async function handler(req, res, depsOverride) {
       tier: profile.subscription_tier || null,
       status: profile.subscription_status || null,
     };
+
+    // ── 2b. Resolve brokerage name (Stage 6 white-label snapshot) ──
+    //   brokerage_name lives on agent_voice_profiles (1:many per agent).
+    //   Read with the service-role client (RLS-exempt) so it can be frozen
+    //   into property_data below for the anonymous visitor view. Best-effort:
+    //   a missing/absent row resolves to "" and never blocks the publish.
+    const { data: voiceProfile } = await supabase
+      .from("agent_voice_profiles")
+      .select("brokerage_name")
+      .eq("agent_id", authUser.id)
+      .limit(1)
+      .maybeSingle();
 
     // ── 3. Validate request body ──
     const { bookingId, theme, slug, propertyData } = req.body || {};
@@ -291,6 +303,13 @@ export default async function handler(req, res, depsOverride) {
       agent_name: propertyData.agentName || "",
       agent_phone: propertyData.agentPhone || "",
       agent_email: propertyData.agentEmail || "",
+      // Stage 6 white-label: snapshot the agent's branding so the anonymous
+      // visitor view can read it from property_data (the agents and
+      // agent_voice_profiles tables are not anon-readable).
+      agency_name: profile.agency_name || "",
+      agency_logo_url: profile.agency_logo_url || "",
+      profile_photo_url: profile.profile_photo_url || "",
+      brokerage_name: voiceProfile?.brokerage_name || "",
       hero_img: heroImg,
       hero_media_id: heroMediaId,
       listing_id: propertyData.listingId || null,

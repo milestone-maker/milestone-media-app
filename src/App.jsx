@@ -312,6 +312,23 @@ function PublicMicrosite() {
 
         setMicrosite(msData);
 
+        // Stage 6 white-label: prefer branding snapshotted into property_data
+        // at publish time. The agents / agent_voice_profiles tables are NOT
+        // anon-readable, so for a real anonymous visitor the snapshot is the
+        // only source that resolves. The live reads below remain as a fallback
+        // for authenticated self-preview and pre-snapshot legacy microsites.
+        const pd = msData.property_data || {};
+        const hasSnapshot = !!(pd.agency_name || pd.agency_logo_url || pd.profile_photo_url);
+        if (hasSnapshot) {
+          setAgentBranding({
+            full_name:         pd.agent_name || "",
+            agency_name:       pd.agency_name || "",
+            agency_logo_url:   pd.agency_logo_url || "",
+            profile_photo_url: pd.profile_photo_url || "",
+          });
+        }
+        if (pd.brokerage_name) setBrokerageName(pd.brokerage_name);
+
         if (msData.agent_id) {
           const [{ data: ab }, { data: vp }] = await Promise.all([
             supabase
@@ -326,8 +343,9 @@ function PublicMicrosite() {
               .limit(1)
               .maybeSingle(),
           ]);
-          if (ab) setAgentBranding(ab);
-          if (vp?.brokerage_name) setBrokerageName(vp.brokerage_name);
+          // Fallback only — never overwrite a resolved snapshot.
+          if (ab && !hasSnapshot) setAgentBranding(ab);
+          if (vp?.brokerage_name && !pd.brokerage_name) setBrokerageName(vp.brokerage_name);
         }
 
         setLoading(false);

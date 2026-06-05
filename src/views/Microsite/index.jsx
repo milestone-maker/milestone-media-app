@@ -236,6 +236,12 @@ function MicrositePreview({ data, theme, listingPhotos, listingVideo, listingFlo
 function MicrositeView() {
   const { user, profile } = useAuth();
   const isAdmin = profile?.role === "admin";
+  // Stage 6 white-label: branding is "complete" when the agent has both an
+  // agency name and a logo — the two fields that actually replace "Milestone
+  // Media" in the published nav, footer, browser tab, and favicon. Drives the
+  // build-step heads-up banner and the soft publish warning.
+  const brandingComplete = !!(profile?.agency_name && profile?.agency_logo_url);
+  const [brandingNoticeDismissed, setBrandingNoticeDismissed] = useState(false);
   const editLoadRef = useRef(false); // skip sourceType reset when loading for edit
   // When loading a published microsite for edit, the listing/booking source
   // effects must NOT overwrite the form fields we just restored from the
@@ -769,6 +775,15 @@ function MicrositeView() {
   };
 
   const handlePublish = async () => {
+    // Stage 6 white-label: soft, non-blocking warning when the agent has no
+    // agency branding. Publishing still proceeds on confirm — the public page
+    // simply falls back to the default Milestone branding.
+    if (!brandingComplete) {
+      const proceed = window.confirm(
+        "Publish without your agency branding? Your logo and agency name won't appear — visitors will see the default Milestone branding. You can add branding in Edit Profile & Branding and republish anytime."
+      );
+      if (!proceed) return;
+    }
     try {
       // Publish is now a server-side operation. The endpoint validates
       // entitlement, copies booking media into the public bucket, builds
@@ -1388,6 +1403,31 @@ function MicrositeView() {
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 32, color: "#fff", marginBottom: 4 }}>Microsite Generator</div>
         <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Build a branded property page in 60 seconds.</div>
       </div>
+
+      {/* Stage 6 white-label heads-up — shown until the agent adds agency
+          name + logo. Dismiss is session-only (reappears next session if
+          still incomplete). */}
+      {!brandingComplete && !brandingNoticeDismissed && (
+        <div style={{
+          display: "flex", alignItems: "flex-start", gap: 12,
+          background: "rgba(201,168,76,0.08)", border: "1px solid rgba(201,168,76,0.35)",
+          borderRadius: 10, padding: "14px 16px",
+        }}>
+          <div style={{ fontSize: 16, lineHeight: "20px" }}>✨</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, fontWeight: 600, color: "#e5c97e", marginBottom: 4 }}>
+              Add your branding before you publish
+            </div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.6)", lineHeight: 1.5 }}>
+              Add your agency name and logo under <strong style={{ color: "rgba(255,255,255,0.85)" }}>Edit Profile &amp; Branding</strong> so your branding — not Milestone's — appears on published microsites. Your brokerage name (shown in the microsite chat) lives under <strong style={{ color: "rgba(255,255,255,0.85)" }}>Voice Profile</strong>.
+            </div>
+          </div>
+          <button onClick={() => setBrandingNoticeDismissed(true)} style={{
+            background: "none", border: "none", color: "rgba(255,255,255,0.4)",
+            cursor: "pointer", fontSize: 16, lineHeight: "20px", padding: 0, flexShrink: 0,
+          }} aria-label="Dismiss">×</button>
+        </div>
+      )}
 
       {/* My Published Microsites */}
       {myMicrosites.length > 0 && (
