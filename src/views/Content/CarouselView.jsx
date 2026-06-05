@@ -6,11 +6,15 @@
 // with "Download all slides" (client-composed ZIP) and one-click copy of the
 // caption + hashtags. Composition is on-demand at download — nothing is stored.
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   buildSlideSequence,
   downloadCarouselZip,
   DEFAULT_BRAND_TOKENS,
+  renderCardSlide,
+  renderPhotoSlide,
+  ensureFonts,
+  loadImage,
 } from "./carouselCompose";
 
 function MiniCopy({ text, label }) {
@@ -61,6 +65,127 @@ function CardTile({ item, bt }) {
   );
 }
 
+// ── Full-size slide preview (lightbox) ──────────────────────────────────────
+// Renders the ACTUAL carousel canvas (the same renderCardSlide/renderPhotoSlide
+// used at download) for the open slide and appends the <canvas> element to the
+// modal. Display-only: we never call toBlob/toDataURL here, so there is no taint
+// concern at all. Lazy — only the open slide composes; prev/next re-render.
+function SlidePreviewModal({ seq, index, bt, onClose, onPrev, onNext }) {
+  const containerRef = useRef(null);
+  const logoRef  = useRef({ loaded: false, img: null }); // logo loaded once, cached
+  const fontsRef = useRef(false);                         // ensureFonts run once
+  const [status, setStatus] = useState("rendering");      // "rendering" | "ready" | "error"
+
+  const item = seq[index];
+  const count = seq.length;
+  const atFirst = index <= 0;
+  const atLast  = index >= count - 1;
+
+  // Render the current slide on demand. Keyed on index + bt-by-value (bt is
+  // rebuilt each parent render, so stringify it to avoid spurious re-renders).
+  const btKey = JSON.stringify(bt);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setStatus("rendering");
+      try {
+        if (!fontsRef.current) { await ensureFonts(bt); fontsRef.current = true; }
+        if (!logoRef.current.loaded) {
+          logoRef.current.loaded = true;
+          if (bt.logoUrl) {
+            try { logoRef.current.img = await loadImage(bt.logoUrl, "anonymous"); }
+            catch { logoRef.current.img = null; }
+          }
+        }
+        const canvas = item.type === "card"
+          ? await renderCardSlide(item, bt, logoRef.current.img)
+          : await renderPhotoSlide(item.photo_url, { category: item.category, brandTokens: bt });
+        if (cancelled) return; // a newer slide was opened — drop this stale canvas
+        const host = containerRef.current;
+        if (!host) return;
+        host.innerHTML = "";
+        canvas.style.display = "block";
+        canvas.style.maxHeight = "85vh";
+        canvas.style.maxWidth = "95vw";
+        canvas.style.width = "auto";
+        canvas.style.height = "auto";
+        canvas.style.borderRadius = "8px";
+        canvas.style.boxShadow = "0 20px 60px rgba(0,0,0,0.6)";
+        host.appendChild(canvas);
+        setStatus("ready");
+      } catch {
+        if (!cancelled) setStatus("error");
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index, btKey]);
+
+  // Keyboard: ←/→ step, Esc closes.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft" && !atFirst) onPrev();
+      else if (e.key === "ArrowRight" && !atLast) onNext();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose, onPrev, onNext, atFirst, atLast]);
+
+  const navBtn = (disabled) => ({
+    background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.18)",
+    color: "#fff", borderRadius: 999, width: 44, height: 44, fontSize: 22, lineHeight: 1,
+    cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.3 : 1, flexShrink: 0,
+  });
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, zIndex: 1000, background: "rgba(4,8,16,0.88)",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        padding: "16px", gap: 14,
+      }}
+    >
+      {/* Top bar: counter + close */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "min(95vw, 520px)" }}
+      >
+        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.6)", letterSpacing: "0.06em" }}>
+          {index + 1} / {count}
+        </div>
+        <button
+          onClick={onClose}
+          title="Close (Esc)"
+          style={{ background: "none", border: "none", color: "rgba(255,255,255,0.6)", cursor: "pointer", fontSize: 26, lineHeight: 1, padding: 0 }}
+        >×</button>
+      </div>
+
+      {/* Slide + nav arrows */}
+      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 14, maxWidth: "100%" }}>
+        <button onClick={onPrev} disabled={atFirst} title="Previous (←)" style={navBtn(atFirst)}>‹</button>
+
+        <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minWidth: 0 }}>
+          <div ref={containerRef} style={{ display: status === "ready" ? "block" : "none" }} />
+          {status === "rendering" && (
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.6)", padding: "60px 40px" }}>
+              Rendering…
+            </div>
+          )}
+          {status === "error" && (
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#f87171", padding: "60px 40px", textAlign: "center" }}>
+              Couldn't render this slide.
+            </div>
+          )}
+        </div>
+
+        <button onClick={onNext} disabled={atLast} title="Next (→)" style={navBtn(atLast)}>›</button>
+      </div>
+    </div>
+  );
+}
+
 function CarouselView({ slides, caption, hashtags, address, stats, footer, brandTokens }) {
   // Merge over the Milestone defaults, but IGNORE null/undefined token values so
   // an agent who hasn't set a given color/font falls back to the default rather
@@ -72,6 +197,7 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
   }
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [lightboxIndex, setLightboxIndex] = useState(null); // open slide in the preview modal, or null
 
   if (!Array.isArray(slides) || slides.length === 0) return null;
 
@@ -124,7 +250,11 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
         {seq.map((item, i) => (
           <div key={i} style={{ width: 120 }}>
-            <div style={{ position: "relative" }}>
+            <div
+              onClick={() => setLightboxIndex(i)}
+              title="Click to preview full size"
+              style={{ position: "relative", cursor: "pointer" }}
+            >
               {item.type === "card" ? (
                 <CardTile item={item} bt={bt} />
               ) : (
@@ -146,6 +276,17 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
           </div>
         ))}
       </div>
+
+      {lightboxIndex !== null && (
+        <SlidePreviewModal
+          seq={seq}
+          index={lightboxIndex}
+          bt={bt}
+          onClose={() => setLightboxIndex(null)}
+          onPrev={() => setLightboxIndex((i) => Math.max(0, i - 1))}
+          onNext={() => setLightboxIndex((i) => Math.min(seq.length - 1, i + 1))}
+        />
+      )}
     </div>
   );
 }
