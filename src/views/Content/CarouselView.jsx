@@ -128,7 +128,7 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
               {item.type === "card" ? (
                 <CardTile item={item} bt={bt} />
               ) : (
-                <img src={item.photo_url} alt="" loading="lazy" style={{
+                <img src={item.photo_url} alt="" loading="lazy" crossOrigin="anonymous" style={{
                   width: 120, height: 150, objectFit: "cover", borderRadius: 6,
                   border: "1px solid rgba(255,255,255,0.1)", display: "block",
                 }} />
