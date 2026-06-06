@@ -994,10 +994,12 @@ const CAROUSEL_LABELS = [
   check("P3f: terse text also preserved alongside statement", s[1]?.text === "overlay 0");
 }
 
-// P3g — Style B budget: endpoint passes maxSubjects:3, so even with many
-// qualifying rooms only 3 subject photos are selected (cover + 3).
+// P3g — Stage 4 required-rooms: selection yields the present required rooms
+// (facade + living + kitchen here; no primary bed/bath, backyard dropped because
+// no pool, dining excluded), so exactly 3 subjects in required-room order.
 {
-  // drone cover + 5 rooms qualifying; selection should yield exactly 3 subjects.
+  // drone cover + facade/backyard/living/dining/kitchen qualifying, NO pool →
+  // present required rooms = front_facade, living, kitchen → 3 subjects.
   const manyLabels = [
     { id: "g1", listing_id: LISTING_ID, photo_url: "DRONE", category: "drone",        confidence: 0.9, agent_corrected: false, sort_order: 0, features: [] },
     { id: "g2", listing_id: LISTING_ID, photo_url: "FRONT", category: "front_facade", confidence: 0.9, agent_corrected: false, sort_order: 1, features: [] },
@@ -1006,7 +1008,7 @@ const CAROUSEL_LABELS = [
     { id: "g5", listing_id: LISTING_ID, photo_url: "DIN",   category: "dining",       confidence: 0.9, agent_corrected: false, sort_order: 4, features: [] },
     { id: "g6", listing_id: LISTING_ID, photo_url: "KIT",   category: "kitchen",      confidence: 0.9, agent_corrected: false, sort_order: 5, features: [] },
   ];
-  cannedOverride = cannedCarousel(3); // 5 slides — matches the 3-subject budget
+  cannedOverride = cannedCarousel(3); // 5 slides — matches the 3 present required rooms
   const res = await callHandler({
     body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "walkthrough_carousel" },
     supabaseOverride: makeSupabaseMock({ photoLabels: manyLabels }),
@@ -1014,10 +1016,10 @@ const CAROUSEL_LABELS = [
   cannedOverride = null;
   const s = res.body?.slides || [];
   check("P3g: 200", res.statusCode === 200);
-  check("P3g: exactly 5 slides (cover + 3 + final) — budget honored", s.length === 5, `got ${s.length}`);
+  check("P3g: exactly 5 slides (cover + 3 + final)", s.length === 5, `got ${s.length}`);
   check("P3g: no count-mismatch warning (selection matched model)", res.body?.photo_warnings === undefined);
-  check("P3g: 3 subject photos = FRONT, BACK, LIV (locked order, budget 3)",
-    s[1]?.photo_url === "FRONT" && s[2]?.photo_url === "BACK" && s[3]?.photo_url === "LIV");
+  check("P3g: subjects = FRONT, LIV, KIT (required-room order; BACK dropped no-pool, DIN excluded)",
+    s[1]?.photo_url === "FRONT" && s[2]?.photo_url === "LIV" && s[3]?.photo_url === "KIT");
 }
 
 // ── Unit tests: canonicalizeHashtags ─────────────────────────────────

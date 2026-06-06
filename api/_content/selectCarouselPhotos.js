@@ -5,22 +5,24 @@
 // and positional zipping (attaching photo_url onto the model's slides). No IO,
 // no side effects — fully unit-testable.
 //
-// Selection rules (locked):
+// Selection rules (Stage 4 — required rooms, locked):
 //   • Includable photo: agent_corrected === true (always), OR confidence >= 0.70.
-//   • Category order (cover candidates + subject order; 'other' excluded):
-//       drone, front_facade, backyard, living, dining, kitchen,
-//       primary_bedroom, primary_bathroom
 //   • Best within a category: prefer agent_corrected, then highest confidence,
 //     then lowest sort_order.
 //   • COVER: best drone, else best front_facade, else null (caller falls back
 //     to the listing/microsite hero_img). The cover's category is NOT repeated
 //     as a subject slide.
-//   • SUBJECT SLIDES: one best photo per present category in the locked order,
-//     excluding the cover's category.
-//   • FILL: if fewer than MAX_PHOTO_SLIDES subject slides, add additional
-//     photos from the showcase categories (kitchen, living, backyard,
-//     primary_bedroom — in that priority), one extra per category per pass
-//     (round-robin), next-best by confidence, until MAX_PHOTO_SLIDES.
+//   • SUBJECT SLIDES: a FIXED required-room walk (no cap, no fill), best photo
+//     per category in this exact order, skipping any room with no includable
+//     photo:
+//       front_facade (only when it is NOT the cover — i.e. when a drone covers,
+//                     so the facade always appears: as cover without a drone,
+//                     as the first beat with one),
+//       living, kitchen, primary_bedroom, primary_bathroom,
+//       backyard — ONLY when a pool is detected.
+//     Exactly this set — dining and every non-listed category are excluded.
+//   • POOL: case-insensitive substring "pool" in the features of ANY includable
+//     photo for the listing.
 //   • FINAL slide reuses the cover photo.
 
 export const CAROUSEL_CATEGORY_ORDER = [
@@ -34,12 +36,17 @@ export const CAROUSEL_CATEGORY_ORDER = [
   "primary_bathroom",
 ];
 
-const SHOWCASE_FILL_PRIORITY = ["kitchen", "living", "backyard", "primary_bedroom"];
+// Required subject rooms, in carousel order. backyard is appended conditionally
+// (pool only). front_facade is skipped automatically when it is the cover.
+const REQUIRED_SUBJECT_ORDER = [
+  "front_facade",
+  "living",
+  "kitchen",
+  "primary_bedroom",
+  "primary_bathroom",
+];
+
 const CONFIDENCE_FLOOR = 0.7;
-// Default subject-photo budget. Style B (statement-then-reveal) passes a smaller
-// budget (~3) since each beat costs two carousel slots (card + photo); a future
-// Style A can pass a larger one. Parameterized via opts.maxSubjects.
-const MAX_PHOTO_SLIDES = 8;
 
 function includable(l) {
   if (!l || typeof l.photo_url !== "string" || !l.photo_url) return false;
@@ -59,6 +66,15 @@ function bestFirst(a, b) {
 
 const keyOf = (l) => (l.id != null ? `id:${l.id}` : `url:${l.photo_url}`);
 
+// True when any includable photo's features mention a pool (free-text signal).
+function hasPool(labels) {
+  return labels.some(
+    (l) =>
+      Array.isArray(l.features) &&
+      l.features.some((f) => typeof f === "string" && /pool/i.test(f))
+  );
+}
+
 /**
  * @param {Array<object>} photoLabels  rows from public.photo_labels
  * @returns {{
@@ -67,13 +83,10 @@ const keyOf = (l) => (l.id != null ? `id:${l.id}` : `url:${l.photo_url}`);
  *   finalPhotoUrl: string | null,
  * }}
  */
-export function selectCarouselPhotos(photoLabels, opts = {}) {
-  const maxSubjects = Number.isInteger(opts.maxSubjects) && opts.maxSubjects >= 0
-    ? opts.maxSubjects
-    : MAX_PHOTO_SLIDES;
+export function selectCarouselPhotos(photoLabels) {
   const labels = Array.isArray(photoLabels) ? photoLabels.filter(includable) : [];
 
-  // Group by category (only the eight carousel categories; 'other' dropped).
+  // Group by category (only the carousel categories; 'other'/unlisted dropped).
   const byCat = new Map(CAROUSEL_CATEGORY_ORDER.map((c) => [c, []]));
   for (const l of labels) {
     if (byCat.has(l.category)) byCat.get(l.category).push(l);
@@ -89,12 +102,16 @@ export function selectCarouselPhotos(photoLabels, opts = {}) {
   const used = new Set();
   if (coverRow) used.add(keyOf(coverRow));
 
-  // SUBJECT SLIDES: one best per present category in order, excluding cover cat,
-  // up to the budget (maxSubjects).
+  // Required-room subject walk: best per category in order, skip empties.
+  // backyard appended only when a pool is detected. front_facade is skipped
+  // when it is the cover (so it appears exactly once — as cover or first beat).
+  const subjectOrder = hasPool(labels)
+    ? [...REQUIRED_SUBJECT_ORDER, "backyard"]
+    : REQUIRED_SUBJECT_ORDER;
+
   const subjectSlides = [];
-  for (const cat of CAROUSEL_CATEGORY_ORDER) {
-    if (subjectSlides.length >= maxSubjects) break;
-    if (cat === coverCategory) continue;
+  for (const cat of subjectOrder) {
+    if (cat === coverCategory) continue; // facade-as-cover isn't repeated
     const top = byCat.get(cat).find((l) => !used.has(keyOf(l)));
     if (top) {
       used.add(keyOf(top));
@@ -105,30 +122,6 @@ export function selectCarouselPhotos(photoLabels, opts = {}) {
       });
     }
   }
-
-  // FILL: round-robin over showcase categories, next-best each pass, until budget.
-  if (subjectSlides.length > 0) {
-    let added = true;
-    while (subjectSlides.length < maxSubjects && added) {
-      added = false;
-      for (const cat of SHOWCASE_FILL_PRIORITY) {
-        if (subjectSlides.length >= maxSubjects) break;
-        const next = byCat.get(cat).find((l) => !used.has(keyOf(l)));
-        if (next) {
-          used.add(keyOf(next));
-          subjectSlides.push({
-            photo_url: next.photo_url,
-            category: cat,
-            features: Array.isArray(next.features) ? next.features : [],
-          });
-          added = true;
-        }
-      }
-    }
-  }
-
-  // Hard cap (defensive; the loop already bounds it).
-  if (subjectSlides.length > maxSubjects) subjectSlides.length = maxSubjects;
 
   return {
     coverPhoto: coverRow ? { photo_url: coverRow.photo_url, category: coverCategory } : null,
