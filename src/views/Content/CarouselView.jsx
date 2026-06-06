@@ -15,6 +15,7 @@ import {
   renderPhotoSlide,
   ensureFonts,
   loadImage,
+  HUMAN_SUBJECT,
 } from "./carouselCompose";
 
 function MiniCopy({ text, label }) {
@@ -73,7 +74,7 @@ function CardTile({ item, bt }) {
 const STATEMENT_MAX = 200;   // hard cap to prevent pathological overflow
 const STATEMENT_WARN = 140;  // soft warning — past this, lines may shrink/overflow
 
-function SlidePreviewModal({ seq, index, bt, onClose, onPrev, onNext, onUpdateStatement, canPersist }) {
+function SlidePreviewModal({ seq, index, bt, slides, photoPool, onClose, onPrev, onNext, onUpdateStatement, onSwapPhoto, onRetryStatement, canPersist }) {
   const containerRef = useRef(null);
   const logoRef  = useRef({ loaded: false, img: null }); // logo loaded once, cached
   const fontsRef = useRef(false);                         // ensureFonts run once
@@ -84,19 +85,62 @@ function SlidePreviewModal({ seq, index, bt, onClose, onPrev, onNext, onUpdateSt
   const atFirst = index <= 0;
   const atLast  = index >= count - 1;
   const isCard  = item.type === "card";
+  const isPhoto = item.type === "photo";
   const canEdit = isCard && typeof onUpdateStatement === "function";
+  const canSwap = isPhoto && typeof onSwapPhoto === "function" && Array.isArray(photoPool) && photoPool.length > 0;
 
   // Inline edit state. Re-seeded whenever the open slide changes.
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(isCard ? (item.statement || "") : "");
+
+  // Photo-swap state, scoped to the open slide. "regenerating" while the new
+  // card statement is being generated; "error" if it failed (the swapped photo
+  // stays — only the caption is pending). The durable stale signal across
+  // navigation/reload is item.needsCaption.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [regenState, setRegenState] = useState("idle"); // "idle" | "regenerating" | "error"
   useEffect(() => {
     setEditing(false);
     setDraft(item.type === "card" ? (item.statement || "") : "");
+    setPickerOpen(false);
+    setRegenState("idle");
   }, [index]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Candidate pool for this photo slide: includable photos (already filtered by
+  // the parent) MINUS any photo_url used by ANOTHER source slide. The slide
+  // being replaced stays selectable (only OTHER slides' photos are excluded).
+  const usedByOthers = new Set(
+    (Array.isArray(slides) ? slides : [])
+      .filter((_, i) => i !== item.sourceIndex)
+      .map((s) => s.photo_url)
+      .filter(Boolean)
+  );
+  const candidates = (Array.isArray(photoPool) ? photoPool : [])
+    .filter((c) => c.photo_url && !usedByOthers.has(c.photo_url));
+
+  const onPick = async (candidate) => {
+    setPickerOpen(false);
+    setRegenState("regenerating");
+    const { ok } = (await onSwapPhoto(item.sourceIndex, candidate)) || {};
+    setRegenState(ok ? "idle" : "error");
+  };
+  const onRetry = async () => {
+    if (typeof onRetryStatement !== "function") return;
+    setRegenState("regenerating");
+    const { ok } = (await onRetryStatement(item.sourceIndex)) || {};
+    setRegenState(ok ? "idle" : "error");
+  };
+
+  // Stale = photo swapped but statement not yet regenerated (persisted flag) OR
+  // the most recent regen attempt for this open slide failed.
+  const isStale = item.needsCaption === true || regenState === "error";
 
   // Re-fire the canvas render when the statement changes (an edit), not just on
   // index/bt. statementKey is "" for photo slides (no editable text).
   const statementKey = isCard ? (item.statement || "") : "";
+  // Photo slides must also repaint when their photo/category changes (a swap on
+  // the CURRENTLY-OPEN slide), so include those in the render key below.
+  const photoKey = isPhoto ? `${item.photo_url || ""}|${item.category || ""}` : "";
 
   // Render the current slide on demand. Keyed on index + bt-by-value (bt is
   // rebuilt each parent render, so stringify it to avoid spurious re-renders).
@@ -136,7 +180,7 @@ function SlidePreviewModal({ seq, index, bt, onClose, onPrev, onNext, onUpdateSt
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index, btKey, statementKey]);
+  }, [index, btKey, statementKey, photoKey]);
 
   // Keyboard: ←/→ step, Esc closes. While editing, don't navigate/close — Esc
   // cancels the edit and arrows move the cursor inside the textarea.
@@ -261,11 +305,103 @@ function SlidePreviewModal({ seq, index, bt, onClose, onPrev, onNext, onUpdateSt
           )}
         </div>
       )}
+
+      {/* Stale-caption marker — photo swapped but statement not yet regenerated.
+          Shows on BOTH the card and the photo of a swapped slide. Soft heads-up,
+          never blocks download. Clears when regen succeeds or the text is edited. */}
+      {isStale && regenState !== "regenerating" && (
+        <div onClick={(e) => e.stopPropagation()} style={{
+          width: "min(95vw, 520px)", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+          background: "rgba(234,179,8,0.12)", border: "1px solid rgba(234,179,8,0.45)", borderRadius: 8,
+          padding: "8px 12px",
+        }}>
+          <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#fbbf24", flex: 1, minWidth: 180 }}>
+            ⚠ Caption needs updating — this photo was swapped but its statement hasn’t been regenerated.
+          </span>
+          {typeof onRetryStatement === "function" && (
+            <button onClick={onRetry} style={{
+              background: "rgba(234,179,8,0.18)", border: "1px solid rgba(234,179,8,0.5)", color: "#fbbf24",
+              borderRadius: 8, padding: "6px 12px", cursor: "pointer",
+              fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 600,
+            }}>↻ Retry</button>
+          )}
+          {canEdit && (
+            <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.5)" }}>
+              or use “✎ Edit text” above to write it yourself
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Photo-swap controls (photo slides only) */}
+      {isPhoto && (
+        <div onClick={(e) => e.stopPropagation()} style={{ width: "min(95vw, 520px)" }}>
+          {regenState === "regenerating" ? (
+            <div style={{
+              fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#e8c97a",
+              background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.25)",
+              borderRadius: 8, padding: "8px 14px", display: "inline-block",
+            }}>⟳ Regenerating caption…</div>
+          ) : !pickerOpen ? (
+            canSwap && (
+              <button onClick={() => setPickerOpen(true)} style={{
+                background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.3)",
+                color: "#e8c97a", borderRadius: 8, padding: "8px 14px", cursor: "pointer",
+                fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: "0.04em",
+              }}>⇄ Replace photo</button>
+            )
+          ) : (
+            <div style={{
+              background: "rgba(8,18,40,0.6)", border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 10, padding: 12,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.6)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+                  Replace with a photo from this listing
+                </span>
+                <button onClick={() => setPickerOpen(false)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 18, lineHeight: 1, padding: 0 }}>×</button>
+              </div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10.5, color: "rgba(255,255,255,0.4)", lineHeight: 1.5, marginBottom: 10 }}>
+                Picking a photo regenerates this card’s caption on its own — written for this room in isolation, so it won’t reference the rest of the carousel’s narrative arc.
+              </div>
+              {candidates.length === 0 ? (
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)", padding: "8px 2px" }}>
+                  No other usable photos for this listing — every analyzed photo is already in the carousel.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, maxHeight: "40vh", overflowY: "auto" }}>
+                  {candidates.map((c) => {
+                    const isCurrent = c.photo_url === item.photo_url;
+                    return (
+                      <button key={c.id || c.photo_url} onClick={() => onPick(c)} title={isCurrent ? "Current photo" : "Use this photo"} style={{
+                        width: 92, padding: 0, border: `1px solid ${isCurrent ? "#C9A84C" : "rgba(255,255,255,0.14)"}`,
+                        borderRadius: 8, background: "rgba(255,255,255,0.04)", cursor: "pointer", overflow: "hidden", textAlign: "left",
+                      }}>
+                        <img src={c.photo_url} alt="" loading="lazy" crossOrigin="anonymous" style={{ width: "100%", height: 70, objectFit: "cover", display: "block" }} />
+                        <div style={{ padding: "4px 5px 5px" }}>
+                          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 8.5, color: "#c9a84c", letterSpacing: "0.06em", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {HUMAN_SUBJECT[c.category] || c.category}{isCurrent ? " · current" : ""}
+                          </div>
+                          {Array.isArray(c.features) && c.features.length > 0 && (
+                            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 8, color: "rgba(255,255,255,0.45)", lineHeight: 1.3, marginTop: 2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                              {c.features.slice(0, 3).join(", ")}
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-function CarouselView({ slides, caption, hashtags, address, stats, footer, brandTokens, rowId, onUpdateStatement }) {
+function CarouselView({ slides, caption, hashtags, address, stats, footer, brandTokens, rowId, onUpdateStatement, photoPool, onSwapPhoto, onRetryStatement }) {
   // Merge over the Milestone defaults, but IGNORE null/undefined token values so
   // an agent who hasn't set a given color/font falls back to the default rather
   // than overriding it with null (a plain spread copies the nullish value and
@@ -283,6 +419,10 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
   const seq = buildSlideSequence(slides, { stats, footer });
   const cardCount = seq.filter((s) => s.type === "card").length;
   const photoCount = seq.filter((s) => s.type === "photo").length;
+  // Source slides flagged stale (photo swapped, statement not regenerated). One
+  // count per SOURCE slide (card+photo share needsCaption) — a soft heads-up so
+  // a mismatched card isn't downloaded unnoticed. Download is never hard-blocked.
+  const staleCount = (Array.isArray(slides) ? slides : []).filter((s) => s._needsCaption === true).length;
 
   const onDownload = async () => {
     setErr(""); setBusy(true);
@@ -325,6 +465,15 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
         }}>{err}</div>
       )}
 
+      {staleCount > 0 && (
+        <div style={{
+          marginBottom: 12, fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#fbbf24",
+          background: "rgba(234,179,8,0.1)", border: "1px solid rgba(234,179,8,0.35)", borderRadius: 8, padding: "10px 12px",
+        }}>
+          ⚠ {staleCount} {staleCount === 1 ? "slide has" : "slides have"} a swapped photo whose caption hasn’t been regenerated. Open the slide to retry or edit the text before downloading.
+        </div>
+      )}
+
       {/* Numbered sequence: card → photo, in order */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
         {seq.map((item, i) => (
@@ -346,6 +495,12 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
                 position: "absolute", top: 5, left: 5, background: "rgba(8,18,40,0.78)", color: "#fff",
                 borderRadius: 4, padding: "1px 6px", fontFamily: "'Jost', sans-serif", fontSize: 9, fontWeight: 700,
               }}>{String(i + 1).padStart(2, "0")}</span>
+              {item.needsCaption && (
+                <span title="Caption needs updating — photo swapped, statement not regenerated" style={{
+                  position: "absolute", top: 5, right: 5, background: "rgba(234,179,8,0.92)", color: "#1a1505",
+                  borderRadius: 4, padding: "1px 5px", fontFamily: "'Jost', sans-serif", fontSize: 9, fontWeight: 700,
+                }}>⚠ caption</span>
+              )}
             </div>
             <div style={{
               marginTop: 4, textAlign: "center", fontFamily: "'Jost', sans-serif", fontSize: 8.5,
@@ -361,6 +516,8 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
           seq={seq}
           index={lightboxIndex}
           bt={bt}
+          slides={slides}
+          photoPool={photoPool}
           onClose={() => setLightboxIndex(null)}
           onPrev={() => setLightboxIndex((i) => Math.max(0, i - 1))}
           onNext={() => setLightboxIndex((i) => Math.min(seq.length - 1, i + 1))}
@@ -368,6 +525,16 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
           onUpdateStatement={
             typeof onUpdateStatement === "function"
               ? (sourceIndex, text) => onUpdateStatement(rowId, sourceIndex, text)
+              : undefined
+          }
+          onSwapPhoto={
+            typeof onSwapPhoto === "function"
+              ? (sourceIndex, candidate) => onSwapPhoto(rowId, sourceIndex, candidate)
+              : undefined
+          }
+          onRetryStatement={
+            typeof onRetryStatement === "function"
+              ? (sourceIndex) => onRetryStatement(rowId, sourceIndex)
               : undefined
           }
         />

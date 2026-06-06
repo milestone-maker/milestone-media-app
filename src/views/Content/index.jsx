@@ -22,6 +22,7 @@ import VoiceProfileModal from "../../components/VoiceProfileModal";
 import SubscriptionsView from "../Subscriptions";
 import PhotosPanel from "./PhotosPanel";
 import CarouselView from "./CarouselView";
+import { includable } from "../../../api/_content/selectCarouselPhotos.js";
 
 // Friendly label → exact framework_name slug the endpoint expects.
 const FRAMEWORKS = [
@@ -122,6 +123,11 @@ function ContentView() {
   // null = unknown / not applicable; a number once checked.
   const [photoLabelCount, setPhotoLabelCount] = useState(null);
 
+  // Includable photo pool for the selected listing — candidates for the
+  // lightbox "Replace photo" picker. Filtered by the same includable() rule
+  // the server selection uses. Fetched once per listing (RLS-scoped read).
+  const [photoPool, setPhotoPool] = useState([]);
+
   // Generation state
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null);
@@ -187,11 +193,17 @@ function ContentView() {
   //    generated_content id: result.saved_id for a fresh generation, or h.id for
   //    a History row. If rowId is missing (the best-effort insert failed at
   //    generation), the edit re-renders locally but cannot be persisted. ──
+  // Strip the transient stale-caption flag (_needsCaption) from a slide. The
+  // marker means "photo swapped but statement not yet regenerated"; any fresh
+  // statement (regenerated OR hand-edited) clears it. JSON.stringify drops the
+  // dropped key on persist, so the DB row also loses the flag.
+  const clearStale = (s) => { const { _needsCaption, ...rest } = s; return rest; };
+
   const updateSlideStatement = async (rowId, sourceIndex, text) => {
     setSaveError("");
     const applyEdit = (slides) =>
       (Array.isArray(slides) ? slides : []).map((s, i) =>
-        i === sourceIndex ? { ...s, statement: text, text } : s);
+        i === sourceIndex ? clearStale({ ...s, statement: text, text }) : s);
 
     // Fresh result (matched by saved_id, or rowId absent → the result is the only
     // candidate since every History row has an id).
@@ -235,6 +247,122 @@ function ContentView() {
     }
   };
 
+  // ── Photo swap + single-card regeneration (Stage 3b) ──
+  // Locate which store (the fresh result vs a specific history row) holds rowId
+  // and its current slides. Mirrors updateSlideStatement's matching: result by
+  // saved_id (or the only candidate when rowId is absent), else a history row
+  // by id. Returns null when no store matches.
+  const locateSlides = (rowId) => {
+    if ((rowId && result?.saved_id === rowId) || (!rowId && result)) {
+      return { target: "result", baseSlides: Array.isArray(result.slides) ? result.slides : [] };
+    }
+    const h = history.find((x) => x.id === rowId);
+    if (h) return { target: "history", baseSlides: Array.isArray(h.slides) ? h.slides : [] };
+    return null;
+  };
+  const writeSlides = (target, rowId, nextSlides) => {
+    if (target === "result") setResult((p) => (p ? { ...p, slides: nextSlides } : p));
+    else setHistory((p) => p.map((h) => (h.id === rowId ? { ...h, slides: nextSlides } : h)));
+  };
+  const persistSlides = (rowId, nextSlides) =>
+    supabase.from("generated_content").update({ slides: nextSlides }).eq("id", rowId);
+
+  // Call the single-statement endpoint for one room. Throws on any failure so
+  // callers keep the swapped photo and surface a retry.
+  const regenerateStatement = async ({ category, features }) => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) throw new Error("session expired");
+    const res = await fetch("/api/content-regenerate-slide", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        voice_profile_id: voiceProfile?.id,
+        listing_id: selectedListingId,
+        category,
+        features: Array.isArray(features) ? features : [],
+      }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error || `regenerate failed (${res.status})`);
+    }
+    const j = await res.json();
+    if (!j || typeof j.statement !== "string" || !j.statement.trim()) throw new Error("empty statement");
+    return j.statement.trim();
+  };
+
+  // Regenerate the statement for an already-swapped slide. baseSlides is the
+  // array WITH the new photo. Success: write statement (+mirror text), clear
+  // the stale flag, persist once. Failure: keep the photo, mark the slide stale,
+  // best-effort persist so a reload still shows new photo + the marker. Photo
+  // and statement are decoupled — a regen failure never reverts the photo.
+  const runRegen = async (rowId, sourceIndex, { category, features }, target, baseSlides) => {
+    setSaveError("");
+    const markStale = (slides) =>
+      slides.map((s, i) => (i === sourceIndex ? { ...s, _needsCaption: true } : s));
+
+    let statement;
+    try {
+      statement = await regenerateStatement({ category, features });
+    } catch (e) {
+      console.error("[content] statement regenerate failed:", e);
+      const stale = markStale(baseSlides);
+      writeSlides(target, rowId, stale);
+      if (rowId) {
+        const { error } = await persistSlides(rowId, stale);
+        if (error) { console.error("[content] stale persist failed:", error); setSaveError("Couldn't save the photo swap. Please try again."); }
+      }
+      return { ok: false };
+    }
+
+    const updated = baseSlides.map((s, i) =>
+      i === sourceIndex ? clearStale({ ...s, statement, text: statement }) : s);
+    writeSlides(target, rowId, updated);
+    if (!rowId) return { ok: true }; // local-only (no saved row) — cannot persist
+    const { error } = await persistSlides(rowId, updated);
+    if (error) {
+      console.error("[content] swap+statement persist failed:", error);
+      // Keep the swapped photo; drop the unsaved new statement (revert to the
+      // prior caption) and mark stale so DB + UI agree.
+      const stale = markStale(baseSlides);
+      writeSlides(target, rowId, stale);
+      await persistSlides(rowId, stale).catch(() => {});
+      setSaveError("Couldn't save that edit. Please try again.");
+      return { ok: false };
+    }
+    return { ok: true };
+  };
+
+  // Swap a slide's photo to `candidate`, then regenerate its statement. Photo
+  // repaints immediately (optimistic); statement follows. `_features` is stashed
+  // on the slide so a later Retry can re-run regeneration with the right inputs.
+  const swapSlidePhoto = async (rowId, sourceIndex, candidate) => {
+    const loc = locateSlides(rowId);
+    if (!loc) return { ok: false };
+    const swapped = loc.baseSlides.map((s, i) =>
+      i === sourceIndex
+        ? clearStale({
+            ...s,
+            photo_url: candidate.photo_url,
+            category: candidate.category,
+            _features: Array.isArray(candidate.features) ? candidate.features : [],
+          })
+        : s);
+    writeSlides(loc.target, rowId, swapped); // immediate repaint
+    return runRegen(rowId, sourceIndex, { category: candidate.category, features: candidate.features }, loc.target, swapped);
+  };
+
+  // Retry regeneration for a slide whose photo is already swapped (reads the
+  // swapped photo's category + remembered features off the slide).
+  const retrySlideStatement = async (rowId, sourceIndex) => {
+    const loc = locateSlides(rowId);
+    if (!loc) return { ok: false };
+    const s = loc.baseSlides[sourceIndex];
+    if (!s) return { ok: false };
+    return runRegen(rowId, sourceIndex, { category: s.category, features: Array.isArray(s._features) ? s._features : [] }, loc.target, loc.baseSlides);
+  };
+
   useEffect(() => {
     loadHistory(selectedListingId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -257,6 +385,29 @@ function ContentView() {
     })();
     return () => { cancelled = true; };
   }, [framework, selectedListingId]);
+
+  // ── Load the includable photo pool for the selected listing (once) ──
+  // Candidates for the lightbox "Replace photo" picker. RLS already scopes the
+  // read to the agent's own listings (photo_labels has no agent_id column).
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedListingId) { setPhotoPool([]); return; }
+    (async () => {
+      const { data, error } = await supabase
+        .from("photo_labels")
+        .select("*")
+        .eq("listing_id", selectedListingId)
+        .order("sort_order", { ascending: true });
+      if (cancelled) return;
+      if (error) {
+        console.error("[content] photo pool read error:", error);
+        setPhotoPool([]);
+        return;
+      }
+      setPhotoPool((data || []).filter(includable));
+    })();
+    return () => { cancelled = true; };
+  }, [selectedListingId]);
 
   const selectedListing = listings.find((l) => l.id === selectedListingId) || null;
   const hasUsableProfile = !!voiceProfile && !!String(voiceProfile.license_number || "").trim();
@@ -510,6 +661,9 @@ function ContentView() {
                 footer={carouselFooter(result.license_number)}
                 rowId={result.saved_id}
                 onUpdateStatement={updateSlideStatement}
+                photoPool={photoPool}
+                onSwapPhoto={swapSlidePhoto}
+                onRetryStatement={retrySlideStatement}
                 brandTokens={{
                   bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
                   mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
@@ -626,6 +780,9 @@ function ContentView() {
                             footer={carouselFooter(h.license_number)}
                             rowId={h.id}
                             onUpdateStatement={updateSlideStatement}
+                            photoPool={photoPool}
+                            onSwapPhoto={swapSlidePhoto}
+                            onRetryStatement={retrySlideStatement}
                             brandTokens={{
                               bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
                               mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,

@@ -27,6 +27,8 @@ export const DEFAULT_BRAND_TOKENS = {
 };
 
 // Canonical photo_labels category → human-readable kicker.
+// Exported (see bottom of file) so the "Replace photo" picker labels candidate
+// photos with the same room names the rendered cards/photo labels use.
 const HUMAN_SUBJECT = {
   drone:            "Aerial",
   front_facade:     "Exterior",
@@ -295,15 +297,22 @@ export function buildSlideSequence(slides, { stats, footer } = {}) {
     const statement = s.statement || s.text || "";
     const isCover = s.is_cover || s.subject === "cover";
     const isFinal = s.subject === "final";
+    // needsCaption: this slide's photo was swapped but its statement has not
+    // been regenerated yet (regen failed or pending after a failure). Set on
+    // BOTH the card and the photo item for the source slide so the
+    // "Caption needs updating" marker shows on the strip and in the lightbox.
+    // Additive field — existing consumers ignore it. (See _needsCaption in
+    // Content/index.jsx swap handlers.)
+    const needsCaption = s._needsCaption === true;
     if (isCover) {
-      seq.push({ type: "card", kind: "hook", statement, stats, footer, sourceIndex: si });
-      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category, sourceIndex: si });
+      seq.push({ type: "card", kind: "hook", statement, stats, footer, sourceIndex: si, needsCaption });
+      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category, sourceIndex: si, needsCaption });
     } else if (isFinal) {
-      seq.push({ type: "card", kind: "cta", statement, footer, contact: footer?.contact || "", sourceIndex: si });
-      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category, sourceIndex: si });
+      seq.push({ type: "card", kind: "cta", statement, footer, contact: footer?.contact || "", sourceIndex: si, needsCaption });
+      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category, sourceIndex: si, needsCaption });
     } else {
-      seq.push({ type: "card", kind: "room", statement, kicker: HUMAN_SUBJECT[s.category] || "", footer, sourceIndex: si });
-      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category, sourceIndex: si });
+      seq.push({ type: "card", kind: "room", statement, kicker: HUMAN_SUBJECT[s.category] || "", footer, sourceIndex: si, needsCaption });
+      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category, sourceIndex: si, needsCaption });
     }
   }
   return seq;
