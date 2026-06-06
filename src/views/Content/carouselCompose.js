@@ -286,19 +286,24 @@ function canvasToBlob(canvas, type, quality) {
 // Final slide → CTA card (no photo). Order preserved.
 export function buildSlideSequence(slides, { stats, footer } = {}) {
   const seq = [];
-  for (const s of (Array.isArray(slides) ? slides : [])) {
+  const list = Array.isArray(slides) ? slides : [];
+  // sourceIndex maps each emitted item back to the source slide it came from
+  // (additive field; existing consumers ignore it). A card and its photo share
+  // the same sourceIndex so an edited lightbox card writes back to the right slide.
+  for (let si = 0; si < list.length; si++) {
+    const s = list[si];
     const statement = s.statement || s.text || "";
     const isCover = s.is_cover || s.subject === "cover";
     const isFinal = s.subject === "final";
     if (isCover) {
-      seq.push({ type: "card", kind: "hook", statement, stats, footer });
-      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category });
+      seq.push({ type: "card", kind: "hook", statement, stats, footer, sourceIndex: si });
+      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category, sourceIndex: si });
     } else if (isFinal) {
-      seq.push({ type: "card", kind: "cta", statement, footer, contact: footer?.contact || "" });
-      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category });
+      seq.push({ type: "card", kind: "cta", statement, footer, contact: footer?.contact || "", sourceIndex: si });
+      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category, sourceIndex: si });
     } else {
-      seq.push({ type: "card", kind: "room", statement, kicker: HUMAN_SUBJECT[s.category] || "", footer });
-      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category });
+      seq.push({ type: "card", kind: "room", statement, kicker: HUMAN_SUBJECT[s.category] || "", footer, sourceIndex: si });
+      if (s.photo_url) seq.push({ type: "photo", kind: "photo", photo_url: s.photo_url, category: s.category, sourceIndex: si });
     }
   }
   return seq;

@@ -126,6 +126,7 @@ function ContentView() {
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
+  const [saveError, setSaveError] = useState(""); // transient "couldn't save edit" note
 
   // History (for the selected listing)
   const [history, setHistory] = useState([]);
@@ -178,6 +179,60 @@ function ContentView() {
       .order("created_at", { ascending: false });
     setHistory(data || []);
     setHistoryLoading(false);
+  };
+
+  // ── Edit a card statement (Stage 3a). Updates the source slide immutably so
+  //    both the thumbnail and the lightbox re-render, then persists only the
+  //    slides column. RLS (agent_id = auth.uid()) scopes ownership. rowId is the
+  //    generated_content id: result.saved_id for a fresh generation, or h.id for
+  //    a History row. If rowId is missing (the best-effort insert failed at
+  //    generation), the edit re-renders locally but cannot be persisted. ──
+  const updateSlideStatement = async (rowId, sourceIndex, text) => {
+    setSaveError("");
+    const applyEdit = (slides) =>
+      (Array.isArray(slides) ? slides : []).map((s, i) =>
+        i === sourceIndex ? { ...s, statement: text, text } : s);
+
+    // Fresh result (matched by saved_id, or rowId absent → the result is the only
+    // candidate since every History row has an id).
+    if ((rowId && result?.saved_id === rowId) || (!rowId && result)) {
+      const prev = result;
+      const nextSlides = applyEdit(result.slides);
+      setResult({ ...result, slides: nextSlides });
+      if (!rowId) return; // nothing to persist — no saved row
+      const { error } = await supabase
+        .from("generated_content")
+        .update({ slides: nextSlides })
+        .eq("id", rowId);
+      if (error) {
+        console.error("[Content] slide edit save failed:", error);
+        setResult(prev); // revert
+        setSaveError("Couldn't save that edit. Please try again.");
+      }
+      return;
+    }
+
+    // Otherwise it's a History entry, matched by id.
+    if (rowId) {
+      const prev = history;
+      let nextSlides = null;
+      const nextHistory = history.map((h) => {
+        if (h.id !== rowId) return h;
+        nextSlides = applyEdit(h.slides);
+        return { ...h, slides: nextSlides };
+      });
+      if (!nextSlides) return; // row not found
+      setHistory(nextHistory);
+      const { error } = await supabase
+        .from("generated_content")
+        .update({ slides: nextSlides })
+        .eq("id", rowId);
+      if (error) {
+        console.error("[Content] slide edit save failed:", error);
+        setHistory(prev); // revert
+        setSaveError("Couldn't save that edit. Please try again.");
+      }
+    }
   };
 
   useEffect(() => {
@@ -453,6 +508,8 @@ function ContentView() {
                 address={selectedListing?.address}
                 stats={carouselStats}
                 footer={carouselFooter(result.license_number)}
+                rowId={result.saved_id}
+                onUpdateStatement={updateSlideStatement}
                 brandTokens={{
                   bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
                   mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
@@ -460,6 +517,9 @@ function ContentView() {
                   logoUrl: profile?.agency_logo_url || undefined,
                 }}
               />
+              {saveError && (
+                <div style={{ marginTop: 8, fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#f87171" }}>{saveError}</div>
+              )}
             </div>
           )}
 
@@ -564,6 +624,8 @@ function ContentView() {
                             address={selectedListing?.address}
                             stats={carouselStats}
                             footer={carouselFooter(h.license_number)}
+                            rowId={h.id}
+                            onUpdateStatement={updateSlideStatement}
                             brandTokens={{
                               bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
                               mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
