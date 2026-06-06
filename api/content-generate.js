@@ -287,10 +287,11 @@ export default async function handler(req, res, depsOverride) {
       if (plErr) {
         console.error("[content-generate] photo_labels fetch error (continuing text-only):", plErr);
       } else {
-        // Style B "statement-then-reveal": each beat costs two carousel slots
-        // (statement card + clean photo), so budget the cover + ~3 rooms →
-        // 9-slide structure (hook card → cover photo → 3 room beats → CTA card).
-        const sel = selectCarouselPhotos(photoLabels || [], { maxSubjects: 3 });
+        // Stage 4: required-rooms selection. selectCarouselPhotos returns a
+        // fixed beat set (facade cover + living/kitchen/primary bed/primary bath,
+        // + backyard only if a pool is detected), skipping rooms with no photo.
+        // The count is fully selection-driven from here on — no cap.
+        const sel = selectCarouselPhotos(photoLabels || []);
         if (sel.subjectSlides.length > 0) carouselSelection = sel;
       }
     }
