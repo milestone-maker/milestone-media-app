@@ -92,8 +92,10 @@ function defaultSupabase() {
 // Model + token budget defaults. No app-wide constants exist yet, so
 // the first endpoint defines them; later endpoints can override per
 // content type if needed.
-const DEFAULT_MODEL      = "claude-sonnet-4-6";
-const DEFAULT_MAX_TOKENS = 2048;
+// Exported so sibling endpoints (e.g. api/content-regenerate-slide.js) reuse the
+// exact same model + token budget rather than drifting their own copy.
+export const DEFAULT_MODEL      = "claude-sonnet-4-6";
+export const DEFAULT_MAX_TOKENS = 2048;
 
 // ── helpers ──────────────────────────────────────────────────────────
 
@@ -118,7 +120,7 @@ function bearerFrom(req) {
  * catch the engine's array-only parse failure, and do object-extraction
  * locally. Returns the parsed object plus the raw text for logging.
  */
-async function generateAndParseObject(opts) {
+export async function generateAndParseObject(opts) {
   const generatePosts = await getGeneratePosts();
   let captured;
   try {

@@ -181,7 +181,11 @@ function coverContextFor(coverPhoto) {
 }
 
 // "Kitchen — marble waterfall island, white cabinetry" (up to 3 features).
-function subjectWithFeatures(s) {
+// Exported so the single-card regeneration endpoint (api/content-regenerate-slide.js)
+// derives the SAME "Room — features" room string from a swapped photo's
+// category + features, keeping the regenerated statement consistent with the
+// way the full carousel prompt phrases the room.
+export function subjectWithFeatures(s) {
   const name = HUMAN_SUBJECT[s.category] || s.category;
   const feats = (Array.isArray(s.features) ? s.features : []).filter(Boolean).slice(0, 3);
   return feats.length ? `${name} — ${feats.join(", ")}` : name;
