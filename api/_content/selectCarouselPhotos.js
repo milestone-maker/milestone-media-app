@@ -46,9 +46,13 @@ const REQUIRED_SUBJECT_ORDER = [
   "primary_bathroom",
 ];
 
-const CONFIDENCE_FLOOR = 0.7;
+export const CONFIDENCE_FLOOR = 0.7;
 
-function includable(l) {
+// Exported so the Content tab's "Replace photo" picker filters its candidate
+// pool by the SAME rule the server selection uses (agent_corrected, or
+// confidence ≥ floor), keeping client and server in agreement on what counts
+// as a usable photo.
+export function includable(l) {
   if (!l || typeof l.photo_url !== "string" || !l.photo_url) return false;
   if (l.agent_corrected === true) return true;
   return typeof l.confidence === "number" && l.confidence >= CONFIDENCE_FLOOR;
