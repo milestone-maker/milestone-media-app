@@ -147,7 +147,7 @@ function RowListInput({ label, values, setValues, placeholder, note }) {
 const cleanArr = (arr) => arr.map((s) => String(s).trim()).filter((s) => s !== "");
 
 function VoiceProfileModal({ onClose }) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [profileId, setProfileId] = useState(null); // null = CREATE, set = EDIT
@@ -236,6 +236,15 @@ function VoiceProfileModal({ onClose }) {
         setSocialFacebook(data.social_facebook_url || "");
         setSocialThreads(data.social_threads || "");
         setSocialLinkedin(data.social_linkedin_url || "");
+      } else {
+        // CREATE (no existing row): pre-fill editable defaults from the agent
+        // record so they don't retype info already on file. EDIT (the if-branch
+        // above) is untouched — a saved profile's values always win. Falls back
+        // to blank when the agent record has no value. profile is intentionally
+        // NOT in the dep array so this seeds once on open and never clobbers
+        // what the agent has started typing.
+        setFullName(profile?.full_name || "");
+        setBrokerageName(profile?.agency_name || "");
       }
       setLoading(false);
     };
