@@ -122,7 +122,7 @@ export default async function handler(req, res, depsOverride) {
     // ── 2. Resolve agent profile (for role + subscription state) ──
     const { data: profile, error: profileErr } = await supabase
       .from("agents")
-      .select("id, role, subscription_tier, subscription_status, agency_name, agency_logo_url, profile_photo_url, full_name")
+      .select("id, role, is_beta, subscription_tier, subscription_status, agency_name, agency_logo_url, profile_photo_url, full_name")
       .eq("id", authUser.id)
       .single();
     if (profileErr || !profile) {
@@ -164,8 +164,25 @@ export default async function handler(req, res, depsOverride) {
       return res.status(404).json({ error: "booking not found" });
     }
 
+    // ── 4b. Existing microsite for this booking (path 3) ──
+    //   If the agent already owns a microsite for this booking, it stays
+    //   editable / re-publishable regardless of the booking's original
+    //   package or invoice state. Owner-scoped so it can only ever match
+    //   the caller's own row. property_data->>'booking_id' is a text match
+    //   on the JSONB blob the publish step writes (see step 8).
+    const { data: existingMicrosite } = await supabase
+      .from("microsites")
+      .select("id, agent_id")
+      .eq("agent_id", user.id)
+      .eq("property_data->>booking_id", bookingId)
+      .limit(1)
+      .maybeSingle();
+
     // ── 5. Entitlement check ──
-    const { entitled, reason } = checkMicrositeEntitlement(user, booking, subscription);
+    const { entitled, reason } = checkMicrositeEntitlement(user, booking, subscription, {
+      isBeta: profile.is_beta === true,
+      existingMicrosite: existingMicrosite || null,
+    });
     if (!entitled) {
       return res.status(403).json({ error: reason });
     }
