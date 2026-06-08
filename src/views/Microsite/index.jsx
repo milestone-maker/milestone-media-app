@@ -8,6 +8,10 @@ import ChatAssistantSection from "./ChatAssistantSection.jsx";
 import ComparableSalesSection from "./ComparableSalesSection.jsx";
 import Modal from "./Modal.jsx";
 import { applyListingAutofill, applyBookingAutofill } from "./autofill.js";
+// Canonical microsite write/access rule — the SAME pure module the
+// serverless endpoint (api/_lib/entitlement.js) imports, so the UI and API
+// can never disagree about who may edit a microsite. See shared/micrositeAccess.js.
+import { canWriteMicrosite } from "../../../shared/micrositeAccess.js";
 
 // Microsite add-on price, sourced from the central pricing config
 const MICROSITE_ADDON_PRICE = ADDONS.find(a => a.id === "microsite")?.price ?? 0;
@@ -658,10 +662,44 @@ function MicrositeView() {
     const addons = selectedBooking?.selected_addons || [];
     micrositeAddonApproved = Array.isArray(addons) && addons.some(a => a.id === "microsite" || a === "microsite");
   }
-  // Invoice paid check — agents must pay before creating a microsite
+  // Invoice paid check — only the booking-entitlement path (path 5) needs it.
   const invoicePaid = sourceType === "booking" ? !!selectedBooking?.invoice_paid : true;
-  // Admin always has access; agents need package/addon AND paid invoice
-  micrositeAccessible = isAdmin || ((micrositeIncluded || micrositeAddonApproved) && invoicePaid);
+
+  // is_beta grants full microsite access (treated like admin) — see the
+  // canonical rule. profile is useAuth().profile (the agents row, select *).
+  const isBeta = profile?.is_beta === true;
+
+  // Existing-microsite exemption (path 3): the agent already owns a microsite
+  // for this booking, so it stays editable/re-publishable regardless of the
+  // booking's package or invoice. myMicrosites is fetched owner-scoped
+  // (.eq agent_id), so every row here belongs to the current agent. Match by
+  // the booking the microsite was built from, and — for listing-sourced or
+  // mid-edit microsites — by the slug currently loaded for edit.
+  const hasExistingMicrosite =
+    (!!selectedBookingId &&
+      myMicrosites.some(m => m.property_data?.booking_id === selectedBookingId)) ||
+    (!!publishedSlug && myMicrosites.some(m => m.slug === publishedSlug));
+
+  // Single source of truth: defer the whole decision to the shared rule so
+  // the UI mirrors the endpoint and RLS exactly (incl. the Pro/Elite
+  // subscription term the UI previously omitted). Ownership is guaranteed by
+  // the owner-scoped sources feeding these inputs.
+  micrositeAccessible = canWriteMicrosite({
+    role: profile?.role || null,
+    isBeta,
+    hasExistingMicrosite,
+    subscriptionTier: profile?.subscription_tier ?? null,
+    subscriptionStatus: profile?.subscription_status ?? null,
+    selectedPackage:
+      sourceType === "booking"
+        ? (selectedBooking?.selected_package ?? null)
+        : (selectedListing?.package ?? null),
+    selectedAddons:
+      sourceType === "booking"
+        ? (selectedBooking?.selected_addons ?? [])
+        : (selectedListing?.microsite_addon === true ? ["microsite"] : []),
+    invoicePaid,
+  }).allowed;
   const hasSourceSelection = sourceType === "listing" ? !!selectedListingId : !!selectedBookingId;
 
   const handleRequestAddon = async () => {
@@ -1522,8 +1560,11 @@ function MicrositeView() {
         )}
       </div>
 
-      {/* Invoice not paid gate — agent has package but hasn't paid yet */}
-      {hasSourceSelection && !isAdmin && (micrositeIncluded || micrositeAddonApproved) && !invoicePaid && (
+      {/* Invoice not paid gate — agent has package but hasn't paid yet.
+          Suppressed when access is already granted by another path (admin,
+          beta, Pro/Elite subscription, or an existing owned microsite), so
+          those agents never see a spurious "pay the invoice" message. */}
+      {hasSourceSelection && !micrositeAccessible && (micrositeIncluded || micrositeAddonApproved) && !invoicePaid && (
         <div style={{
           background: "rgba(255,255,255,0.03)", border: "1px solid rgba(239,168,76,0.25)",
           borderRadius: 14, padding: 28, textAlign: "center",
