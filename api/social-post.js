@@ -38,14 +38,14 @@ import {
   createUploadFromUrl as bundleCreateUploadFromUrl,
   createPost as bundleCreatePost,
 } from "./_lib/bundle.js";
+import { INSTAGRAM_MAX_CAROUSEL_IMAGES } from "../shared/carouselPosting.js";
 
 const SUPABASE_URL              = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// Instagram's hard ceiling on carousel items (currently 20). A pure backstop
-// against handing bundle an oversized post — the per-layout UX cap is a later
-// UI decision.
-const MAX_CAROUSEL_IMAGES = 20;
+// Instagram's hard ceiling on carousel items — shared with the UI gate so the
+// two can never disagree. A backstop against handing bundle an oversized post.
+const MAX_CAROUSEL_IMAGES = INSTAGRAM_MAX_CAROUSEL_IMAGES;
 
 // The custom domain fronts the whole Supabase project (incl. Storage) — see
 // src/supabaseClient.js — so client-generated getPublicUrl() URLs use THIS
@@ -191,6 +191,34 @@ export default async function handler(req, res, depsOverride) {
     // Caption is already IG-ready (hashtags merged in at generation time).
     const text = typeof content.caption === "string" ? content.caption : "";
 
+    // ── 4b. Open a tracking row (pending) for this attempt ──
+    // Best-effort: a tracking write must never change the user-facing outcome,
+    // but we keep the id so we can mark it submitted/failed below.
+    let trackingId = null;
+    {
+      const { data: tracked, error: insErr } = await supabase
+        .from("social_posts")
+        .insert({
+          agent_id:   authUser.id,
+          content_id: contentId,
+          image_urls: imageUrls,
+          status:     "pending",
+        })
+        .select("id")
+        .maybeSingle();
+      if (insErr) console.error("[social-post] tracking insert error:", insErr);
+      else trackingId = tracked?.id ?? null;
+    }
+
+    const markFailed = async (message) => {
+      if (!trackingId) return;
+      const { error: upErr } = await supabase
+        .from("social_posts")
+        .update({ status: "failed", error_message: message, updated_at: new Date().toISOString() })
+        .eq("id", trackingId);
+      if (upErr) console.error("[social-post] tracking fail-update error:", upErr);
+    };
+
     // ── 5. Ingest each image into bundle, preserving order ──
     const uploadIds = [];
     try {
@@ -200,6 +228,7 @@ export default async function handler(req, res, depsOverride) {
       }
     } catch (e) {
       console.error("[social-post] bundle upload failed:", e?.status, e?.message);
+      await markFailed("could not upload images to Instagram provider");
       return res.status(502).json({ error: "could not upload images to Instagram provider", details: e?.message });
     }
 
@@ -217,10 +246,20 @@ export default async function handler(req, res, depsOverride) {
       });
     } catch (e) {
       console.error("[social-post] bundle create-post failed:", e?.status, e?.message);
+      await markFailed("could not create Instagram post");
       return res.status(502).json({ error: "could not create Instagram post", details: e?.message });
     }
 
-    return res.status(200).json({ postId: post.id, status: post.status || "SCHEDULED" });
+    // ── 7. Record success ──
+    if (trackingId) {
+      const { error: okErr } = await supabase
+        .from("social_posts")
+        .update({ status: "submitted", bundle_post_id: post.id, updated_at: new Date().toISOString() })
+        .eq("id", trackingId);
+      if (okErr) console.error("[social-post] tracking success-update error:", okErr);
+    }
+
+    return res.status(200).json({ trackingId, postId: post.id, status: post.status || "SCHEDULED" });
   } catch (err) {
     console.error("[social-post] fatal:", err);
     return res.status(500).json({ error: err.message || "internal error" });

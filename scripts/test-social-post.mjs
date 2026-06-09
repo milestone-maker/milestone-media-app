@@ -54,16 +54,21 @@ const URL_B = `https://auth.milestonemediaphotography.com/storage/v1/object/publ
 const VALID_URLS = [URL_A, URL_B];
 
 function makeSupabaseMock({
-  user        = { id: AGENT_ID },
-  authError   = null,
-  agent       = { role: "agent", subscription_status: "active" },
-  agentErr    = null,
-  connection  = { bundle_team_id: "team_1", connection_status: "connected" },
-  connErr     = null,
-  content     = { id: CONTENT_ID, agent_id: AGENT_ID, caption: CAPTION },
-  contentErr  = null,
+  user           = { id: AGENT_ID },
+  authError      = null,
+  agent          = { role: "agent", subscription_status: "active" },
+  agentErr       = null,
+  connection     = { bundle_team_id: "team_1", connection_status: "connected" },
+  connErr        = null,
+  content        = { id: CONTENT_ID, agent_id: AGENT_ID, caption: CAPTION },
+  contentErr     = null,
+  socialInsertId = "sp_1",
+  socialInsertErr = null,
 } = {}) {
-  return {
+  // Records every social_posts write so tests can assert the tracking lifecycle.
+  const track = { inserts: [], updates: [] };
+  const mock = {
+    _track: track,
     auth: {
       getUser: async () => (authError ? { data: null, error: authError } : { data: { user }, error: null }),
     },
@@ -77,9 +82,19 @@ function makeSupabaseMock({
       if (table === "generated_content") {
         return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: content, error: contentErr }) }) }) };
       }
+      if (table === "social_posts") {
+        return {
+          insert: (row) => {
+            track.inserts.push(row);
+            return { select: () => ({ maybeSingle: async () => ({ data: socialInsertErr ? null : { id: socialInsertId }, error: socialInsertErr }) }) };
+          },
+          update: (row) => ({ eq: async (_col, _val) => { track.updates.push(row); return { error: null }; } }),
+        };
+      }
       throw new Error(`Unexpected table: ${table}`);
     },
   };
+  return mock;
 }
 
 function makeBundleMocks({ uploadThrow = null, postThrow = null, postResp = { id: "post_1", status: "SCHEDULED" } } = {}) {
@@ -104,6 +119,7 @@ const FIXED_NOW = new Date("2026-06-09T15:30:00.000Z");
 
 async function callHandler({ headers, body, supabaseOverride, bundle } = {}) {
   const b = bundle || makeBundleMocks();
+  const supa = supabaseOverride || makeSupabaseMock();
   const req = {
     method: "POST",
     headers: headers ?? { authorization: `Bearer ${VALID_TOKEN}` },
@@ -111,22 +127,23 @@ async function callHandler({ headers, body, supabaseOverride, bundle } = {}) {
   };
   const res = makeRes();
   await handler(req, res, {
-    supabase:     supabaseOverride || makeSupabaseMock(),
+    supabase:     supa,
     createUpload: b.createUpload,
     createPost:   b.createPost,
     now:          () => FIXED_NOW,
   });
-  return { res, bundle: b };
+  return { res, bundle: b, supabase: supa };
 }
 
 console.log("\n── api/social-post.js — publish carousel to Instagram ──\n");
 
 // 1. HAPPY PATH
 {
-  const { res, bundle } = await callHandler();
+  const { res, bundle, supabase } = await callHandler();
   check("happy path → 200", res.statusCode === 200, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
   check("returns postId", res.body?.postId === "post_1");
   check("returns status", res.body?.status === "SCHEDULED");
+  check("returns trackingId", res.body?.trackingId === "sp_1");
   check("createUpload called once per URL", bundle.calls.uploads.length === 2);
   check("uploads in order (URL_A first)", bundle.calls.uploads[0].url === URL_A && bundle.calls.uploads[1].url === URL_B);
   check("uploads carry teamId", bundle.calls.uploads.every((u) => u.teamId === "team_1"));
@@ -137,6 +154,16 @@ console.log("\n── api/social-post.js — publish carousel to Instagram ─�
   check("post status SCHEDULED (immediate)", bundle.calls.post.status === "SCHEDULED");
   check("post postDate = now ISO", bundle.calls.post.postDate === FIXED_NOW.toISOString());
   check("post title is a label, not the caption", typeof bundle.calls.post.title === "string" && bundle.calls.post.title !== CAPTION);
+
+  // Tracking lifecycle: pending row inserted, then updated to submitted.
+  const t = supabase._track;
+  check("tracking: one pending row inserted", t.inserts.length === 1);
+  check("tracking: insert has agent_id + content_id", t.inserts[0]?.agent_id === AGENT_ID && t.inserts[0]?.content_id === CONTENT_ID);
+  check("tracking: insert status pending", t.inserts[0]?.status === "pending");
+  check("tracking: insert stores image_urls", JSON.stringify(t.inserts[0]?.image_urls) === JSON.stringify(VALID_URLS));
+  check("tracking: updated to submitted", t.updates.some((u) => u.status === "submitted"));
+  check("tracking: submitted carries bundle_post_id", t.updates.some((u) => u.status === "submitted" && u.bundle_post_id === "post_1"));
+  check("tracking: never marked failed on success", !t.updates.some((u) => u.status === "failed"));
 }
 
 // 2. Missing Authorization → 401
@@ -234,19 +261,28 @@ console.log("\n── api/social-post.js — publish carousel to Instagram ─�
   check("20 uploads attempted", bundle.calls.uploads.length === 20);
 }
 
-// 14. Bundle upload failure → 502, no post created
+// 14. Bundle upload failure → 502, no post created, tracking → failed
 {
   const bundle = makeBundleMocks({ uploadThrow: new Error("bundle upload 500") });
-  const { res } = await callHandler({ bundle });
+  const { res, supabase } = await callHandler({ bundle });
   check("upload failure → 502", res.statusCode === 502, `got ${res.statusCode}`);
   check("upload failure → no post created", bundle.calls.postCount === 0);
+  const t = supabase._track;
+  check("upload failure → pending row was inserted", t.inserts.length === 1 && t.inserts[0].status === "pending");
+  check("upload failure → updated to failed", t.updates.some((u) => u.status === "failed"));
+  check("upload failure → failed has error_message", t.updates.some((u) => u.status === "failed" && typeof u.error_message === "string" && u.error_message.length > 0));
+  check("upload failure → never marked submitted", !t.updates.some((u) => u.status === "submitted"));
 }
 
-// 15. Bundle create-post failure → 502
+// 15. Bundle create-post failure → 502, tracking → failed
 {
   const bundle = makeBundleMocks({ postThrow: new Error("bundle post 500") });
-  const { res } = await callHandler({ bundle });
+  const { res, supabase } = await callHandler({ bundle });
   check("post failure → 502", res.statusCode === 502, `got ${res.statusCode}`);
+  const t = supabase._track;
+  check("post failure → uploads happened before failure", t.inserts.length === 1);
+  check("post failure → updated to failed", t.updates.some((u) => u.status === "failed"));
+  check("post failure → never marked submitted", !t.updates.some((u) => u.status === "submitted"));
 }
 
 // 16. Method guard — non-POST → 405
