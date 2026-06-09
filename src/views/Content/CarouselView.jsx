@@ -17,6 +17,9 @@ import {
   loadImage,
   HUMAN_SUBJECT,
 } from "./carouselCompose";
+import { composeAndUploadCarousel } from "./carouselUpload";
+import { checkCarouselImageCap } from "../../../shared/carouselPosting.js";
+import { supabase } from "../../supabaseClient";
 
 function MiniCopy({ text, label }) {
   const [copied, setCopied] = useState(false);
@@ -401,6 +404,159 @@ function SlidePreviewModal({ seq, index, bt, slides, photoPool, onClose, onPrev,
   );
 }
 
+// Get the current session's access token + agent id in one call.
+async function getSession() {
+  const { data } = await supabase.auth.getSession();
+  return { token: data?.session?.access_token || null, agentId: data?.session?.user?.id || null };
+}
+
+// "Post to Instagram" — ties compose→upload→post together with connection
+// gating, the shared image-count cap, a caption-preview confirm, and status
+// feedback. Self-contained (own hooks/modal) so CarouselView stays simple.
+//   • not connected → routes the agent to the Stage 1 Instagram connect view
+//   • over the cap  → blocks with a "trim to post" message
+//   • confirm       → shows the caption (already includes hashtags) + count
+function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, contentId }) {
+  const [connection, setConnection] = useState("checking"); // checking|connected|none|error
+  const [phase, setPhase] = useState("idle");               // idle|confirm|working|done|error
+  const [step, setStep] = useState("");                     // progress label while working
+  const [msg, setMsg] = useState("");                       // error / blocked message
+  const [posted, setPosted] = useState(null);               // returned status string
+
+  const cap = checkCarouselImageCap(slides);
+
+  // Check connection once on mount (reuses GET /api/social-status from Stage 1).
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const { token } = await getSession();
+        if (!token) { if (alive) setConnection("error"); return; }
+        const res = await fetch("/api/social-status", { headers: { Authorization: `Bearer ${token}` } });
+        const body = await res.json().catch(() => ({}));
+        if (alive) setConnection(body?.status === "connected" ? "connected" : "none");
+      } catch { if (alive) setConnection("error"); }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const goConnect = () => { window.location.assign("/?social=connect"); };
+
+  const onClick = () => {
+    setMsg("");
+    if (connection !== "connected") { goConnect(); return; }
+    if (!contentId) { setPhase("error"); setMsg("This carousel is still saving — try again in a moment."); return; }
+    if (!cap.ok) { setPhase("error"); setMsg(cap.message); return; }
+    setPhase("confirm");
+  };
+
+  const doPost = async () => {
+    setPhase("working"); setMsg("");
+    try {
+      const { token, agentId } = await getSession();
+      if (!token || !agentId) throw new Error("Your session expired. Please sign in again.");
+
+      setStep("Composing & uploading images…");
+      const imageUrls = await composeAndUploadCarousel({ slides, stats, footer, brandTokens, agentId, contentId });
+
+      setStep("Posting to Instagram…");
+      const res = await fetch("/api/social-post", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ contentId, imageUrls }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || `Posting failed (${res.status})`);
+
+      setPosted(body?.status || "submitted");
+      setPhase("done");
+    } catch (e) {
+      console.error("[PostToInstagram] failed:", e);
+      setMsg(e?.message || "Could not post to Instagram. Please try again.");
+      setPhase("error");
+    }
+  };
+
+  // Posted — terminal success pill.
+  if (phase === "done") {
+    return (
+      <span style={{
+        fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
+        color: "#4ade80", background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.3)",
+        borderRadius: 8, padding: "8px 14px",
+      }}>✓ Posted to Instagram</span>
+    );
+  }
+
+  const working = phase === "working";
+  const label =
+    connection === "checking" ? "Checking…"
+    : connection !== "connected" ? "Connect Instagram to post"
+    : working ? (step || "Working…")
+    : "Post to Instagram";
+
+  return (
+    <>
+      <button
+        onClick={onClick}
+        disabled={working || connection === "checking"}
+        title={connection !== "connected" && connection !== "checking" ? "Connect your Instagram first" : undefined}
+        style={{
+          padding: "8px 16px", borderRadius: 8, border: "1px solid rgba(201,168,76,0.4)",
+          cursor: working || connection === "checking" ? "default" : "pointer",
+          opacity: working || connection === "checking" ? 0.6 : 1,
+          background: "rgba(201,168,76,0.1)", color: "#e8c97a",
+          fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 11,
+          letterSpacing: "0.06em", textTransform: "uppercase", whiteSpace: "nowrap",
+        }}
+      >{label}</button>
+
+      {phase === "error" && msg && (
+        <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "#f87171", maxWidth: 280 }}>
+          {msg} <button onClick={() => { setPhase("idle"); setMsg(""); }} style={{ background: "none", border: "none", color: "#e8c97a", cursor: "pointer", textDecoration: "underline", fontSize: 11 }}>dismiss</button>
+        </span>
+      )}
+
+      {/* Confirm dialog: caption preview (already includes hashtags) + count. */}
+      {phase === "confirm" && (
+        <div onClick={() => setPhase("idle")} style={{
+          position: "fixed", inset: 0, background: "rgba(4,8,16,0.78)", zIndex: 1000,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            width: "min(94vw, 480px)", background: "#0e1220", border: "1px solid rgba(201,168,76,0.2)",
+            borderRadius: 14, padding: "24px 24px 20px", fontFamily: "'Jost', sans-serif", color: "#F0EDE8",
+          }}>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, fontWeight: 600, color: "#F5ECD7", marginBottom: 4 }}>
+              Post to Instagram
+            </div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 14 }}>
+              {cap.count} images · posts immediately to your connected account.
+            </div>
+            <div style={{
+              maxHeight: 200, overflowY: "auto", whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.5,
+              color: "rgba(255,255,255,0.82)", background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "12px 14px", marginBottom: 18,
+            }}>{caption || "(no caption)"}</div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button onClick={() => setPhase("idle")} style={{
+                padding: "10px 18px", borderRadius: 9, border: "1px solid rgba(255,255,255,0.18)",
+                background: "transparent", color: "rgba(255,255,255,0.7)", cursor: "pointer",
+                fontFamily: "'Jost', sans-serif", fontSize: 12,
+              }}>Cancel</button>
+              <button onClick={doPost} style={{
+                padding: "10px 20px", borderRadius: 9, border: "none", cursor: "pointer",
+                background: "linear-gradient(135deg, #C9A84C 0%, #e8c97a 100%)", color: "#0a1628",
+                fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 700, letterSpacing: "0.04em",
+              }}>Post now</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function CarouselView({ slides, caption, hashtags, address, stats, footer, brandTokens, rowId, onUpdateStatement, photoPool, onSwapPhoto, onRetryStatement }) {
   // Merge over the Milestone defaults, but IGNORE null/undefined token values so
   // an agent who hasn't set a given color/font falls back to the default rather
@@ -455,6 +611,7 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
             color: "#0a1628", fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 11,
             letterSpacing: "0.06em", textTransform: "uppercase",
           }}>{busy ? "Composing…" : "⤓ Download all slides"}</button>
+          <PostToInstagramButton slides={slides} caption={caption} stats={stats} footer={footer} brandTokens={bt} contentId={rowId} />
         </div>
       </div>
 
