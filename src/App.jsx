@@ -8,6 +8,7 @@ import ContentView from "./views/Content";
 import MicrositeView from "./views/Microsite";
 import AnalyticsView from "./views/Analytics";
 import SubscriptionsView from "./views/Subscriptions";
+import InstagramView from "./views/Instagram";
 // Shared modules — see src/lib/ for the why. These extractions broke
 // a circular import that App.jsx had with every view (App imported
 // the views; the views imported pricing/auth/UI symbols back from App).
@@ -878,6 +879,8 @@ function AppShell() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.has("subscription")) setExtraView("Subscriptions");
+    // bundle.social returns the agent here after the hosted connect portal.
+    if (params.has("social")) setExtraView("Instagram");
   }, []);
 
   const handleBook = () => setTab(1);
@@ -902,6 +905,8 @@ function AppShell() {
     Microsite: <MicrositeView />,
     // Subscriptions is reachable only from the profile dropdown — not in navItems.
     Subscriptions: <SubscriptionsView />,
+    // Instagram (Connected Accounts) — off-nav, profile dropdown only.
+    Instagram: <InstagramView />,
     Bookings: <BookingsManagerView />,
     ...(isAdmin && { Admin: <AdminView /> }),
   };
@@ -1011,6 +1016,32 @@ function AppShell() {
           <div>
             <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", fontWeight: 600, letterSpacing: "0.03em" }}>Subscriptions</div>
             <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>Manage plan · billing · invoices</div>
+          </div>
+        </button>
+      </div>
+
+      {/* Instagram (Connected Accounts) */}
+      <div style={{ padding: "0 12px 6px" }}>
+        <button
+          onClick={() => {
+            setShowProfile(false);
+            // Gate behind an active subscription (admins exempt), mirroring
+            // Voice Profile — unsubscribed non-admins go to the plan page.
+            if (!isAdmin && !isSubscribed(profile)) { setExtraView("Subscriptions"); return; }
+            setExtraView("Instagram");
+          }}
+          style={{
+            width: "100%", padding: "11px 14px", borderRadius: 9,
+            border: "1px solid rgba(201,168,76,0.18)",
+            background: "rgba(201,168,76,0.04)",
+            display: "flex", alignItems: "center", gap: 10,
+            cursor: "pointer", textAlign: "left",
+          }}
+        >
+          <span style={{ fontSize: 16 }}>📷</span>
+          <div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", fontWeight: 600, letterSpacing: "0.03em" }}>Instagram</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>Connect your account to post carousels</div>
           </div>
         </button>
       </div>
