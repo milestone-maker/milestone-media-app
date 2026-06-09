@@ -3,77 +3,78 @@
 // Imported by /api/publish-microsite.js and exercised in isolation by
 // scripts/test-entitlement.mjs.
 //
+// The decision logic itself lives in the canonical, isomorphic rule
+// module shared/micrositeAccess.js — the SAME module the client editor UI
+// imports. This file is the server-side adapter: it enforces the
+// authorization preconditions (authenticated user, booking exists,
+// ownership) and wraps the rule's denial reason into the { entitled,
+// reason } shape the endpoint returns as a 403 body.
+//
 // The leading underscore on the parent folder (_lib) signals to Vercel
 // and to humans that this is a private helper, not a deployable function.
 // Vercel only auto-routes files directly under /api/. This file is not
 // reachable as an HTTP endpoint.
 
-// Subscription tiers that include microsite publishing on every booking.
-const MICROSITE_TIERS = new Set(["pro", "elite"]);
-// Subscription statuses considered "active for entitlement purposes".
-// Matches ACTIVE_STATUSES used elsewhere; past_due is in grace.
-const ACTIVE_STATUSES = new Set(["trialing", "active", "past_due"]);
+import { canWriteMicrosite } from "../../shared/micrositeAccess.js";
 
 /**
  * Decide whether the given user is entitled to publish a microsite for
  * the given booking.
  *
+ * Admins and beta agents are trusted and bypass the ownership gate
+ * (mirroring how admin has always worked). For every other path,
+ * ownership of the booking is required, and an existing microsite only
+ * counts when it is owned by the calling agent.
+ *
  * @param {{ id: string, role?: string }} user
  * @param {{ agent_id: string, invoice_paid: boolean,
  *           selected_package?: string, selected_addons?: any[] } | null} booking
  * @param {{ tier?: string|null, status?: string|null } | null} [subscription]
- *        Optional subscription state for the calling agent. When the
- *        agent is on Pro or Elite with an active/trialing/past_due
- *        status, microsite publishing is included with every booking.
+ *        Optional subscription state for the calling agent. Pro/Elite with
+ *        an active/trialing/past_due status includes microsites on every
+ *        booking (no invoice required).
+ * @param {{ isBeta?: boolean,
+ *           existingMicrosite?: { agent_id?: string } | null }} [opts]
+ *        isBeta: the agents.is_beta flag. existingMicrosite: a microsite
+ *        row already saved for this booking (or null) — only honored when
+ *        it is owned by `user`.
  * @returns {{ entitled: boolean, reason?: string }}
  */
-export function checkMicrositeEntitlement(user, booking, subscription = null) {
+export function checkMicrositeEntitlement(user, booking, subscription = null, opts = {}) {
   if (!user) {
     return { entitled: false, reason: "no authenticated user" };
   }
 
-  // Admins bypass everything.
-  if (user.role === "admin") {
-    return { entitled: true };
+  const isBeta = opts.isBeta === true;
+  const trusted = user.role === "admin" || isBeta;
+
+  // Ownership preconditions apply to everyone EXCEPT trusted roles
+  // (admin/beta), which may act on any booking — preserving the
+  // long-standing admin bypass and extending it to beta.
+  if (!trusted) {
+    if (!booking) {
+      return { entitled: false, reason: "booking not found" };
+    }
+    if (booking.agent_id !== user.id) {
+      return { entitled: false, reason: "this booking does not belong to you" };
+    }
   }
 
-  if (!booking) {
-    return { entitled: false, reason: "booking not found" };
-  }
+  // An existing microsite only counts toward access when the calling agent
+  // owns it (path 3). A missing row, or one owned by someone else, is false.
+  const existing = opts.existingMicrosite || null;
+  const hasExistingMicrosite = !!existing && existing.agent_id === user.id;
 
-  // Ownership
-  if (booking.agent_id !== user.id) {
-    return { entitled: false, reason: "this booking does not belong to you" };
-  }
-
-  // Invoice must be paid (credit-covered bookings have invoice_paid set
-  // to true at insert time — see api/create-booking.js).
-  if (!booking.invoice_paid) {
-    return { entitled: false, reason: "invoice has not been paid yet" };
-  }
-
-  // Booking-level microsite signals
-  const pkg = (booking.selected_package || "").toLowerCase();
-  const hasLuxury = pkg === "luxury";
-  const addons = Array.isArray(booking.selected_addons) ? booking.selected_addons : [];
-  const hasMicrositeAddon = addons.some(a => {
-    if (typeof a === "string") return a === "microsite";
-    if (a && typeof a === "object") return a.id === "microsite";
-    return false;
+  const { allowed, reason } = canWriteMicrosite({
+    role: user.role || null,
+    isBeta,
+    hasExistingMicrosite,
+    subscriptionTier: subscription?.tier ?? null,
+    subscriptionStatus: subscription?.status ?? null,
+    selectedPackage: booking?.selected_package ?? null,
+    selectedAddons: booking?.selected_addons ?? [],
+    invoicePaid: !!booking?.invoice_paid,
   });
 
-  // Subscription-level entitlement
-  const hasMicrositeSub =
-    !!subscription &&
-    MICROSITE_TIERS.has(subscription.tier) &&
-    ACTIVE_STATUSES.has(subscription.status);
-
-  if (!hasLuxury && !hasMicrositeAddon && !hasMicrositeSub) {
-    return {
-      entitled: false,
-      reason: "this booking doesn't include a microsite — add the microsite add-on, or subscribe to Pro or Elite to include microsites with every booking",
-    };
-  }
-
-  return { entitled: true };
+  return allowed ? { entitled: true } : { entitled: false, reason };
 }

@@ -135,11 +135,59 @@ const cases = [
     expect: { entitled: false, reasonMatch: /does not belong to you/i },
   },
   {
-    name: "Pro subscriber + own booking, invoice NOT paid → denied (invoice still required)",
+    // Policy change (migration 031 / shared rule): subscription path (4) no
+    // longer requires invoice_paid. A Pro/active agent is entitled even on an
+    // unpaid, non-microsite booking.
+    name: "Pro subscriber + own booking, invoice NOT paid → entitled (sub path needs no invoice)",
     user: alice,
     subscription: { tier: "pro", status: "active" },
     booking: bookingFor(alice.id, { invoice_paid: false, selected_package: "essential", selected_addons: [] }),
-    expect: { entitled: false, reasonMatch: /invoice has not been paid/i },
+    expect: { entitled: true },
+  },
+
+  // ── Beta path (2) ──────────────────────────────────────────────────
+  {
+    name: "beta agent + own booking, Essential, no addons, unpaid → entitled (beta path)",
+    user: alice,
+    opts: { isBeta: true },
+    booking: bookingFor(alice.id, { invoice_paid: false, selected_package: "essential", selected_addons: [] }),
+    expect: { entitled: true },
+  },
+  {
+    name: "beta agent + someone else's booking → entitled (beta is trusted, bypasses ownership like admin)",
+    user: alice,
+    opts: { isBeta: true },
+    booking: bookingFor(bob.id, { invoice_paid: false, selected_package: "essential", selected_addons: [] }),
+    expect: { entitled: true },
+  },
+
+  // ── Existing-microsite path (3) ────────────────────────────────────
+  {
+    name: "existing microsite owned by agent + Starter + unpaid + Essential → entitled (existing path)",
+    user: alice,
+    subscription: { tier: "starter", status: "active" },
+    opts: { existingMicrosite: { agent_id: alice.id } },
+    booking: bookingFor(alice.id, { invoice_paid: false, selected_package: "essential", selected_addons: [] }),
+    expect: { entitled: true },
+  },
+  {
+    name: "existing microsite owned by SOMEONE ELSE + own booking, Essential, unpaid → denied",
+    user: alice,
+    opts: { existingMicrosite: { agent_id: bob.id } },
+    booking: bookingFor(alice.id, { invoice_paid: false, selected_package: "essential", selected_addons: [] }),
+    expect: { entitled: false, reasonMatch: /(does not|doesn't) include a microsite/i },
+  },
+
+  // ── The exact 1954 Toronto production fixture ──────────────────────
+  // signature package, no addons, invoice paid, Pro/active subscription,
+  // and an existing owned microsite → must ALLOW (this is the bug we fixed).
+  {
+    name: "1954 Toronto: signature, [] addons, paid, pro/active, existing owned row → entitled",
+    user: alice,
+    subscription: { tier: "pro", status: "active" },
+    opts: { existingMicrosite: { agent_id: alice.id } },
+    booking: bookingFor(alice.id, { invoice_paid: true, selected_package: "signature", selected_addons: [] }),
+    expect: { entitled: true },
   },
 ];
 
@@ -148,7 +196,7 @@ let passed = 0;
 let failed = 0;
 
 for (const c of cases) {
-  const got = checkMicrositeEntitlement(c.user, c.booking, c.subscription);
+  const got = checkMicrositeEntitlement(c.user, c.booking, c.subscription, c.opts);
   const want = c.expect;
   let ok = got.entitled === want.entitled;
   if (ok && want.reasonMatch) {

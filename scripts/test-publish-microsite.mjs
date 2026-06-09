@@ -121,13 +121,18 @@ function makeFakeClient() {
       }
       if (table === "microsites") {
         const captured = mockState.micrositeWrites;
-        // The handler does a SELECT first to find an existing row.
+        const existing = mockState.existingMicrosite ?? null;
+        // Two SELECT shapes hit this table:
+        //   • step 4b existing-microsite-by-booking: select→eq→eq→limit→maybeSingle
+        //   • step 9 existing-by-slug write check:    select→eq→eq→maybeSingle
+        // Both terminate in maybeSingle and return the same existing row (or
+        // null). Default null preserves the insert-path hero scenarios.
+        const terminal = {
+          maybeSingle: async () => ({ data: existing, error: null }),
+          limit: () => ({ maybeSingle: async () => ({ data: existing, error: null }) }),
+        };
         return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
-            }),
-          }),
+          select: () => ({ eq: () => ({ eq: () => terminal }) }),
           insert: (row) => {
             captured.push({ op: "insert", row });
             return {
@@ -421,6 +426,55 @@ const BASE_PROPERTY_DATA = {
   check("status 200 (empty branding)",   res2.statusCode === 200, `got ${res2.statusCode}`);
   check("agency_name === '' when absent", pd2?.agency_name === "");
   check("brokerage_name === '' when absent", pd2?.brokerage_name === "");
+}
+
+// ── Scenario 5 — Entitlement gate: beta / existing / ownership ──────
+{
+  console.log("\n── Scenario 5: entitlement gate (beta, existing-microsite, cross-owner) ──\n");
+
+  // 5a. Beta agent, NON-microsite booking (signature, no addons, UNPAID),
+  //     no subscription → still publishes (beta path 2).
+  resetMock({
+    agent:   { id: "agent-1", role: "agent", is_beta: true, subscription_tier: null, subscription_status: null },
+    booking: { id: "booking-1", agent_id: "agent-1", invoice_paid: false, selected_package: "signature", selected_addons: [], address: "5912 Velasco" },
+    voiceProfile: null,
+  });
+  {
+    const res = makeRes();
+    await handler(makeReq({ bookingId: "booking-1", theme: "Prestige", slug: "beta-slug", propertyData: { ...BASE_PROPERTY_DATA } }), res);
+    check("beta agent publishes unpaid non-microsite booking → 200", res.statusCode === 200, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
+    check("beta publish wrote a microsite row", mockState.micrositeWrites.length === 1);
+  }
+
+  // 5b. Existing owned microsite for the booking, Starter tier, UNPAID
+  //     signature booking → publishes (existing path 3), via UPDATE.
+  resetMock({
+    agent:   { id: "agent-1", role: "agent", is_beta: false, subscription_tier: "starter", subscription_status: "active" },
+    booking: { id: "booking-1", agent_id: "agent-1", invoice_paid: false, selected_package: "signature", selected_addons: [], address: "5912 Velasco" },
+    existingMicrosite: { id: "ms-1", agent_id: "agent-1" },
+    voiceProfile: null,
+  });
+  {
+    const res = makeRes();
+    await handler(makeReq({ bookingId: "booking-1", theme: "Prestige", slug: "existing-slug", propertyData: { ...BASE_PROPERTY_DATA } }), res);
+    check("existing-microsite owner re-publishes unpaid Starter booking → 200", res.statusCode === 200, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
+    check("re-publish used UPDATE (existing row found)", mockState.micrositeWrites[0]?.op === "update");
+  }
+
+  // 5c. Non-owner: booking belongs to agent-2, caller is agent-1 (no beta,
+  //     no sub, no existing) → 403 ownership.
+  resetMock({
+    agent:   { id: "agent-1", role: "agent", is_beta: false, subscription_tier: null, subscription_status: null },
+    booking: { id: "booking-1", agent_id: "agent-2", invoice_paid: true, selected_package: "luxury", selected_addons: [], address: "Someone Else Rd" },
+    voiceProfile: null,
+  });
+  {
+    const res = makeRes();
+    await handler(makeReq({ bookingId: "booking-1", theme: "Prestige", slug: "stolen-slug", propertyData: { ...BASE_PROPERTY_DATA } }), res);
+    check("cross-owner publish → 403", res.statusCode === 403, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
+    check("cross-owner publish wrote nothing", mockState.micrositeWrites.length === 0);
+    check("403 reason mentions ownership", /does not belong to you/i.test(res.body?.error || ""), res.body?.error);
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
