@@ -56,6 +56,7 @@ function InstagramView() {
   const [connectedAt, setConnectedAt] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false); // gates Connect until requirements are acknowledged
   const pollTimer = useRef(null);
   const pollIdx = useRef(0);
   const mounted = useRef(true);
@@ -195,15 +196,60 @@ function InstagramView() {
               </div>
             )}
 
+            {/* Requirements notice — prominent, high-contrast (not fine print).
+                Posting via the Instagram Graph API only works for Business/
+                Creator accounts linked to a Facebook Page, so agents must
+                understand this BEFORE connecting. */}
+            <div style={{
+              background: "rgba(201,168,76,0.08)", border: "1px solid rgba(201,168,76,0.35)",
+              borderRadius: 12, padding: "18px 20px", marginBottom: 16,
+            }}>
+              <div style={{
+                fontFamily: "'Cormorant Garamond', serif", fontSize: 21, fontWeight: 600,
+                color: "#F5ECD7", marginBottom: 10,
+              }}>
+                Before connecting your Instagram
+              </div>
+              <div style={{ fontSize: 13.5, color: "rgba(255,255,255,0.82)", marginBottom: 8 }}>
+                For posting to work, your Instagram account must be:
+              </div>
+              <ul style={{ margin: "0 0 12px", paddingLeft: 20, fontSize: 13.5, lineHeight: 1.7, color: "#F0EDE8" }}>
+                <li>A <strong>Business or Creator account</strong> (not a personal account)</li>
+                <li>Linked to a <strong>Facebook Page</strong> you manage</li>
+              </ul>
+              <div style={{ fontSize: 13, lineHeight: 1.6, color: "rgba(255,255,255,0.7)" }}>
+                When you connect, sign in with the Facebook account that controls it and approve all
+                requested permissions. If your account isn't set up this way, your posts won't publish.
+              </div>
+            </div>
+
+            {/* Required acknowledgment — gates the Connect button. */}
+            <label style={{
+              display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 16,
+              cursor: "pointer", fontSize: 13, lineHeight: 1.5, color: "rgba(255,255,255,0.85)",
+            }}>
+              <input
+                type="checkbox"
+                checked={acknowledged}
+                onChange={(e) => setAcknowledged(e.target.checked)}
+                style={{ marginTop: 2, width: 17, height: 17, accentColor: GOLD, cursor: "pointer", flexShrink: 0 }}
+              />
+              <span>
+                I understand my Instagram must be a Business or Creator account linked to a Facebook Page.
+              </span>
+            </label>
+
             <button
               onClick={handleConnect}
-              disabled={busy}
+              disabled={busy || !acknowledged}
               style={{
                 width: "100%", padding: "14px 18px", borderRadius: 10, border: "none",
-                background: busy ? "rgba(201,168,76,0.4)" : GOLD, color: "#1a1206",
+                background: (busy || !acknowledged) ? "rgba(201,168,76,0.25)" : GOLD,
+                color: (busy || !acknowledged) ? "rgba(26,18,6,0.55)" : "#1a1206",
                 fontFamily: "'Jost', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: "0.02em",
-                cursor: busy ? "default" : "pointer",
+                cursor: (busy || !acknowledged) ? "not-allowed" : "pointer",
               }}
+              title={!acknowledged ? "Confirm the requirement above to continue" : undefined}
             >
               {busy ? "Starting…" : status === "pending" ? "Reopen connection" : "Connect Instagram"}
             </button>
