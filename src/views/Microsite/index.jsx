@@ -257,6 +257,8 @@ function MicrositeView() {
   const [step, setStep] = useState("build");
   const [themeIdx, setThemeIdx] = useState(0);
   const [generating, setGenerating] = useState(false);
+  const [publishing, setPublishing] = useState(false); // in-flight guard for Save & Republish / Publish
+  const [requestingAddon, setRequestingAddon] = useState(false); // in-flight guard for "Add Microsite — $price"
   const [published, setPublished] = useState(false);
   const [copied, setCopied] = useState(false);
   const [publishedSlug, setPublishedSlug] = useState(null);
@@ -703,15 +705,23 @@ function MicrositeView() {
   const hasSourceSelection = sourceType === "listing" ? !!selectedListingId : !!selectedBookingId;
 
   const handleRequestAddon = async () => {
+    // Re-entry guard: ignore clicks while a request is already in flight.
+    if (requestingAddon) return;
     if (!selectedListingId || !user?.id) return;
-    const { error } = await supabase.from("microsite_requests").insert({
-      listing_id: selectedListingId,
-      agent_id: user.id,
-      status: "pending",
-    });
-    if (!error) {
-      setAddonRequested(true);
-      setAddonStatus("pending");
+    setRequestingAddon(true);
+    try {
+      const { error } = await supabase.from("microsite_requests").insert({
+        listing_id: selectedListingId,
+        agent_id: user.id,
+        status: "pending",
+      });
+      if (!error) {
+        setAddonRequested(true);
+        setAddonStatus("pending");
+      }
+    } finally {
+      // Clear on every path (success, insert error, or throw), re-enabling the button.
+      setRequestingAddon(false);
     }
   };
 
@@ -813,6 +823,9 @@ function MicrositeView() {
   };
 
   const handlePublish = async () => {
+    // Re-entry guard: ignore clicks while a publish is already in flight, so
+    // rapid double-clicks can't fire multiple concurrent publish calls.
+    if (publishing) return;
     // Stage 6 white-label: soft, non-blocking warning when the agent has no
     // agency branding. Publishing still proceeds on confirm — the public page
     // simply falls back to the default Milestone branding.
@@ -822,6 +835,9 @@ function MicrositeView() {
       );
       if (!proceed) return;
     }
+    // Set in-flight AFTER the confirm resolves, so cancelling the confirm
+    // never leaves the button stuck disabled.
+    setPublishing(true);
     try {
       // Publish is now a server-side operation. The endpoint validates
       // entitlement, copies booking media into the public bucket, builds
@@ -901,6 +917,10 @@ function MicrositeView() {
     } catch (err) {
       console.error("Publish error:", err);
       alert("Failed to publish. Please try again.");
+    } finally {
+      // Clear the in-flight flag on EVERY path — success, each early return
+      // (no-token/401/403/!ok), and the catch — re-enabling the button.
+      setPublishing(false);
     }
   };
 
@@ -1425,12 +1445,14 @@ function MicrositeView() {
         listingFloorplan={listingFloorplan}
       />
 
-      <button onClick={handlePublish} style={{
-        background: "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
+      <button onClick={handlePublish} disabled={publishing} style={{
+        background: publishing ? "rgba(201,168,76,0.3)" : "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
         border: "none", borderRadius: 10, padding: "15px",
         fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 13,
-        letterSpacing: "0.12em", textTransform: "uppercase", color: "#0a1628", cursor: "pointer",
-      }}>{publishedSlug ? "✅ Save & Republish" : "🚀 Publish Microsite"}</button>
+        letterSpacing: "0.12em", textTransform: "uppercase",
+        color: publishing ? "rgba(255,255,255,0.5)" : "#0a1628",
+        cursor: publishing ? "not-allowed" : "pointer",
+      }}>{publishing ? "Publishing…" : publishedSlug ? "✅ Save & Republish" : "🚀 Publish Microsite"}</button>
     </div>
   );
 
@@ -1613,14 +1635,15 @@ function MicrositeView() {
                   Request Denied — Contact admin for details
                 </div>
               ) : (
-                <button onClick={handleRequestAddon} style={{
-                  background: "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
+                <button onClick={handleRequestAddon} disabled={requestingAddon} style={{
+                  background: requestingAddon ? "rgba(201,168,76,0.3)" : "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
                   border: "none", borderRadius: 10, padding: "14px 32px",
                   fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 12,
-                  letterSpacing: "0.1em", textTransform: "uppercase", color: "#0a1628",
-                  cursor: "pointer", transition: "all 0.3s",
+                  letterSpacing: "0.1em", textTransform: "uppercase",
+                  color: requestingAddon ? "rgba(255,255,255,0.5)" : "#0a1628",
+                  cursor: requestingAddon ? "not-allowed" : "pointer", transition: "all 0.3s",
                 }}>
-                  Add Microsite — ${MICROSITE_ADDON_PRICE}
+                  {requestingAddon ? "Requesting…" : `Add Microsite — $${MICROSITE_ADDON_PRICE}`}
                 </button>
               )}
             </>
