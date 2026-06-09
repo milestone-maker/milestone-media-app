@@ -144,3 +144,61 @@ export async function getSocialAccountByType({ teamId, type = "INSTAGRAM", fetch
     throw err;
   }
 }
+
+// ── Posting (Stage 2) ────────────────────────────────────────────────
+
+/**
+ * Ingest a publicly-reachable image URL into bundle's media library. bundle
+ * fetches the URL server-side and returns an upload record whose `id` is later
+ * referenced by createPost. The caller is responsible for ensuring `url` is a
+ * trusted, public URL (the api/social-post endpoint restricts these to this
+ * project's Supabase Storage public host).
+ *
+ * @param {{ teamId: string, url: string, fetchImpl?: typeof fetch, apiKey?: string }} args
+ * @returns {Promise<{ id: string, url?: string|null, type?: string }>} the upload record
+ */
+export async function createUploadFromUrl({ teamId, url, fetchImpl, apiKey } = {}) {
+  if (!url) throw new BundleApiError("url is required for upload/from-url", { status: 0 });
+  const body = { url };
+  if (teamId) body.teamId = teamId;
+  const upload = await bundleFetch("/upload/from-url", { method: "POST", body, fetchImpl, apiKey });
+  if (!upload || !upload.id) throw new BundleApiError("bundle upload/from-url returned no id", { status: 502, body: upload });
+  return upload;
+}
+
+/**
+ * Create a post for the team's connected Instagram account, targeting by
+ * team + type (no socialAccountId needed). An Instagram CAROUSEL is a
+ * type:"POST" with multiple ordered uploadIds.
+ *
+ * `postDate` and `status` are parameters so Stage 3 scheduling reuses this by
+ * passing a future ISO date with status "SCHEDULED". bundle's status enum is
+ * ["DRAFT","SCHEDULED"] — there is NO "publish now" status, so IMMEDIATE
+ * publishing = status "SCHEDULED" with postDate ≈ now (the caller decides).
+ *
+ * @param {{ teamId: string, title: string, postDate: string, status?: string, text: string, uploadIds: string[], fetchImpl?: typeof fetch, apiKey?: string }} args
+ * @returns {Promise<{ id: string, status?: string }>} the created post
+ */
+export async function createPost({ teamId, title, postDate, status = "SCHEDULED", text, uploadIds, fetchImpl, apiKey } = {}) {
+  if (!teamId) throw new BundleApiError("teamId is required for create-post", { status: 0 });
+  if (!Array.isArray(uploadIds) || uploadIds.length === 0) {
+    throw new BundleApiError("uploadIds must be a non-empty array for create-post", { status: 0 });
+  }
+  const body = {
+    teamId,
+    title: title || "Milestone carousel",
+    postDate,
+    status,
+    socialAccountTypes: ["INSTAGRAM"],
+    data: {
+      INSTAGRAM: {
+        type: "POST",
+        text: text || "",
+        uploadIds,
+      },
+    },
+  };
+  const post = await bundleFetch("/post/", { method: "POST", body, fetchImpl, apiKey });
+  if (!post || !post.id) throw new BundleApiError("bundle create-post returned no id", { status: 502, body: post });
+  return post;
+}
