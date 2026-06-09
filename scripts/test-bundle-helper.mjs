@@ -23,6 +23,8 @@ const {
   createTeam,
   createPortalLink,
   getSocialAccountByType,
+  createUploadFromUrl,
+  createPost,
   BundleApiError,
 } = await import(pathToFileURL(MOD_PATH).href);
 
@@ -174,6 +176,82 @@ console.log("\n── api/_lib/bundle.js — bundle.social adapter ──\n");
   let err = null;
   try { await getSocialAccountByType({ teamId: "team_abc", apiKey: KEY, fetchImpl: f }); } catch (e) { err = e; }
   check("by-type 500 → throws", err instanceof BundleApiError && err.status === 500);
+}
+
+// ── Posting helpers (Stage 2) ────────────────────────────────────────
+
+// 15. createUploadFromUrl — POSTs url (+teamId) to /upload/from-url, returns upload
+{
+  const f = makeFetch({ status: 201, json: { id: "up_1", url: "https://cdn.bundle/up_1.jpg", type: "image" } });
+  const up = await createUploadFromUrl({ teamId: "team_abc", url: "https://x.supabase.co/storage/v1/object/public/b/a.jpg", apiKey: KEY, fetchImpl: f });
+  check("uploadFromUrl returns upload id", up.id === "up_1");
+  check("uploadFromUrl POSTs to /upload/from-url", f.calls[0].url.endsWith("/upload/from-url") && f.calls[0].init.method === "POST");
+  const sent = JSON.parse(f.calls[0].init.body);
+  check("uploadFromUrl body has url", sent.url === "https://x.supabase.co/storage/v1/object/public/b/a.jpg");
+  check("uploadFromUrl body has teamId", sent.teamId === "team_abc");
+  check("uploadFromUrl sends x-api-key", f.calls[0].init.headers["x-api-key"] === KEY);
+}
+
+// 16. createUploadFromUrl — missing url throws before fetch
+{
+  const f = makeFetch();
+  let err = null;
+  try { await createUploadFromUrl({ teamId: "team_abc", apiKey: KEY, fetchImpl: f }); } catch (e) { err = e; }
+  check("uploadFromUrl missing url → throws", err instanceof BundleApiError && f.calls.length === 0);
+}
+
+// 17. createUploadFromUrl — response without id → BundleApiError
+{
+  const f = makeFetch({ json: { url: "x" } });
+  let err = null;
+  try { await createUploadFromUrl({ teamId: "t", url: "https://x.supabase.co/storage/v1/object/public/b/a.jpg", apiKey: KEY, fetchImpl: f }); } catch (e) { err = e; }
+  check("uploadFromUrl no id → throws", err instanceof BundleApiError && err.status === 502);
+}
+
+// 18. createPost — POSTs the full Instagram carousel body, returns post
+{
+  const f = makeFetch({ status: 201, json: { id: "post_1", status: "SCHEDULED" } });
+  const post = await createPost({
+    teamId: "team_abc",
+    title: "Milestone carousel · 2026-06-09",
+    postDate: "2026-06-09T12:00:00.000Z",
+    status: "SCHEDULED",
+    text: "Caption here\n\n#dallas #realestate",
+    uploadIds: ["up_1", "up_2", "up_3"],
+    apiKey: KEY, fetchImpl: f,
+  });
+  check("createPost returns post id", post.id === "post_1");
+  check("createPost returns status", post.status === "SCHEDULED");
+  check("createPost POSTs to /post/", f.calls[0].url.endsWith("/post/") && f.calls[0].init.method === "POST");
+  const sent = JSON.parse(f.calls[0].init.body);
+  check("createPost body teamId", sent.teamId === "team_abc");
+  check("createPost body postDate passthrough", sent.postDate === "2026-06-09T12:00:00.000Z");
+  check("createPost body status passthrough", sent.status === "SCHEDULED");
+  check("createPost socialAccountTypes=[INSTAGRAM]", JSON.stringify(sent.socialAccountTypes) === JSON.stringify(["INSTAGRAM"]));
+  check("createPost data.INSTAGRAM.type=POST", sent.data?.INSTAGRAM?.type === "POST");
+  check("createPost data.INSTAGRAM.text passthrough", sent.data?.INSTAGRAM?.text === "Caption here\n\n#dallas #realestate");
+  check("createPost data.INSTAGRAM.uploadIds in order", JSON.stringify(sent.data?.INSTAGRAM?.uploadIds) === JSON.stringify(["up_1", "up_2", "up_3"]));
+}
+
+// 19. createPost — status defaults to SCHEDULED when omitted
+{
+  const f = makeFetch({ status: 201, json: { id: "post_2" } });
+  await createPost({ teamId: "t", title: "x", postDate: "2026-06-09T12:00:00.000Z", text: "x", uploadIds: ["u1"], apiKey: KEY, fetchImpl: f });
+  const sent = JSON.parse(f.calls[0].init.body);
+  check("createPost status defaults to SCHEDULED", sent.status === "SCHEDULED");
+}
+
+// 20. createPost — missing teamId / empty uploadIds throw before fetch
+{
+  const f1 = makeFetch();
+  let e1 = null;
+  try { await createPost({ title: "x", postDate: "d", text: "x", uploadIds: ["u1"], apiKey: KEY, fetchImpl: f1 }); } catch (e) { e1 = e; }
+  check("createPost missing teamId → throws", e1 instanceof BundleApiError && f1.calls.length === 0);
+
+  const f2 = makeFetch();
+  let e2 = null;
+  try { await createPost({ teamId: "t", title: "x", postDate: "d", text: "x", uploadIds: [], apiKey: KEY, fetchImpl: f2 }); } catch (e) { e2 = e; }
+  check("createPost empty uploadIds → throws", e2 instanceof BundleApiError && f2.calls.length === 0);
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
