@@ -8,4 +8,12 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = 'https://auth.milestonemediaphotography.com';
 const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNicG5qdW90b3h0bWVmbWVkcG1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQzNDcwMTMsImV4cCI6MjA4OTkyMzAxM30.T6T8ACQPwnokeajrb47kbcQ82bauu4S1z1pb9wsv5OM';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Pin the auth storage key to the original project ref. supabase-js otherwise
+// derives it from the URL's first label, so moving the host from
+// cbpnjuotoxtmefmedpmj.supabase.co → auth.milestonemediaphotography.com would
+// change the key (sb-cbpnjuotoxtmefmedpmj-auth-token → sb-auth-auth-token) and
+// silently log out every currently signed-in agent. Pinning it preserves
+// existing sessions across the custom-domain cutover.
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: { storageKey: 'sb-cbpnjuotoxtmefmedpmj-auth-token' },
+});
