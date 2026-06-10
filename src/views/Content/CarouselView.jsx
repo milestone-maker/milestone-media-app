@@ -410,6 +410,53 @@ async function getSession() {
   return { token: data?.session?.access_token || null, agentId: data?.session?.user?.id || null };
 }
 
+// ── Scheduling helpers (Stage 3a) ────────────────────────────────────
+// The whole app treats wall-clock times as America/Chicago (Central) — see
+// api/calendar.js and api/microsite-chat.js — and Stage 3b will assume the
+// same. So a scheduled post's picked time is interpreted as Central, NOT the
+// browser's local zone, and converted to a UTC ISO before it leaves the page.
+
+const TZ = "America/Chicago";
+// Must mirror SCHEDULE_BUFFER_MS in api/social-post.js — the floor a scheduled
+// time must clear so the server never rejects a too-soon pick.
+const SCHEDULE_BUFFER_MS = 3 * 60 * 1000; // 3 minutes
+
+// Convert a <input type="datetime-local"> value ("YYYY-MM-DDTHH:mm"), read as a
+// Central wall-clock time, into the UTC ISO string for that exact instant.
+// DST-correct: we derive Central's offset for THAT specific date via
+// Intl.DateTimeFormat rather than assuming a fixed -5/-6h or trusting the
+// browser's own zone.
+function centralWallClockToUtcIso(localValue) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(localValue || "");
+  if (!m) return null;
+  const [, y, mo, d, h, mi] = m.map(Number);
+  // Instant if the wall clock were UTC.
+  const asUtc = Date.UTC(y, mo - 1, d, h, mi);
+  // What Central wall clock does that instant render as? (numbered in UTC)
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  }).formatToParts(new Date(asUtc));
+  const p = {};
+  for (const part of parts) p[part.type] = part.value;
+  const centralAsUtc = Date.UTC(
+    +p.year, +p.month - 1, +p.day,
+    p.hour === "24" ? 0 : +p.hour, +p.minute, +p.second,
+  );
+  const offset = centralAsUtc - asUtc; // Central's offset from UTC for this date
+  return new Date(asUtc - offset).toISOString();
+}
+
+// Render a UTC ISO instant as a friendly Central-time label, e.g.
+// "Tue, Jun 9, 2026 at 3:30 PM CT".
+function formatCentral(iso) {
+  const label = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ, weekday: "short", month: "short", day: "numeric",
+    year: "numeric", hour: "numeric", minute: "2-digit", hour12: true,
+  }).format(new Date(iso));
+  return `${label} CT`;
+}
+
 // "Post to Instagram" — ties compose→upload→post together with connection
 // gating, the shared image-count cap, a caption-preview confirm, and status
 // feedback. Self-contained (own hooks/modal) so CarouselView stays simple.
@@ -422,6 +469,9 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
   const [step, setStep] = useState("");                     // progress label while working
   const [msg, setMsg] = useState("");                       // error / blocked message
   const [posted, setPosted] = useState(null);               // returned status string
+  const [mode, setMode] = useState("now");                  // "now" | "schedule"
+  const [scheduleLocal, setScheduleLocal] = useState("");   // datetime-local value (Central wall-clock)
+  const [scheduledLabel, setScheduledLabel] = useState(""); // Central label shown on the scheduled success state
 
   const cap = checkCarouselImageCap(slides);
 
@@ -447,10 +497,27 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
     if (connection !== "connected") { goConnect(); return; }
     if (!contentId) { setPhase("error"); setMsg("This carousel is still saving — try again in a moment."); return; }
     if (!cap.ok) { setPhase("error"); setMsg(cap.message); return; }
+    setMode("now"); setScheduleLocal(""); setMsg("");
     setPhase("confirm");
   };
 
   const doPost = async () => {
+    // Resolve the optional postDate from the chosen mode BEFORE leaving the
+    // confirm dialog, so a bad pick keeps the modal open with a message.
+    let postDate; // undefined → immediate; ISO string → scheduled
+    let chosenIso = null;
+    if (mode === "schedule") {
+      chosenIso = centralWallClockToUtcIso(scheduleLocal);
+      if (!chosenIso) { setMsg("Pick a date and time to schedule."); return; }
+      // Client-side guard mirrors the server buffer so the user gets a friendly
+      // message instead of a 400.
+      if (new Date(chosenIso).getTime() < Date.now() + SCHEDULE_BUFFER_MS) {
+        setMsg("Pick a time at least a few minutes from now.");
+        return;
+      }
+      postDate = chosenIso;
+    }
+
     setPhase("working"); setMsg("");
     try {
       const { token, agentId } = await getSession();
@@ -459,16 +526,19 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
       setStep("Composing & uploading images…");
       const imageUrls = await composeAndUploadCarousel({ slides, stats, footer, brandTokens, agentId, contentId });
 
-      setStep("Posting to Instagram…");
+      setStep(mode === "schedule" ? "Scheduling…" : "Posting to Instagram…");
       const res = await fetch("/api/social-post", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ contentId, imageUrls }),
+        body: JSON.stringify(postDate ? { contentId, imageUrls, postDate } : { contentId, imageUrls }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body?.error || `Posting failed (${res.status})`);
 
       setPosted(body?.status || "submitted");
+      // Prefer the server's authoritative effective time for the scheduled label.
+      if (mode === "schedule") setScheduledLabel(formatCentral(body?.scheduledFor || chosenIso));
+      else setScheduledLabel("");
       setPhase("done");
     } catch (e) {
       console.error("[PostToInstagram] failed:", e);
@@ -477,14 +547,16 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
     }
   };
 
-  // Posted — terminal success pill.
+  // Posted — terminal success pill. Scheduled posts show their Central time.
   if (phase === "done") {
     return (
       <span style={{
         fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: "0.04em",
         color: "#4ade80", background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.3)",
         borderRadius: 8, padding: "8px 14px",
-      }}>✓ Posted to Instagram</span>
+      }}>
+        {scheduledLabel ? `✓ Scheduled for ${scheduledLabel}` : "✓ Posted to Instagram"}
+      </span>
     );
   }
 
@@ -517,7 +589,8 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
         </span>
       )}
 
-      {/* Confirm dialog: caption preview (already includes hashtags) + count. */}
+      {/* Confirm dialog: caption preview (already includes hashtags) + count,
+          plus a Post-now / Schedule-for-later choice. */}
       {phase === "confirm" && (
         <div onClick={() => setPhase("idle")} style={{
           position: "fixed", inset: 0, background: "rgba(4,8,16,0.78)", zIndex: 1000,
@@ -531,13 +604,53 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
               Post to Instagram
             </div>
             <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 14 }}>
-              {cap.count} images · posts immediately to your connected account.
+              {cap.count} images · {mode === "schedule" ? "schedules to your connected account." : "posts immediately to your connected account."}
             </div>
             <div style={{
               maxHeight: 200, overflowY: "auto", whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.5,
               color: "rgba(255,255,255,0.82)", background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "12px 14px", marginBottom: 18,
+              border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10, padding: "12px 14px", marginBottom: 16,
             }}>{caption || "(no caption)"}</div>
+
+            {/* When to post: Post now vs Schedule for later */}
+            <div style={{ display: "flex", gap: 8, marginBottom: mode === "schedule" ? 12 : 16 }}>
+              {[["now", "Post now"], ["schedule", "Schedule for later"]].map(([m, lbl]) => {
+                const active = mode === m;
+                return (
+                  <button key={m} onClick={() => { setMode(m); setMsg(""); }} style={{
+                    flex: 1, padding: "9px 12px", borderRadius: 9, cursor: "pointer",
+                    border: active ? "1px solid rgba(201,168,76,0.7)" : "1px solid rgba(255,255,255,0.16)",
+                    background: active ? "rgba(201,168,76,0.14)" : "transparent",
+                    color: active ? "#e8c97a" : "rgba(255,255,255,0.7)",
+                    fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: active ? 700 : 500,
+                  }}>{lbl}</button>
+                );
+              })}
+            </div>
+
+            {mode === "schedule" && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontSize: 11, color: "rgba(255,255,255,0.55)", marginBottom: 6, letterSpacing: "0.04em" }}>
+                  Date &amp; time (Central / CT)
+                </label>
+                <input
+                  type="datetime-local"
+                  value={scheduleLocal}
+                  onChange={(e) => { setScheduleLocal(e.target.value); setMsg(""); }}
+                  style={{
+                    width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 9,
+                    border: "1px solid rgba(255,255,255,0.18)", background: "rgba(255,255,255,0.04)",
+                    color: "#F0EDE8", fontFamily: "'Jost', sans-serif", fontSize: 13,
+                    colorScheme: "dark",
+                  }}
+                />
+              </div>
+            )}
+
+            {msg && (
+              <div style={{ fontSize: 12, color: "#f87171", marginBottom: 14 }}>{msg}</div>
+            )}
+
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
               <button onClick={() => setPhase("idle")} style={{
                 padding: "10px 18px", borderRadius: 9, border: "1px solid rgba(255,255,255,0.18)",
@@ -548,7 +661,7 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
                 padding: "10px 20px", borderRadius: 9, border: "none", cursor: "pointer",
                 background: "linear-gradient(135deg, #C9A84C 0%, #e8c97a 100%)", color: "#0a1628",
                 fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 700, letterSpacing: "0.04em",
-              }}>Post now</button>
+              }}>{mode === "schedule" ? "Schedule" : "Post now"}</button>
             </div>
           </div>
         </div>

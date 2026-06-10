@@ -152,7 +152,9 @@ console.log("\n── api/social-post.js — publish carousel to Instagram ─�
   check("post text = stored caption (verbatim, hashtags NOT re-appended)", bundle.calls.post.text === CAPTION);
   check("post text has no duplicated hashtag block", (bundle.calls.post.text.match(/#dallasrealestate/g) || []).length === 1);
   check("post status SCHEDULED (immediate)", bundle.calls.post.status === "SCHEDULED");
-  check("post postDate = now ISO", bundle.calls.post.postDate === FIXED_NOW.toISOString());
+  // Immediate posts now use now + a small buffer (Stage 3a) so bundle never
+  // sees a postDate that isn't slightly in the future.
+  check("post postDate = now + 3min buffer", bundle.calls.post.postDate === new Date(FIXED_NOW.getTime() + 3 * 60 * 1000).toISOString());
   check("post title is a label, not the caption", typeof bundle.calls.post.title === "string" && bundle.calls.post.title !== CAPTION);
 
   // Tracking lifecycle: pending row inserted, then updated to submitted.

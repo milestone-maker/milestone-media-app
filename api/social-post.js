@@ -54,6 +54,13 @@ const MAX_CAROUSEL_IMAGES = INSTAGRAM_MAX_CAROUSEL_IMAGES;
 const EXTRA_STORAGE_HOSTS = ["auth.milestonemediaphotography.com"];
 const PUBLIC_STORAGE_PATH = "/storage/v1/object/public/";
 
+// Minimum lead time between "now" and the effective postDate handed to bundle.
+// Two jobs: (1) for an immediate post, nudging postDate slightly into the
+// future avoids bundle rejecting a date that isn't > now by the time it lands;
+// (2) for a scheduled post, it's the floor a chosen time must clear so we never
+// schedule something effectively in the past. The client mirrors this value.
+const SCHEDULE_BUFFER_MS = 3 * 60 * 1000; // 3 minutes
+
 let _supabaseSingleton = null;
 function defaultSupabase() {
   if (!_supabaseSingleton) {
@@ -158,6 +165,36 @@ export default async function handler(req, res, depsOverride) {
       }
     }
 
+    // ── 2b. Resolve the effective postDate (immediate vs scheduled) ──
+    // bundle's status enum is ["DRAFT","SCHEDULED"] with no "publish now", so
+    // BOTH paths post with status "SCHEDULED"; only the date differs.
+    //   • no postDate            → immediate: now + buffer (the buffer also
+    //                              keeps the date safely > now when it reaches
+    //                              bundle).
+    //   • postDate (ISO string)  → scheduled: must parse and be at least
+    //                              now + buffer in the future.
+    const nowMs = now().getTime();
+    const earliestMs = nowMs + SCHEDULE_BUFFER_MS;
+    let effectivePostDate; // ISO string handed to bundle + persisted
+
+    if (body.postDate === undefined || body.postDate === null) {
+      effectivePostDate = new Date(earliestMs).toISOString();
+    } else {
+      if (typeof body.postDate !== "string") {
+        return res.status(400).json({ error: "postDate must be an ISO 8601 string" });
+      }
+      const parsedMs = Date.parse(body.postDate);
+      if (Number.isNaN(parsedMs)) {
+        return res.status(400).json({ error: "postDate is not a valid date" });
+      }
+      if (parsedMs < earliestMs) {
+        return res.status(400).json({
+          error: `postDate must be at least ${Math.round(SCHEDULE_BUFFER_MS / 60000)} minutes in the future`,
+        });
+      }
+      effectivePostDate = new Date(parsedMs).toISOString();
+    }
+
     // ── 3. Require a connected Instagram (team + status) ──
     const { data: conn, error: connErr } = await supabase
       .from("agent_social_connections")
@@ -199,10 +236,11 @@ export default async function handler(req, res, depsOverride) {
       const { data: tracked, error: insErr } = await supabase
         .from("social_posts")
         .insert({
-          agent_id:   authUser.id,
-          content_id: contentId,
-          image_urls: imageUrls,
-          status:     "pending",
+          agent_id:      authUser.id,
+          content_id:    contentId,
+          image_urls:    imageUrls,
+          status:        "pending",
+          scheduled_for: effectivePostDate,
         })
         .select("id")
         .maybeSingle();
@@ -232,15 +270,16 @@ export default async function handler(req, res, depsOverride) {
       return res.status(502).json({ error: "could not upload images to Instagram provider", details: e?.message });
     }
 
-    // ── 6. Create the Instagram carousel post (immediate) ──
-    const nowIso = now().toISOString();
+    // ── 6. Create the Instagram carousel post (immediate or scheduled) ──
+    // status stays "SCHEDULED" for both paths; effectivePostDate is now+buffer
+    // for immediate or the agent-chosen future time for scheduled.
     let post;
     try {
       post = await createPost({
         teamId,
-        title: `Milestone carousel · ${nowIso.slice(0, 10)}`, // bundle dashboard label, NOT the IG caption
-        postDate: nowIso,
-        status: "SCHEDULED", // immediate: SCHEDULED + postDate now (no publish-now status exists)
+        title: `Milestone carousel · ${effectivePostDate.slice(0, 10)}`, // bundle dashboard label, NOT the IG caption
+        postDate: effectivePostDate,
+        status: "SCHEDULED", // no publish-now status exists; immediate = SCHEDULED at now+buffer
         text,
         uploadIds,
       });
@@ -259,7 +298,12 @@ export default async function handler(req, res, depsOverride) {
       if (okErr) console.error("[social-post] tracking success-update error:", okErr);
     }
 
-    return res.status(200).json({ trackingId, postId: post.id, status: post.status || "SCHEDULED" });
+    return res.status(200).json({
+      trackingId,
+      postId: post.id,
+      status: post.status || "SCHEDULED",
+      scheduledFor: effectivePostDate,
+    });
   } catch (err) {
     console.error("[social-post] fatal:", err);
     return res.status(500).json({ error: err.message || "internal error" });
