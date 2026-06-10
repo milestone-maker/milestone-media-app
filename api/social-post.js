@@ -61,6 +61,12 @@ const PUBLIC_STORAGE_PATH = "/storage/v1/object/public/";
 // schedule something effectively in the past. The client mirrors this value.
 const SCHEDULE_BUFFER_MS = 3 * 60 * 1000; // 3 minutes
 
+// Allowed target networks — mirrors the social_posts.platform CHECK
+// (migration 036). Only Instagram ships today; facebook/threads are forward
+// hooks (Stage 3b). The default when the client omits it is "instagram".
+const ALLOWED_PLATFORMS = ["instagram", "facebook", "threads"];
+const DEFAULT_PLATFORM = "instagram";
+
 let _supabaseSingleton = null;
 function defaultSupabase() {
   if (!_supabaseSingleton) {
@@ -165,6 +171,16 @@ export default async function handler(req, res, depsOverride) {
       }
     }
 
+    // Optional platform — defaults to instagram (the only network that ships
+    // today). Validated against the same vocabulary as the DB CHECK so an
+    // unknown value fails here with a clean 400 rather than at insert time.
+    const platform = body.platform === undefined || body.platform === null
+      ? DEFAULT_PLATFORM
+      : body.platform;
+    if (!ALLOWED_PLATFORMS.includes(platform)) {
+      return res.status(400).json({ error: `platform must be one of: ${ALLOWED_PLATFORMS.join(", ")}` });
+    }
+
     // ── 2b. Resolve the effective postDate (immediate vs scheduled) ──
     // bundle's status enum is ["DRAFT","SCHEDULED"] with no "publish now", so
     // BOTH paths post with status "SCHEDULED"; only the date differs.
@@ -241,6 +257,7 @@ export default async function handler(req, res, depsOverride) {
           image_urls:    imageUrls,
           status:        "pending",
           scheduled_for: effectivePostDate,
+          platform,
         })
         .select("id")
         .maybeSingle();

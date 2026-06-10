@@ -166,6 +166,28 @@ console.log("\n── api/social-post.js — publish carousel to Instagram ─�
   check("tracking: updated to submitted", t.updates.some((u) => u.status === "submitted"));
   check("tracking: submitted carries bundle_post_id", t.updates.some((u) => u.status === "submitted" && u.bundle_post_id === "post_1"));
   check("tracking: never marked failed on success", !t.updates.some((u) => u.status === "failed"));
+  // Stage 3b: platform defaults to instagram when omitted.
+  check("tracking: insert defaults platform = instagram", t.inserts[0]?.platform === "instagram");
+}
+
+// 1b. PLATFORM (Stage 3b) — explicit valid, invalid, defaulting
+{
+  // Explicit valid platform persists.
+  const r1 = await callHandler({ body: { contentId: CONTENT_ID, imageUrls: VALID_URLS, platform: "instagram" } });
+  check("explicit platform instagram → 200", r1.res.statusCode === 200, `got ${r1.res.statusCode}`);
+  check("explicit platform persisted", r1.supabase._track.inserts[0]?.platform === "instagram");
+
+  // Invalid platform → 400 with NO bundle call and NO tracking insert.
+  const r2 = await callHandler({ body: { contentId: CONTENT_ID, imageUrls: VALID_URLS, platform: "myspace" } });
+  check("invalid platform → 400", r2.res.statusCode === 400, `got ${r2.res.statusCode}`);
+  check("invalid platform → no bundle call", r2.bundle.calls.uploads.length === 0 && r2.bundle.calls.postCount === 0);
+  check("invalid platform → no tracking insert", r2.supabase._track.inserts.length === 0);
+
+  // A forward-hook platform (facebook) is accepted at the endpoint layer and
+  // persisted, even though no slots exist yet — the column allows it.
+  const r3 = await callHandler({ body: { contentId: CONTENT_ID, imageUrls: VALID_URLS, platform: "facebook" } });
+  check("forward-hook platform facebook → 200", r3.res.statusCode === 200, `got ${r3.res.statusCode}`);
+  check("facebook platform persisted", r3.supabase._track.inserts[0]?.platform === "facebook");
 }
 
 // 2. Missing Authorization → 401
