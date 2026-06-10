@@ -190,6 +190,47 @@ console.log("\n── api/social-post.js — publish carousel to Instagram ─�
   check("facebook platform persisted", r3.supabase._track.inserts[0]?.platform === "facebook");
 }
 
+// 1c. PARALLEL UPLOAD ORDERING (Stage 3b fix) — uploads run with bounded
+// concurrency, but the uploadIds handed to createPost MUST stay in the original
+// imageUrls order regardless of which upload finishes first. We force completion
+// order to be the REVERSE of input order (earlier images resolve slower) and
+// derive each upload id from its url, so any order bug would surface.
+{
+  const N = 7; // > concurrency cap (3), so multiple waves run
+  const orderedUrls = Array.from({ length: N }, (_, i) =>
+    `https://${SB_HOST}/storage/v1/object/public/carousel-posts/${AGENT_ID}/${String(i).padStart(2, "0")}_slide.png`);
+  const indexOf = new Map(orderedUrls.map((u, i) => [u, i]));
+
+  const calls = { uploads: [], completions: [], post: null, postCount: 0 };
+  const orderingBundle = {
+    calls,
+    // Earlier indices wait LONGER → they complete last, scrambling completion
+    // order vs input order. id echoes the url so we can verify the mapping.
+    createUpload: async ({ teamId, url }) => {
+      calls.uploads.push({ teamId, url });
+      const idx = indexOf.get(url);
+      await new Promise((r) => setTimeout(r, (N - idx) * 5));
+      calls.completions.push(url);
+      return { id: `id:${url}` };
+    },
+    createPost: async (args) => { calls.postCount++; calls.post = args; return { id: "post_1", status: "SCHEDULED" }; },
+  };
+
+  const { res } = await callHandler({ body: { contentId: CONTENT_ID, imageUrls: orderedUrls }, bundle: orderingBundle });
+  check("parallel uploads → 200", res.statusCode === 200, `got ${res.statusCode}`);
+  check("all N uploads attempted", calls.uploads.length === N);
+  // Sanity: completion order really was NOT the input order (proves concurrency).
+  check("completion order was scrambled (not input order)",
+    JSON.stringify(calls.completions) !== JSON.stringify(orderedUrls),
+    JSON.stringify(calls.completions));
+  // The actual guarantee: uploadIds map back to ORIGINAL input order.
+  const expected = orderedUrls.map((u) => `id:${u}`);
+  check("createPost uploadIds preserve input order", JSON.stringify(calls.post.uploadIds) === JSON.stringify(expected),
+    `got ${JSON.stringify(calls.post.uploadIds)}`);
+  // No gaps/holes in the indexed result array.
+  check("uploadIds dense (no undefined holes)", calls.post.uploadIds.length === N && calls.post.uploadIds.every(Boolean));
+}
+
 // 2. Missing Authorization → 401
 {
   const { res } = await callHandler({ headers: {} });

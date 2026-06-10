@@ -513,7 +513,23 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
           : { contentId, imageUrls, platform: "instagram" }),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error || `Posting failed (${res.status})`);
+      if (!res.ok) {
+        // Only trust body.error when it's actually a string — a platform
+        // timeout/gateway failure returns an OBJECT-shaped error body, which
+        // would otherwise stringify to "[object Object]".
+        const serverMsg = typeof body?.error === "string" ? body.error : null;
+        // A 504, or any response without a usable string error (the platform's
+        // object-shaped timeout body), may mean the post ALREADY went through:
+        // bundle can finish creating the post after the gateway gives up. Soften
+        // the message so the agent doesn't repost a carousel that may already be
+        // scheduled. Genuine endpoint failures — a real 4xx/5xx WITH a string
+        // error, including this endpoint's own 502s ("could not create Instagram
+        // post") — keep their normal text via serverMsg.
+        const looksLikeTimeout = res.status === 504 || !serverMsg;
+        throw new Error(looksLikeTimeout
+          ? "This is taking longer than expected — your post may already have been scheduled. Please wait a moment before trying again to avoid posting it twice."
+          : serverMsg);
+      }
 
       setPosted(body?.status || "submitted");
       // Prefer the server's authoritative effective time for the scheduled label.
@@ -522,7 +538,10 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
       setPhase("done");
     } catch (e) {
       console.error("[PostToInstagram] failed:", e);
-      setMsg(e?.message || "Could not post to Instagram. Please try again.");
+      // Defensive: msg must always be a string, never an object.
+      setMsg(typeof e?.message === "string" && e.message
+        ? e.message
+        : "Could not post to Instagram. Please try again.");
       setPhase("error");
     }
   };

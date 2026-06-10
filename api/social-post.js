@@ -275,12 +275,26 @@ export default async function handler(req, res, depsOverride) {
     };
 
     // ── 5. Ingest each image into bundle, preserving order ──
-    const uploadIds = [];
+    // Uploads run in parallel with a small concurrency cap. bundle ingests each
+    // image server-side (it fetches the URL), so serial uploads of a 10-slide
+    // carousel can run tens of seconds and trip the function timeout. Results
+    // are written by ORIGINAL index, so slide order is preserved regardless of
+    // which upload finishes first. Cap kept low to stay gentle on bundle's rate
+    // limits. Any single upload failure rejects the batch → 502, as before.
+    const UPLOAD_CONCURRENCY = 3;
+    const uploadIds = new Array(imageUrls.length);
     try {
-      for (const url of imageUrls) {
-        const upload = await createUpload({ teamId, url });
-        uploadIds.push(upload.id);
-      }
+      let nextIndex = 0;
+      const worker = async () => {
+        // Each worker pulls the next un-claimed index until the queue drains.
+        // (nextIndex++ is race-free on JS's single-threaded event loop.)
+        for (let i = nextIndex++; i < imageUrls.length; i = nextIndex++) {
+          const upload = await createUpload({ teamId, url: imageUrls[i] });
+          uploadIds[i] = upload.id;
+        }
+      };
+      const workerCount = Math.min(UPLOAD_CONCURRENCY, imageUrls.length);
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
     } catch (e) {
       console.error("[social-post] bundle upload failed:", e?.status, e?.message);
       await markFailed("could not upload images to Instagram provider");

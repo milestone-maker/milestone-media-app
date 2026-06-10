@@ -7,7 +7,8 @@
     "api/content-generate.js": { "maxDuration": 60 },
     "api/parse-comps.js": { "maxDuration": 60 },
     "api/microsite-chat.js": { "maxDuration": 60 },
-    "api/classify-photos.js": { "maxDuration": 120 }
+    "api/classify-photos.js": { "maxDuration": 120 },
+    "api/social-post.js": { "maxDuration": 60 }
   },
   "crons": [
     { "path": "/api/refresh-mortgage-rates", "schedule": "0 20 * * *" }
