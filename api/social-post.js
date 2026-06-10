@@ -61,6 +61,12 @@ const PUBLIC_STORAGE_PATH = "/storage/v1/object/public/";
 // schedule something effectively in the past. The client mirrors this value.
 const SCHEDULE_BUFFER_MS = 3 * 60 * 1000; // 3 minutes
 
+// Allowed target networks — mirrors the social_posts.platform CHECK
+// (migration 036). Only Instagram ships today; facebook/threads are forward
+// hooks (Stage 3b). The default when the client omits it is "instagram".
+const ALLOWED_PLATFORMS = ["instagram", "facebook", "threads"];
+const DEFAULT_PLATFORM = "instagram";
+
 let _supabaseSingleton = null;
 function defaultSupabase() {
   if (!_supabaseSingleton) {
@@ -165,6 +171,16 @@ export default async function handler(req, res, depsOverride) {
       }
     }
 
+    // Optional platform — defaults to instagram (the only network that ships
+    // today). Validated against the same vocabulary as the DB CHECK so an
+    // unknown value fails here with a clean 400 rather than at insert time.
+    const platform = body.platform === undefined || body.platform === null
+      ? DEFAULT_PLATFORM
+      : body.platform;
+    if (!ALLOWED_PLATFORMS.includes(platform)) {
+      return res.status(400).json({ error: `platform must be one of: ${ALLOWED_PLATFORMS.join(", ")}` });
+    }
+
     // ── 2b. Resolve the effective postDate (immediate vs scheduled) ──
     // bundle's status enum is ["DRAFT","SCHEDULED"] with no "publish now", so
     // BOTH paths post with status "SCHEDULED"; only the date differs.
@@ -241,6 +257,7 @@ export default async function handler(req, res, depsOverride) {
           image_urls:    imageUrls,
           status:        "pending",
           scheduled_for: effectivePostDate,
+          platform,
         })
         .select("id")
         .maybeSingle();
@@ -258,12 +275,26 @@ export default async function handler(req, res, depsOverride) {
     };
 
     // ── 5. Ingest each image into bundle, preserving order ──
-    const uploadIds = [];
+    // Uploads run in parallel with a small concurrency cap. bundle ingests each
+    // image server-side (it fetches the URL), so serial uploads of a 10-slide
+    // carousel can run tens of seconds and trip the function timeout. Results
+    // are written by ORIGINAL index, so slide order is preserved regardless of
+    // which upload finishes first. Cap kept low to stay gentle on bundle's rate
+    // limits. Any single upload failure rejects the batch → 502, as before.
+    const UPLOAD_CONCURRENCY = 3;
+    const uploadIds = new Array(imageUrls.length);
     try {
-      for (const url of imageUrls) {
-        const upload = await createUpload({ teamId, url });
-        uploadIds.push(upload.id);
-      }
+      let nextIndex = 0;
+      const worker = async () => {
+        // Each worker pulls the next un-claimed index until the queue drains.
+        // (nextIndex++ is race-free on JS's single-threaded event loop.)
+        for (let i = nextIndex++; i < imageUrls.length; i = nextIndex++) {
+          const upload = await createUpload({ teamId, url: imageUrls[i] });
+          uploadIds[i] = upload.id;
+        }
+      };
+      const workerCount = Math.min(UPLOAD_CONCURRENCY, imageUrls.length);
+      await Promise.all(Array.from({ length: workerCount }, () => worker()));
     } catch (e) {
       console.error("[social-post] bundle upload failed:", e?.status, e?.message);
       await markFailed("could not upload images to Instagram provider");
