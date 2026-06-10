@@ -713,12 +713,8 @@ function ContentView() {
         </div>
       )}
 
-      {/* ── PHOTO INTELLIGENCE PANEL ── */}
+      {/* ── HISTORY PANEL ── (above the photos; gated on a selected listing) */}
       {selectedListingId && (
-        <PhotosPanel listingId={selectedListingId} listingAddress={selectedListing?.address} />
-      )}
-
-      {/* ── HISTORY PANEL ── */}
       <div style={panelSt}>
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: "#fff", marginBottom: 4 }}>History</div>
         <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.35)", marginBottom: 16 }}>
@@ -800,6 +796,12 @@ function ContentView() {
           </div>
         )}
       </div>
+      )}
+
+      {/* ── PHOTO INTELLIGENCE PANEL ── */}
+      {selectedListingId && (
+        <PhotosPanel listingId={selectedListingId} listingAddress={selectedListing?.address} />
+      )}
 
       {/* Voice profile editor (reused) — reachable from the 422 error path */}
       {showVoiceModal && (
