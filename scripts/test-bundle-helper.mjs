@@ -25,6 +25,7 @@ const {
   getSocialAccountByType,
   createUploadFromUrl,
   createPost,
+  deletePost,
   BundleApiError,
 } = await import(pathToFileURL(MOD_PATH).href);
 
@@ -252,6 +253,34 @@ console.log("\n── api/_lib/bundle.js — bundle.social adapter ──\n");
   let e2 = null;
   try { await createPost({ teamId: "t", title: "x", postDate: "d", text: "x", uploadIds: [], apiKey: KEY, fetchImpl: f2 }); } catch (e) { e2 = e; }
   check("createPost empty uploadIds → throws", e2 instanceof BundleApiError && f2.calls.length === 0);
+}
+
+// 21. deletePost — DELETEs /post/{id}, returns true, handles empty 204 body
+{
+  const f = makeFetch({ status: 204, json: undefined });
+  const out = await deletePost({ postId: "bp_123", apiKey: KEY, fetchImpl: f });
+  check("deletePost returns true on success", out === true);
+  check("deletePost uses DELETE", f.calls[0].init.method === "DELETE");
+  check("deletePost hits /post/{id}", f.calls[0].url.endsWith("/post/bp_123"), f.calls[0].url);
+  check("deletePost sends x-api-key", f.calls[0].init.headers["x-api-key"] === KEY);
+  check("deletePost (DELETE) sends no body", f.calls[0].init.body === undefined);
+}
+
+// 22. deletePost — missing postId throws before any fetch
+{
+  const f = makeFetch();
+  let err = null;
+  try { await deletePost({ apiKey: KEY, fetchImpl: f }); } catch (e) { err = e; }
+  check("deletePost missing postId → throws", err instanceof BundleApiError && f.calls.length === 0);
+}
+
+// 23. deletePost — non-2xx surfaces a BundleApiError (string message)
+{
+  const f = makeFetch({ status: 404, json: { message: "not found" } });
+  let err = null;
+  try { await deletePost({ postId: "missing", apiKey: KEY, fetchImpl: f }); } catch (e) { err = e; }
+  check("deletePost non-2xx → BundleApiError", err instanceof BundleApiError && err.status === 404);
+  check("deletePost error message is a string", typeof err?.message === "string" && /not found/.test(err.message));
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
