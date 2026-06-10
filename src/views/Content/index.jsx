@@ -22,6 +22,7 @@ import VoiceProfileModal from "../../components/VoiceProfileModal";
 import SubscriptionsView from "../Subscriptions";
 import PhotosPanel from "./PhotosPanel";
 import CarouselView from "./CarouselView";
+import UpcomingPosts from "./UpcomingPosts";
 import { includable } from "../../../api/_content/selectCarouselPhotos.js";
 
 // Friendly label → exact framework_name slug the endpoint expects.
@@ -797,6 +798,9 @@ function ContentView() {
         )}
       </div>
       )}
+
+      {/* ── UPCOMING POSTS ── (below History; all listings, collapsible) */}
+      <UpcomingPosts />
 
       {/* ── PHOTO INTELLIGENCE PANEL ── */}
       {selectedListingId && (

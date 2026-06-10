@@ -27,8 +27,40 @@ import { isSubscribed } from "./_lib/subscription.js";
 const SUPABASE_URL              = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+// Base row fields, plus an embed of the generated_content this post came from
+// and the listing it belongs to — so we can build a human label. The embed
+// rides the FK chain social_posts.content_id → generated_content.listing_id →
+// listings (all confirmed FKs), so PostgREST resolves it by table name.
 const ROW_COLUMNS =
   "id, content_id, platform, status, scheduled_for, canceled_at, bundle_post_id, error_message, created_at";
+const ROW_SELECT =
+  `${ROW_COLUMNS}, generated_content ( content_type, caption, listings ( address ) )`;
+
+// Prettify a content_type slug ("walkthrough_carousel" → "Walkthrough Carousel").
+function prettyType(t) {
+  if (!t || typeof t !== "string") return "";
+  return t.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// First non-empty line of a caption, trimmed to a sane length.
+function firstLine(caption) {
+  if (!caption || typeof caption !== "string") return "";
+  const line = caption.split("\n").map((s) => s.trim()).find(Boolean) || "";
+  return line.length > 60 ? `${line.slice(0, 57)}…` : line;
+}
+
+// Flatten the embed into flat label fields and drop the nested object, so the
+// client gets a stable shape: content_label (always a string) + listing_address.
+function shapeRow(row) {
+  const gc = row.generated_content || null;
+  const address = gc?.listings?.address || null;
+  const typeLabel = prettyType(gc?.content_type);
+  const content_label = address
+    ? (typeLabel ? `${address} · ${typeLabel}` : address)
+    : (firstLine(gc?.caption) || "Untitled post");
+  const { generated_content, ...rest } = row;
+  return { ...rest, content_label, listing_address: address };
+}
 
 let _supabaseSingleton = null;
 function defaultSupabase() {
@@ -111,7 +143,7 @@ export default async function handler(req, res, depsOverride) {
     // most-recent intent surfaces first.
     let query = supabase
       .from("social_posts")
-      .select(ROW_COLUMNS)
+      .select(ROW_SELECT)
       .eq("agent_id", authUser.id);
 
     const contentId = contentIdFrom(req);
@@ -126,7 +158,7 @@ export default async function handler(req, res, depsOverride) {
       return res.status(500).json({ error: "could not load posts", details: rowsErr.message });
     }
 
-    return res.status(200).json({ posts: rows || [] });
+    return res.status(200).json({ posts: (rows || []).map(shapeRow) });
   } catch (err) {
     console.error("[social-posts] fatal:", err);
     return res.status(500).json({ error: err.message || "internal error" });

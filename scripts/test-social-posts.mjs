@@ -42,10 +42,15 @@ function makeRes() {
 const AGENT_ID = "00000000-0000-0000-0000-000000000a01";
 const TOKEN    = "fake-bearer-token";
 
+// Rows include the PostgREST embed (generated_content → listings) the endpoint
+// selects; the handler flattens it into content_label + listing_address.
 const ROWS = [
-  { id: "p1", agent_id: AGENT_ID, content_id: "cA", platform: "instagram", status: "submitted", scheduled_for: "2026-06-12T17:00:00Z", canceled_at: null, bundle_post_id: "b1", error_message: null, created_at: "2026-06-10T17:00:00Z" },
-  { id: "p2", agent_id: AGENT_ID, content_id: "cA", platform: "instagram", status: "failed",    scheduled_for: null,                   canceled_at: null, bundle_post_id: null, error_message: "x", created_at: "2026-06-09T17:00:00Z" },
-  { id: "p3", agent_id: AGENT_ID, content_id: "cB", platform: "instagram", status: "submitted", scheduled_for: "2026-06-11T17:00:00Z", canceled_at: "2026-06-10T18:00:00Z", bundle_post_id: "b3", error_message: null, created_at: "2026-06-08T17:00:00Z" },
+  { id: "p1", agent_id: AGENT_ID, content_id: "cA", platform: "instagram", status: "submitted", scheduled_for: "2026-06-12T17:00:00Z", canceled_at: null, bundle_post_id: "b1", error_message: null, created_at: "2026-06-10T17:00:00Z",
+    generated_content: { content_type: "walkthrough_carousel", caption: "A quiet kitchen.\n#dfw", listings: { address: "123 Main St" } } },
+  { id: "p2", agent_id: AGENT_ID, content_id: "cA", platform: "instagram", status: "failed",    scheduled_for: null,                   canceled_at: null, bundle_post_id: null, error_message: "x", created_at: "2026-06-09T17:00:00Z",
+    generated_content: { content_type: "listing", caption: "Caption line only.", listings: null } }, // no address → caption fallback
+  { id: "p3", agent_id: AGENT_ID, content_id: "cB", platform: "instagram", status: "submitted", scheduled_for: "2026-06-11T17:00:00Z", canceled_at: "2026-06-10T18:00:00Z", bundle_post_id: "b3", error_message: null, created_at: "2026-06-08T17:00:00Z",
+    generated_content: { content_type: "listing", caption: "x", listings: { address: "9 Oak Ave" } } },
 ];
 
 // Chainable query-builder mock. Records eq filters + order calls and resolves
@@ -121,12 +126,19 @@ console.log("\n── api/social-posts.js — list the agent's posts ──\n");
   check("second order = created_at desc", o[1]?.[0] === "created_at" && o[1]?.[1]?.ascending === false, JSON.stringify(o[1]));
 }
 
-// 4. Response shape: each row carries exactly the specified fields
+// 4. Response shape: base fields + flattened label fields; embed dropped
 {
   const { res } = await callHandler();
-  const FIELDS = ["id", "content_id", "platform", "status", "scheduled_for", "canceled_at", "bundle_post_id", "error_message", "created_at"];
-  const row = res.body.posts[0];
-  check("row has all specified fields", FIELDS.every((f) => f in row));
+  const FIELDS = ["id", "content_id", "platform", "status", "scheduled_for", "canceled_at", "bundle_post_id", "error_message", "created_at", "content_label", "listing_address"];
+  const byId = Object.fromEntries(res.body.posts.map((p) => [p.id, p]));
+  check("rows have all base + label fields", FIELDS.every((f) => f in byId.p1));
+  check("nested embed object is dropped", !("generated_content" in byId.p1));
+  // p1: address + content type → "123 Main St · Walkthrough Carousel"
+  check("content_label = address · pretty type", byId.p1.content_label === "123 Main St · Walkthrough Carousel", byId.p1.content_label);
+  check("listing_address surfaced", byId.p1.listing_address === "123 Main St");
+  // p2: no address → caption first-line fallback
+  check("content_label falls back to caption first line", byId.p2.content_label === "Caption line only.", byId.p2.content_label);
+  check("listing_address null when no listing", byId.p2.listing_address === null);
 }
 
 // 5. Method guard + auth
