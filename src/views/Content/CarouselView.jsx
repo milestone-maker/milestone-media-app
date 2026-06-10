@@ -26,6 +26,7 @@ import {
   nextRecommendedSlot,
   SCHEDULE_BUFFER_MS,
 } from "../../lib/postScheduling";
+import { scheduleState, findRecentlyLanded } from "../../lib/scheduledPosts";
 
 function MiniCopy({ text, label }) {
   const [copied, setCopied] = useState(false);
@@ -436,6 +437,7 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
   const [scheduleLocal, setScheduleLocal] = useState("");   // datetime-local value (Central wall-clock)
   const [scheduledLabel, setScheduledLabel] = useState(""); // Central label shown on the scheduled success state
   const [smartSlot, setSmartSlot] = useState(null);         // { postDate, label } from the recommended-slot engine
+  const [existing, setExisting] = useState({ kind: "none", record: null }); // prior schedule/post for THIS carousel
 
   const cap = checkCarouselImageCap(slides);
 
@@ -453,6 +455,34 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
     })();
     return () => { alive = false; };
   }, []);
+
+  // Look up any prior schedule/post for THIS carousel so we can show an inline
+  // indicator and an overridable "already scheduled" warning. Re-runs if the
+  // carousel (contentId) changes.
+  const refreshExisting = async () => {
+    if (!contentId) { setExisting({ kind: "none", record: null }); return; }
+    try {
+      const { token } = await getSession();
+      if (!token) return;
+      const res = await fetch(`/api/social-posts?contentId=${encodeURIComponent(contentId)}`, { headers: { Authorization: `Bearer ${token}` } });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) setExisting(scheduleState(body.posts || [], new Date()));
+    } catch { /* indicator is best-effort */ }
+  };
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!contentId) { setExisting({ kind: "none", record: null }); return; }
+      try {
+        const { token } = await getSession();
+        if (!token) return;
+        const res = await fetch(`/api/social-posts?contentId=${encodeURIComponent(contentId)}`, { headers: { Authorization: `Bearer ${token}` } });
+        const body = await res.json().catch(() => ({}));
+        if (alive && res.ok) setExisting(scheduleState(body.posts || [], new Date()));
+      } catch { /* best-effort */ }
+    })();
+    return () => { alive = false; };
+  }, [contentId]);
 
   const goConnect = () => { window.location.assign("/?social=connect"); };
 
@@ -497,6 +527,7 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
     }
 
     setPhase("working"); setMsg("");
+    let softTimeout = false; // set when the failure may actually have landed
     try {
       const { token, agentId } = await getSession();
       if (!token || !agentId) throw new Error("Your session expired. Please sign in again.");
@@ -526,6 +557,7 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
         // error, including this endpoint's own 502s ("could not create Instagram
         // post") — keep their normal text via serverMsg.
         const looksLikeTimeout = res.status === 504 || !serverMsg;
+        softTimeout = looksLikeTimeout;
         throw new Error(looksLikeTimeout
           ? "This is taking longer than expected — your post may already have been scheduled. Please wait a moment before trying again to avoid posting it twice."
           : serverMsg);
@@ -536,6 +568,7 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
       if (isScheduled) setScheduledLabel(formatCentral(body?.scheduledFor || scheduledIso));
       else setScheduledLabel("");
       setPhase("done");
+      refreshExisting(); // update the inline indicator
     } catch (e) {
       console.error("[PostToInstagram] failed:", e);
       // Defensive: msg must always be a string, never an object.
@@ -543,6 +576,27 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
         ? e.message
         : "Could not post to Instagram. Please try again.");
       setPhase("error");
+
+      // Reconciliation: a soft timeout may actually have landed. Check the list
+      // endpoint for a just-created submitted row with a bundle_post_id; if one
+      // exists, flip the scary message into the real success state.
+      if (softTimeout && contentId) {
+        try {
+          const { token } = await getSession();
+          if (token) {
+            const res = await fetch(`/api/social-posts?contentId=${encodeURIComponent(contentId)}`, { headers: { Authorization: `Bearer ${token}` } });
+            const body = await res.json().catch(() => ({}));
+            const landed = res.ok ? findRecentlyLanded(body.posts || [], new Date()) : null;
+            if (landed) {
+              setPosted(landed.status || "submitted");
+              setScheduledLabel(landed.scheduled_for ? formatCentral(landed.scheduled_for) : "");
+              setMsg("");
+              setPhase("done");
+              setExisting(scheduleState(body.posts || [], new Date()));
+            }
+          }
+        } catch { /* keep the soft message on any reconciliation hiccup */ }
+      }
     }
   };
 
@@ -582,6 +636,19 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
         }}
       >{label}</button>
 
+      {/* Inline indicator: this carousel already has an active schedule/post. */}
+      {!working && existing.kind !== "none" && (
+        <span style={{
+          fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.55)",
+          display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap",
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: 999, background: existing.kind === "scheduled" ? "#e8c97a" : "#4ade80", display: "inline-block" }} />
+          {existing.kind === "scheduled"
+            ? `Scheduled for ${formatCentral(existing.record.scheduled_for)}`
+            : "Posted"}
+        </span>
+      )}
+
       {phase === "error" && msg && (
         <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "#f87171", maxWidth: 280 }}>
           {msg} <button onClick={() => { setPhase("idle"); setMsg(""); }} style={{ background: "none", border: "none", color: "#e8c97a", cursor: "pointer", textDecoration: "underline", fontSize: 11 }}>dismiss</button>
@@ -605,6 +672,20 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
             <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 14 }}>
               {cap.count} images · {mode === "now" ? "posts immediately to your connected account." : "schedules to your connected account."}
             </div>
+
+            {/* Overridable warning — this carousel already has an active post.
+                Informational only; never blocks the agent. */}
+            {existing.kind !== "none" && (
+              <div style={{
+                fontFamily: "'Jost', sans-serif", fontSize: 12, lineHeight: 1.5, color: "#e8c97a",
+                background: "rgba(201,168,76,0.08)", border: "1px solid rgba(201,168,76,0.28)",
+                borderRadius: 9, padding: "10px 12px", marginBottom: 14,
+              }}>
+                {existing.kind === "scheduled"
+                  ? `You already scheduled this for ${formatCentral(existing.record.scheduled_for)} — schedule again anyway?`
+                  : "You already posted this — post again anyway?"}
+              </div>
+            )}
             <div style={{
               maxHeight: 200, overflowY: "auto", whiteSpace: "pre-wrap", fontSize: 13, lineHeight: 1.5,
               color: "rgba(255,255,255,0.82)", background: "rgba(255,255,255,0.04)",

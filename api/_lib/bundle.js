@@ -202,3 +202,18 @@ export async function createPost({ teamId, title, postDate, status = "SCHEDULED"
   if (!post || !post.id) throw new BundleApiError("bundle create-post returned no id", { status: 502, body: post });
   return post;
 }
+
+/**
+ * Delete a post by its bundle post id (DELETE /post/{id}). Used to cancel a
+ * still-upcoming scheduled post before it fires. bundle returns no meaningful
+ * body on success (often 204); bundleFetch throws a BundleApiError on any
+ * non-2xx, which the caller maps to a clean message. Returns true on success.
+ *
+ * @param {{ postId: string, fetchImpl?: typeof fetch, apiKey?: string }} args
+ * @returns {Promise<boolean>}
+ */
+export async function deletePost({ postId, fetchImpl, apiKey } = {}) {
+  if (!postId) throw new BundleApiError("postId is required for delete-post", { status: 0 });
+  await bundleFetch(`/post/${encodeURIComponent(postId)}`, { method: "DELETE", fetchImpl, apiKey });
+  return true;
+}

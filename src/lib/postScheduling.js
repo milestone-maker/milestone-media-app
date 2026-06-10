@@ -57,6 +57,18 @@ export function formatCentral(iso) {
   return `${label} CT`;
 }
 
+// Render a UTC ISO instant as a short Central label, e.g. "Wed 12:00 PM CT"
+// (abbreviated weekday + time). Used by the upcoming-posts list and the inline
+// "already scheduled" indicator.
+export function formatCentralShort(iso) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: TZ, weekday: "short", hour: "numeric", minute: "2-digit", hour12: true,
+  }).formatToParts(new Date(iso));
+  const p = {};
+  for (const x of parts) if (x.type !== "literal") p[x.type] = x.value;
+  return `${p.weekday} ${p.hour}:${p.minute} ${p.dayPeriod} CT`;
+}
+
 // Render a UTC ISO instant as a recommended-slot label, e.g.
 // "Wednesday 12:00 PM CT" (weekday + time only — the slot's identity).
 function formatSlotLabel(iso) {
