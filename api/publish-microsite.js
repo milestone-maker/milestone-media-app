@@ -349,6 +349,10 @@ export default async function handler(req, res, depsOverride) {
       slug,
       theme,
       published: true,
+      // Clear any prior retirement: (re)publishing restores LIVE. Keeps the
+      // canonical "published = true AND retired_at IS NULL" definition
+      // coherent so a re-published microsite counts against the live cap.
+      retired_at: null,
       property_data: finalPropertyData,
       agent_name: finalPropertyData.agent_name,
       agent_phone: finalPropertyData.agent_phone,

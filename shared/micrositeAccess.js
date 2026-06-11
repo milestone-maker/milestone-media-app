@@ -35,6 +35,27 @@
 // booking. Starter is deliberately excluded (Essential shoots only).
 export const MICROSITE_TIERS = new Set(["pro", "elite"]);
 
+// ── CANONICAL "LIVE microsite" definition — single source of truth ──────
+// A microsite is LIVE when it is published AND has not been retired.
+// Retirement ("mark sold / take down") sets published = false AND
+// retired_at, so either condition failing makes a microsite non-live.
+// This is the JS mirror of the SQL predicate MICROSITE_LIVE_SQL below and
+// of the column comment in migration 038. The live-cap (step 2) counts
+// LIVE microsites per agent — reuse isMicrositeLive() / MICROSITE_LIVE_SQL
+// everywhere so the three layers can never disagree on "what counts."
+//
+// @param {{ published?: boolean, retired_at?: string|null }} m  a microsites row
+// @returns {boolean}
+export function isMicrositeLive(m) {
+  if (!m) return false;
+  return m.published === true && (m.retired_at === null || m.retired_at === undefined);
+}
+
+// SQL predicate form of isMicrositeLive(), for endpoint count queries and
+// any RLS/SQL that must agree with the JS rule. Embed against the microsites
+// table (e.g. `where agent_id = $1 and ${MICROSITE_LIVE_SQL}`).
+export const MICROSITE_LIVE_SQL = "published = true and retired_at is null";
+
 // Subscription statuses treated as active for gating (past_due = grace).
 export const ACTIVE_STATUSES = new Set(["trialing", "active", "past_due"]);
 

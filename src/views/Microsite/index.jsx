@@ -258,6 +258,7 @@ function MicrositeView() {
   const [themeIdx, setThemeIdx] = useState(0);
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false); // in-flight guard for Save & Republish / Publish
+  const [retiring, setRetiring] = useState(false); // in-flight guard for Mark sold / take down
   const [requestingAddon, setRequestingAddon] = useState(false); // in-flight guard for "Add Microsite — $price"
   const [published, setPublished] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -924,6 +925,67 @@ function MicrositeView() {
     }
   };
 
+  // Mark sold / take down: retire the current LIVE microsite. Sets
+  // published=false + retired_at server-side (frees a live slot). The row
+  // is NOT deleted — it stays in the list and can be re-published via Edit.
+  const handleRetire = async () => {
+    if (retiring) return;
+    const micrositeId = myMicrosites.find(m => m.slug === publishedSlug)?.id;
+    if (!micrositeId) {
+      alert("Couldn't find this microsite to take it down. Refresh and try again.");
+      return;
+    }
+    const proceed = window.confirm(
+      "Mark this property as sold and take the microsite down?\n\nThe public page will stop showing immediately. Nothing is deleted — you can re-publish it anytime from Edit."
+    );
+    if (!proceed) return;
+    setRetiring(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        alert("Your session expired. Please sign in again.");
+        return;
+      }
+      const res = await fetch("/api/retire-microsite", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ micrositeId }),
+      });
+      if (res.status === 401) {
+        alert("Your session expired. Please sign in again.");
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        console.error("Retire error:", body);
+        alert("Couldn't take the microsite down: " + (body.error || "please try again."));
+        return;
+      }
+      // Refresh the list so the retired row reflects published=false, then
+      // leave the live screen — the page is no longer live.
+      const { data: refreshed } = await supabase
+        .from("microsites")
+        .select("id, slug, theme, published, property_data, agent_name, agent_phone, created_at")
+        .eq("agent_id", user?.id)
+        .order("created_at", { ascending: false });
+      if (refreshed) setMyMicrosites(refreshed);
+      setPublished(false);
+      setPublishedSlug(null);
+      setLeads([]);
+      setStep("build");
+      alert("Microsite taken down. The property is marked sold and the public page is no longer live. You can re-publish it anytime from Edit.");
+    } catch (err) {
+      console.error("Retire error:", err);
+      alert("Couldn't take the microsite down. Please try again.");
+    } finally {
+      setRetiring(false);
+    }
+  };
+
   const handleCopy = () => { setCopied(true); setTimeout(() => setCopied(false), 2000); };
 
   const unread = leads.filter(l => !l.read).length;
@@ -1227,6 +1289,13 @@ function MicrositeView() {
             padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
             letterSpacing: "0.06em", textTransform: "uppercase", cursor: "pointer",
           }}>+ New</button>
+          {/* Mark sold / take down — retires the live microsite (frees a slot).
+              Re-publish stays available via Edit; nothing is deleted. */}
+          <button onClick={handleRetire} disabled={retiring} title="Mark this property sold and take the public page down" style={{
+            background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.35)", color: "#f87171",
+            padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
+            letterSpacing: "0.06em", textTransform: "uppercase", cursor: retiring ? "wait" : "pointer", fontWeight: 600,
+          }}>{retiring ? "Taking down…" : "🏷️ Mark sold / take down"}</button>
         </div>
       </div>
 
