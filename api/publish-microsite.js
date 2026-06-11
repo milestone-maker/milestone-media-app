@@ -32,6 +32,7 @@ import { createClient } from "@supabase/supabase-js";
 import { checkMicrositeEntitlement } from "./_lib/entitlement.js";
 import { listingPayloadFromMicrosite } from "./_lib/listingFromMicrosite.js";
 import { geocodeAddress, getNearbySchoolsFromGeo } from "./_lib/schools.js";
+import { withinMicrositeCap, micrositeCapForTier } from "../shared/micrositeAccess.js";
 
 // Best-effort, strictly non-blocking bake of schools + coordinates. Geocodes
 // ONCE, then derives both from that geo. Races the whole thing against a
@@ -185,6 +186,33 @@ export default async function handler(req, res, depsOverride) {
     });
     if (!entitled) {
       return res.status(403).json({ error: reason });
+    }
+
+    // ── 5b. Per-tier live-microsite cap (NEW-create only) ──
+    //   The cap applies ONLY when creating a brand-new microsite. A
+    //   re-publish/edit of a microsite the agent already owns for this
+    //   booking (existingMicrosite truthy) is fully exempt — never counted,
+    //   never blocked. Count the agent's LIVE microsites (the indexed
+    //   agent_id count; published = true AND retired_at IS NULL — i.e.
+    //   MICROSITE_LIVE_SQL from shared/micrositeAccess.js) and apply the
+    //   pure cap rule. At/over cap → 403 with an actionable message.
+    if (!existingMicrosite) {
+      const { count: liveCount, error: countErr } = await supabase
+        .from("microsites")
+        .select("id", { count: "exact", head: true })
+        .eq("agent_id", user.id)
+        .eq("published", true)
+        .is("retired_at", null);
+      if (countErr) {
+        console.error("live-microsite count error:", countErr);
+        return res.status(500).json({ error: "failed to check microsite cap" });
+      }
+      if (!withinMicrositeCap({ tier: subscription.tier, liveCount: liveCount || 0 })) {
+        const cap = micrositeCapForTier(subscription.tier);
+        return res.status(403).json({
+          error: `You've used your ${cap} live microsites. Retire one (mark a listing sold) to free a slot, or contact us to add more.`,
+        });
+      }
     }
 
     // ── 6. Fetch booking media ──
@@ -349,6 +377,10 @@ export default async function handler(req, res, depsOverride) {
       slug,
       theme,
       published: true,
+      // Clear any prior retirement: (re)publishing restores LIVE. Keeps the
+      // canonical "published = true AND retired_at IS NULL" definition
+      // coherent so a re-published microsite counts against the live cap.
+      retired_at: null,
       property_data: finalPropertyData,
       agent_name: finalPropertyData.agent_name,
       agent_phone: finalPropertyData.agent_phone,

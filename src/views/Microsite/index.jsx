@@ -11,7 +11,7 @@ import { applyListingAutofill, applyBookingAutofill } from "./autofill.js";
 // Canonical microsite write/access rule — the SAME pure module the
 // serverless endpoint (api/_lib/entitlement.js) imports, so the UI and API
 // can never disagree about who may edit a microsite. See shared/micrositeAccess.js.
-import { canWriteMicrosite } from "../../../shared/micrositeAccess.js";
+import { canWriteMicrosite, isMicrositeLive, micrositeCapForTier } from "../../../shared/micrositeAccess.js";
 
 // Microsite add-on price, sourced from the central pricing config
 const MICROSITE_ADDON_PRICE = ADDONS.find(a => a.id === "microsite")?.price ?? 0;
@@ -258,6 +258,7 @@ function MicrositeView() {
   const [themeIdx, setThemeIdx] = useState(0);
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false); // in-flight guard for Save & Republish / Publish
+  const [retiring, setRetiring] = useState(false); // in-flight guard for Mark sold / take down
   const [requestingAddon, setRequestingAddon] = useState(false); // in-flight guard for "Add Microsite — $price"
   const [published, setPublished] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -334,7 +335,7 @@ function MicrositeView() {
       setLoadingMicrosites(true);
       const { data: rows } = await supabase
         .from("microsites")
-        .select("id, slug, theme, published, property_data, agent_name, agent_phone, created_at")
+        .select("id, slug, theme, published, retired_at, property_data, agent_name, agent_phone, created_at")
         .eq("agent_id", user.id)
         .order("created_at", { ascending: false });
       if (rows) setMyMicrosites(rows);
@@ -704,6 +705,19 @@ function MicrositeView() {
   }).allowed;
   const hasSourceSelection = sourceType === "listing" ? !!selectedListingId : !!selectedBookingId;
 
+  // ── Per-tier live-microsite cap (display + new-create gating) ──────────
+  // Live count = the agent's own microsites that are published & not retired
+  // (the canonical LIVE definition). Cap is null for any non-capped tier
+  // (custom/enterprise/none) — those show no limit and are never blocked.
+  // The cap gates NEW creates only: re-publishing/editing a microsite the
+  // agent already owns (hasExistingMicrosite, or an already-published slug)
+  // is exempt, mirroring the endpoint + RLS.
+  const liveMicrositeCount = myMicrosites.filter(isMicrositeLive).length;
+  const micrositeCap = micrositeCapForTier(profile?.subscription_tier ?? null);
+  const isExistingMicrosite = !!publishedSlug || hasExistingMicrosite;
+  const atMicrositeCap =
+    micrositeCap !== null && !isExistingMicrosite && liveMicrositeCount >= micrositeCap;
+
   const handleRequestAddon = async () => {
     // Re-entry guard: ignore clicks while a request is already in flight.
     if (requestingAddon) return;
@@ -910,7 +924,7 @@ function MicrositeView() {
       // Refresh the microsites list so it's up to date
       const { data: refreshed } = await supabase
         .from("microsites")
-        .select("id, slug, theme, published, property_data, agent_name, agent_phone, created_at")
+        .select("id, slug, theme, published, retired_at, property_data, agent_name, agent_phone, created_at")
         .eq("agent_id", user?.id)
         .order("created_at", { ascending: false });
       if (refreshed) setMyMicrosites(refreshed);
@@ -921,6 +935,67 @@ function MicrositeView() {
       // Clear the in-flight flag on EVERY path — success, each early return
       // (no-token/401/403/!ok), and the catch — re-enabling the button.
       setPublishing(false);
+    }
+  };
+
+  // Mark sold / take down: retire the current LIVE microsite. Sets
+  // published=false + retired_at server-side (frees a live slot). The row
+  // is NOT deleted — it stays in the list and can be re-published via Edit.
+  const handleRetire = async () => {
+    if (retiring) return;
+    const micrositeId = myMicrosites.find(m => m.slug === publishedSlug)?.id;
+    if (!micrositeId) {
+      alert("Couldn't find this microsite to take it down. Refresh and try again.");
+      return;
+    }
+    const proceed = window.confirm(
+      "Mark this property as sold and take the microsite down?\n\nThe public page will stop showing immediately. Nothing is deleted — you can re-publish it anytime from Edit."
+    );
+    if (!proceed) return;
+    setRetiring(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        alert("Your session expired. Please sign in again.");
+        return;
+      }
+      const res = await fetch("/api/retire-microsite", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ micrositeId }),
+      });
+      if (res.status === 401) {
+        alert("Your session expired. Please sign in again.");
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        console.error("Retire error:", body);
+        alert("Couldn't take the microsite down: " + (body.error || "please try again."));
+        return;
+      }
+      // Refresh the list so the retired row reflects published=false, then
+      // leave the live screen — the page is no longer live.
+      const { data: refreshed } = await supabase
+        .from("microsites")
+        .select("id, slug, theme, published, retired_at, property_data, agent_name, agent_phone, created_at")
+        .eq("agent_id", user?.id)
+        .order("created_at", { ascending: false });
+      if (refreshed) setMyMicrosites(refreshed);
+      setPublished(false);
+      setPublishedSlug(null);
+      setLeads([]);
+      setStep("build");
+      alert("Microsite taken down. The property is marked sold and the public page is no longer live. You can re-publish it anytime from Edit.");
+    } catch (err) {
+      console.error("Retire error:", err);
+      alert("Couldn't take the microsite down. Please try again.");
+    } finally {
+      setRetiring(false);
     }
   };
 
@@ -1227,6 +1302,13 @@ function MicrositeView() {
             padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
             letterSpacing: "0.06em", textTransform: "uppercase", cursor: "pointer",
           }}>+ New</button>
+          {/* Mark sold / take down — retires the live microsite (frees a slot).
+              Re-publish stays available via Edit; nothing is deleted. */}
+          <button onClick={handleRetire} disabled={retiring} title="Mark this property sold and take the public page down" style={{
+            background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.35)", color: "#f87171",
+            padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
+            letterSpacing: "0.06em", textTransform: "uppercase", cursor: retiring ? "wait" : "pointer", fontWeight: 600,
+          }}>{retiring ? "Taking down…" : "🏷️ Mark sold / take down"}</button>
         </div>
       </div>
 
@@ -1445,14 +1527,17 @@ function MicrositeView() {
         listingFloorplan={listingFloorplan}
       />
 
-      <button onClick={handlePublish} disabled={publishing} style={{
-        background: publishing ? "rgba(201,168,76,0.3)" : "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
+      {/* Live-microsite usage now lives prominently at the top of the build
+          screen (under the "Microsite Generator" header). At cap, the button
+          below stays disabled and carries the minimal "limit reached" hint. */}
+      <button onClick={handlePublish} disabled={publishing || atMicrositeCap} style={{
+        background: (publishing || atMicrositeCap) ? "rgba(201,168,76,0.3)" : "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
         border: "none", borderRadius: 10, padding: "15px",
         fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 13,
         letterSpacing: "0.12em", textTransform: "uppercase",
-        color: publishing ? "rgba(255,255,255,0.5)" : "#0a1628",
-        cursor: publishing ? "not-allowed" : "pointer",
-      }}>{publishing ? "Publishing…" : publishedSlug ? "✅ Save & Republish" : "🚀 Publish Microsite"}</button>
+        color: (publishing || atMicrositeCap) ? "rgba(255,255,255,0.5)" : "#0a1628",
+        cursor: (publishing || atMicrositeCap) ? "not-allowed" : "pointer",
+      }}>{publishing ? "Publishing…" : atMicrositeCap ? "🔒 Live microsite limit reached" : publishedSlug ? "✅ Save & Republish" : "🚀 Publish Microsite"}</button>
     </div>
   );
 
@@ -1463,6 +1548,35 @@ function MicrositeView() {
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 32, color: "#fff", marginBottom: 4 }}>Microsite Generator</div>
         <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Build a branded property page in 60 seconds.</div>
       </div>
+
+      {/* Live-microsite usage — prominent stat for capped tiers (Solo/Team/
+          Brokerage). At cap it turns red and carries the actionable warning;
+          the Publish button (preview step) stays disabled for a NEW microsite.
+          No-cap tiers (micrositeCap === null) render nothing. */}
+      {micrositeCap !== null && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 12,
+          background: atMicrositeCap ? "rgba(239,68,68,0.08)" : "rgba(201,168,76,0.07)",
+          border: `1px solid ${atMicrositeCap ? "rgba(239,68,68,0.35)" : "rgba(201,168,76,0.25)"}`,
+          borderRadius: 10, padding: "13px 16px",
+        }}>
+          <div style={{ fontSize: 18, lineHeight: "22px", flexShrink: 0 }}>{atMicrositeCap ? "🔒" : "🌐"}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{
+              fontFamily: "'Jost', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: "0.01em",
+              color: atMicrositeCap ? "#f87171" : "#e5c97e",
+            }}>
+              {liveMicrositeCount} of {micrositeCap} live microsites used
+              {atMicrositeCap && " — retire one to free a slot, or contact us to add more"}
+            </div>
+            {isExistingMicrosite && (
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.45)", marginTop: 3 }}>
+                Editing an existing one never counts.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Stage 6 white-label heads-up — shown until the agent adds agency
           name + logo. Dismiss is session-only (reappears next session if
