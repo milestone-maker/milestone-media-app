@@ -31,6 +31,11 @@ const ANNUAL_DISCOUNT_PCT = PRICING.promos?.annualPrepay?.discountPercent ?? 15;
 const ANNUAL_MULT = 12 * (1 - ANNUAL_DISCOUNT_PCT / 100);
 const TIER_ORDER = ["starter", "pro", "elite"];
 
+// Display label for a stored tier slug. The slug stays starter/pro/elite in
+// Stripe + the DB; only the user-facing name changes. Must not be derived by
+// capitalizing the slug — that would show "Pro" while the card says "Team".
+const TIER_DISPLAY_LABEL = { starter: "Solo", pro: "Team", elite: "Brokerage", teams: "Teams" };
+
 function statusColor(status) {
   if (status === "active" || status === "trialing") return "#4ade80";
   if (status === "past_due") return "#f59e0b";
@@ -285,7 +290,7 @@ function SubscriptionsView() {
                 Current Plan
               </div>
               <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 32, color: "#c9a84c", fontWeight: 700, lineHeight: 1.1 }}>
-                {(agent.subscription_tier || "—").replace(/^./, c => c.toUpperCase())}
+                {TIER_DISPLAY_LABEL[agent.subscription_tier] || "—"}
               </div>
               <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 4 }}>
                 Billed {agent.billing_period || "monthly"}

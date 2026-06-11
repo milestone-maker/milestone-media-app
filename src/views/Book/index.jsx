@@ -21,7 +21,7 @@ function packageCoveredByTier(tier, pkg) {
 
 // Index → package slug used by the server.
 const PACKAGE_SLUGS = ["essential", "signature", "luxury"];
-const TIER_LABEL = { starter: "Starter", pro: "Pro", elite: "Elite" };
+const TIER_LABEL = { starter: "Solo", pro: "Team", elite: "Brokerage" };
 
 function BookView() {
   const { user } = useAuth();

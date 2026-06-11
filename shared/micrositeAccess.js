@@ -41,7 +41,7 @@ export const ACTIVE_STATUSES = new Set(["trialing", "active", "past_due"]);
 // Denial reason strings. Re-used by the endpoint's 403 body so the UI and
 // API speak with one voice.
 export const REASON_NO_MICROSITE =
-  "this booking doesn't include a microsite — add the microsite add-on, or subscribe to Pro or Elite to include microsites with every booking";
+  "this booking doesn't include a microsite — add the microsite add-on, or subscribe to Team or Brokerage to include microsites with every booking";
 export const REASON_INVOICE_UNPAID = "invoice has not been paid yet";
 
 /**
