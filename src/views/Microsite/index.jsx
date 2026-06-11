@@ -1527,29 +1527,9 @@ function MicrositeView() {
         listingFloorplan={listingFloorplan}
       />
 
-      {/* Live-microsite usage — only for capped tiers (Solo/Team/Brokerage).
-          No-cap tiers (micrositeCap === null) show nothing. */}
-      {micrositeCap !== null && (
-        <div style={{
-          fontFamily: "'Jost', sans-serif", fontSize: 11,
-          color: atMicrositeCap ? "#f87171" : "rgba(255,255,255,0.5)",
-          letterSpacing: "0.04em", textAlign: "center", marginTop: -6,
-        }}>
-          {liveMicrositeCount} of {micrositeCap} live microsites used
-          {isExistingMicrosite && " · editing an existing one never counts"}
-        </div>
-      )}
-      {atMicrositeCap && (
-        <div style={{
-          background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)",
-          borderRadius: 8, padding: "11px 14px",
-          fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#f87171", lineHeight: 1.5,
-        }}>
-          You've used your {micrositeCap} live microsites. Retire one (mark a listing sold)
-          to free a slot, or contact us to add more.
-        </div>
-      )}
-
+      {/* Live-microsite usage now lives prominently at the top of the build
+          screen (under the "Microsite Generator" header). At cap, the button
+          below stays disabled and carries the minimal "limit reached" hint. */}
       <button onClick={handlePublish} disabled={publishing || atMicrositeCap} style={{
         background: (publishing || atMicrositeCap) ? "rgba(201,168,76,0.3)" : "linear-gradient(135deg, #c9a84c 0%, #e5c97e 100%)",
         border: "none", borderRadius: 10, padding: "15px",
@@ -1568,6 +1548,35 @@ function MicrositeView() {
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 32, color: "#fff", marginBottom: 4 }}>Microsite Generator</div>
         <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Build a branded property page in 60 seconds.</div>
       </div>
+
+      {/* Live-microsite usage — prominent stat for capped tiers (Solo/Team/
+          Brokerage). At cap it turns red and carries the actionable warning;
+          the Publish button (preview step) stays disabled for a NEW microsite.
+          No-cap tiers (micrositeCap === null) render nothing. */}
+      {micrositeCap !== null && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 12,
+          background: atMicrositeCap ? "rgba(239,68,68,0.08)" : "rgba(201,168,76,0.07)",
+          border: `1px solid ${atMicrositeCap ? "rgba(239,68,68,0.35)" : "rgba(201,168,76,0.25)"}`,
+          borderRadius: 10, padding: "13px 16px",
+        }}>
+          <div style={{ fontSize: 18, lineHeight: "22px", flexShrink: 0 }}>{atMicrositeCap ? "🔒" : "🌐"}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{
+              fontFamily: "'Jost', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: "0.01em",
+              color: atMicrositeCap ? "#f87171" : "#e5c97e",
+            }}>
+              {liveMicrositeCount} of {micrositeCap} live microsites used
+              {atMicrositeCap && " — retire one to free a slot, or contact us to add more"}
+            </div>
+            {isExistingMicrosite && (
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.45)", marginTop: 3 }}>
+                Editing an existing one never counts.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Stage 6 white-label heads-up — shown until the agent adds agency
           name + logo. Dismiss is session-only (reappears next session if
