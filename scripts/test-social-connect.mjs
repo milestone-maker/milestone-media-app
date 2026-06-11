@@ -4,10 +4,12 @@
 process.on("unhandledRejection", (err) => { console.error("✗ Unhandled rejection:", err); process.exit(1); });
 process.on("uncaughtException",  (err) => { console.error("✗ Uncaught exception:",  err); process.exit(1); });
 
-// Integration test for api/social-connect.js — start the bundle Instagram
-// connect flow. Mocks Supabase + bundle (createTeam / createPortal) via
-// depsOverride. No network, no real key. Verifies auth, subscription gating,
-// idempotent team creation, row upsert, and portalUrl return.
+// Integration test for api/social-connect.js — start the bundle connect flow
+// for a given platform (Facebook Stage 1: multi-platform). Mocks Supabase +
+// bundle (createTeam / createPortal) via depsOverride. No network, no real key.
+// Verifies auth, subscription gating, platform validation, idempotent team
+// creation across platforms, per-platform row upsert into
+// agent_platform_connections, the Instagram→legacy mirror, and portalUrl return.
 //
 //   node scripts/test-social-connect.mjs
 
@@ -43,18 +45,18 @@ function makeRes() {
 const AGENT_ID    = "00000000-0000-0000-0000-000000000a01";
 const VALID_TOKEN = "fake-bearer-token";
 
-// Supabase mock. `connection` is the existing agent_social_connections row
-// (null = none). Records upserts in `upserts`.
+// Supabase mock. `platformRows` are the agent's existing
+// agent_platform_connections rows (array). Records upserts per table.
 function makeSupabaseMock({
-  user       = { id: AGENT_ID },
-  authError  = null,
-  agent      = { role: "agent", subscription_status: "active", full_name: "Sarah Martinez" },
-  agentErr   = null,
-  connection = null,
-  connErr    = null,
-  upsertErr  = null,
+  user         = { id: AGENT_ID },
+  authError    = null,
+  agent        = { role: "agent", subscription_status: "active", full_name: "Sarah Martinez" },
+  agentErr     = null,
+  platformRows = [],
+  rowsErr      = null,
+  upsertErr    = null,
 } = {}) {
-  const upserts = [];
+  const upserts = { agent_platform_connections: [], agent_social_connections: [] };
   const api = {
     upserts,
     auth: {
@@ -64,10 +66,16 @@ function makeSupabaseMock({
       if (table === "agents") {
         return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: agent, error: agentErr }) }) }) };
       }
+      if (table === "agent_platform_connections") {
+        return {
+          // .select(...).eq('agent_id', id) → awaited array result
+          select: () => ({ eq: async () => ({ data: platformRows, error: rowsErr }) }),
+          upsert: async (row, opts) => { upserts.agent_platform_connections.push({ row, opts }); return { error: upsertErr }; },
+        };
+      }
       if (table === "agent_social_connections") {
         return {
-          select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: connection, error: connErr }) }) }),
-          upsert: async (row, opts) => { upserts.push({ row, opts }); return { error: upsertErr }; },
+          upsert: async (row, opts) => { upserts.agent_social_connections.push({ row, opts }); return { error: null }; },
         };
       }
       throw new Error(`Unexpected table: ${table}`);
@@ -85,9 +93,13 @@ function makeBundleMocks({ teamId = "team_new", portalUrl = "https://portal.bund
   };
 }
 
-async function callHandler({ headers, supabaseOverride, bundle } = {}) {
+async function callHandler({ headers, body, supabaseOverride, bundle } = {}) {
   const b = bundle || makeBundleMocks();
-  const req = { method: "POST", headers: headers ?? { authorization: `Bearer ${VALID_TOKEN}`, origin: "https://app.example" }, body: {} };
+  const req = {
+    method: "POST",
+    headers: headers ?? { authorization: `Bearer ${VALID_TOKEN}`, origin: "https://app.example" },
+    body: body ?? {},
+  };
   const res = makeRes();
   await handler(req, res, {
     supabase:     supabaseOverride || makeSupabaseMock(),
@@ -97,55 +109,88 @@ async function callHandler({ headers, supabaseOverride, bundle } = {}) {
   return { res, bundle: b };
 }
 
-console.log("\n── api/social-connect.js — start bundle Instagram connect ──\n");
+console.log("\n── api/social-connect.js — start bundle connect (multi-platform) ──\n");
 
-// 1. Happy path — no existing row → creates team, upserts pending, returns portalUrl
-{
-  const { res, bundle } = await callHandler();
-  check("happy path → 200", res.statusCode === 200, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
-  check("returns portalUrl", res.body?.portalUrl === "https://portal.bundle.social/xyz");
-  check("returns status pending", res.body?.status === "pending");
-  check("createTeam called once", bundle.calls.createTeam === 1);
-  check("createPortal called once", bundle.calls.createPortal === 1);
-  check("portal scoped to teamId from createTeam", bundle.calls.lastPortalArgs?.teamId === "team_new");
-  check("portal redirectUrl built from origin", bundle.calls.lastPortalArgs?.redirectUrl === "https://app.example/?social=connected");
-}
-
-// 2. Idempotency — existing row WITH team id → reuse, no second team
-{
-  const supa = makeSupabaseMock({ connection: { id: "c1", bundle_team_id: "team_existing", connection_status: "pending" } });
-  const { res, bundle } = await callHandler({ supabaseOverride: supa });
-  check("existing team → 200", res.statusCode === 200);
-  check("does NOT create a second team", bundle.calls.createTeam === 0);
-  check("upserts nothing new (reuse path)", supa.upserts.length === 0);
-  check("portal uses existing teamId", bundle.calls.lastPortalArgs?.teamId === "team_existing");
-}
-
-// 3. Upsert writes pending + team id on first connect
+// 1. Happy path (default platform = instagram) — no rows → creates team, upserts
+//    pending IG row, mirrors legacy, returns portalUrl.
 {
   const supa = makeSupabaseMock();
-  await callHandler({ supabaseOverride: supa });
-  const up = supa.upserts[0];
-  check("upsert row has agent_id", up?.row?.agent_id === AGENT_ID);
-  check("upsert row status pending", up?.row?.connection_status === "pending");
-  check("upsert row carries bundle_team_id", up?.row?.bundle_team_id === "team_new");
-  check("upsert onConflict agent_id", up?.opts?.onConflict === "agent_id");
+  const { res, bundle } = await callHandler({ supabaseOverride: supa });
+  check("default → 200", res.statusCode === 200, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
+  check("returns portalUrl", res.body?.portalUrl === "https://portal.bundle.social/xyz");
+  check("returns status pending", res.body?.status === "pending");
+  check("returns platform instagram", res.body?.platform === "instagram");
+  check("createTeam called once", bundle.calls.createTeam === 1);
+  check("createPortal called once", bundle.calls.createPortal === 1);
+  check("portal scoped to teamId", bundle.calls.lastPortalArgs?.teamId === "team_new");
+  check("portal requests instagram platform", JSON.stringify(bundle.calls.lastPortalArgs?.platforms) === JSON.stringify(["instagram"]));
+  check("portal redirectUrl from origin + platform", bundle.calls.lastPortalArgs?.redirectUrl === "https://app.example/?social=connected&platform=instagram", bundle.calls.lastPortalArgs?.redirectUrl);
+  check("upserts IG platform row pending", supa.upserts.agent_platform_connections[0]?.row?.connection_status === "pending");
+  check("platform row carries platform=instagram", supa.upserts.agent_platform_connections[0]?.row?.platform === "instagram");
+  check("platform row onConflict agent_id,platform", supa.upserts.agent_platform_connections[0]?.opts?.onConflict === "agent_id,platform");
+  check("IG mirrors legacy table", supa.upserts.agent_social_connections[0]?.row?.bundle_team_id === "team_new");
+  check("legacy mirror onConflict agent_id", supa.upserts.agent_social_connections[0]?.opts?.onConflict === "agent_id");
 }
 
-// 4. Missing Authorization → 401
+// 2. Facebook connect, NO existing rows → creates team, upserts FB row, NO legacy mirror.
+{
+  const supa = makeSupabaseMock();
+  const { res, bundle } = await callHandler({ body: { platform: "facebook" }, supabaseOverride: supa });
+  check("facebook → 200", res.statusCode === 200, `got ${res.statusCode}`);
+  check("facebook → platform facebook", res.body?.platform === "facebook");
+  check("facebook → portal requests facebook", JSON.stringify(bundle.calls.lastPortalArgs?.platforms) === JSON.stringify(["facebook"]));
+  check("facebook → FB platform row upserted", supa.upserts.agent_platform_connections[0]?.row?.platform === "facebook");
+  check("facebook → NO legacy mirror", supa.upserts.agent_social_connections.length === 0);
+  check("facebook → redirect carries platform", bundle.calls.lastPortalArgs?.redirectUrl?.includes("platform=facebook"));
+}
+
+// 3. Facebook connect REUSES an existing IG team (no second team created).
+{
+  const supa = makeSupabaseMock({
+    platformRows: [{ id: "r1", platform: "instagram", bundle_team_id: "team_existing", connection_status: "connected" }],
+  });
+  const { res, bundle } = await callHandler({ body: { platform: "facebook" }, supabaseOverride: supa });
+  check("fb reuse → 200", res.statusCode === 200);
+  check("fb reuse → does NOT create a second team", bundle.calls.createTeam === 0);
+  check("fb reuse → portal uses existing team", bundle.calls.lastPortalArgs?.teamId === "team_existing");
+  check("fb reuse → FB row upserted with existing team", supa.upserts.agent_platform_connections[0]?.row?.bundle_team_id === "team_existing");
+}
+
+// 4. Idempotent reconnect — platform row already has a team → no upsert, reuse.
+{
+  const supa = makeSupabaseMock({
+    platformRows: [{ id: "r1", platform: "instagram", bundle_team_id: "team_existing", connection_status: "pending" }],
+  });
+  const { res, bundle } = await callHandler({ supabaseOverride: supa });
+  check("reconnect → 200", res.statusCode === 200);
+  check("reconnect → no new team", bundle.calls.createTeam === 0);
+  check("reconnect → no platform upsert (idempotent)", supa.upserts.agent_platform_connections.length === 0);
+  check("reconnect → no legacy mirror upsert", supa.upserts.agent_social_connections.length === 0);
+  check("reconnect → portal reuses team", bundle.calls.lastPortalArgs?.teamId === "team_existing");
+}
+
+// 5. Unknown platform → 400, no bundle call.
+{
+  const supa = makeSupabaseMock();
+  const { res, bundle } = await callHandler({ body: { platform: "tiktok" }, supabaseOverride: supa });
+  check("unknown platform → 400", res.statusCode === 400, `got ${res.statusCode}`);
+  check("unknown platform → no bundle call", bundle.calls.createTeam === 0 && bundle.calls.createPortal === 0);
+}
+
+// 6. Missing Authorization → 401
 {
   const { res } = await callHandler({ headers: {} });
   check("missing auth → 401", res.statusCode === 401);
 }
 
-// 5. Invalid/expired token → 401
+// 7. Invalid/expired token → 401
 {
   const supa = makeSupabaseMock({ authError: { message: "bad jwt" } });
   const { res } = await callHandler({ supabaseOverride: supa });
   check("invalid token → 401", res.statusCode === 401);
 }
 
-// 6. Unsubscribed non-admin → 402 (before any bundle call)
+// 8. Unsubscribed non-admin → 402 (before any bundle call)
 {
   for (const status of [null, "canceled", "incomplete", "unpaid", "paused"]) {
     const supa = makeSupabaseMock({ agent: { role: "agent", subscription_status: status, full_name: "X" } });
@@ -155,7 +200,7 @@ console.log("\n── api/social-connect.js — start bundle Instagram connect �
   }
 }
 
-// 7. Subscribed statuses pass through to 200
+// 9. Subscribed statuses pass through to 200
 {
   for (const status of ["trialing", "active", "past_due"]) {
     const supa = makeSupabaseMock({ agent: { role: "agent", subscription_status: status, full_name: "X" } });
@@ -164,30 +209,30 @@ console.log("\n── api/social-connect.js — start bundle Instagram connect �
   }
 }
 
-// 8. Admin with no subscription → 200 (bypass)
+// 10. Admin with no subscription → 200 (bypass)
 {
   const supa = makeSupabaseMock({ agent: { role: "admin", subscription_status: null, full_name: "Admin" } });
   const { res } = await callHandler({ supabaseOverride: supa });
   check("admin no-sub → 200 (bypass)", res.statusCode === 200, `got ${res.statusCode}`);
 }
 
-// 9. No agent profile row → 401
+// 11. No agent profile row → 401
 {
   const supa = makeSupabaseMock({ agent: null });
   const { res } = await callHandler({ supabaseOverride: supa });
   check("no agent profile → 401", res.statusCode === 401, `got ${res.statusCode}`);
 }
 
-// 10. bundle create-team failure → 502, nothing saved
+// 12. bundle create-team failure → 502, nothing saved
 {
   const supa = makeSupabaseMock();
   const bundle = makeBundleMocks({ teamThrow: new Error("bundle 503") });
   const { res } = await callHandler({ supabaseOverride: supa, bundle });
   check("create-team failure → 502", res.statusCode === 502, `got ${res.statusCode}`);
-  check("create-team failure → no upsert persisted", supa.upserts.length === 0);
+  check("create-team failure → no upsert persisted", supa.upserts.agent_platform_connections.length === 0);
 }
 
-// 11. bundle create-portal-link failure → 502 (team already upserted)
+// 13. bundle create-portal-link failure → 502
 {
   const supa = makeSupabaseMock();
   const bundle = makeBundleMocks({ portalThrow: new Error("portal down") });
@@ -195,7 +240,7 @@ console.log("\n── api/social-connect.js — start bundle Instagram connect �
   check("create-portal failure → 502", res.statusCode === 502, `got ${res.statusCode}`);
 }
 
-// 12. Method guard — non-POST → 405
+// 14. Method guard — non-POST → 405
 {
   const req = { method: "GET", headers: { authorization: `Bearer ${VALID_TOKEN}` } };
   const res = makeRes();
@@ -203,14 +248,14 @@ console.log("\n── api/social-connect.js — start bundle Instagram connect �
   check("GET → 405", res.statusCode === 405);
 }
 
-// 13. redirectUrl falls back to host when no origin header
+// 15. redirectUrl falls back to host when no origin header
 {
   const supa = makeSupabaseMock();
   const bundle = makeBundleMocks();
   const req = { method: "POST", headers: { authorization: `Bearer ${VALID_TOKEN}`, host: "preview.vercel.app", "x-forwarded-proto": "https" }, body: {} };
   const res = makeRes();
   await handler(req, res, { supabase: supa, createTeam: bundle.createTeam, createPortal: bundle.createPortal });
-  check("redirectUrl falls back to host", bundle.calls.lastPortalArgs?.redirectUrl === "https://preview.vercel.app/?social=connected", bundle.calls.lastPortalArgs?.redirectUrl);
+  check("redirectUrl falls back to host", bundle.calls.lastPortalArgs?.redirectUrl === "https://preview.vercel.app/?social=connected&platform=instagram", bundle.calls.lastPortalArgs?.redirectUrl);
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
