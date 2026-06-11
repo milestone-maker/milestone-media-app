@@ -48,6 +48,7 @@ let mockState = {
   publishedPath:   null,        // last destination uploaded to
   publishOrder:    [],          // list of file_paths in the order copied
   micrositeWrites: [],          // captured writes to microsites table
+  liveCount:       0,           // agent's current LIVE-microsite count (cap query)
 };
 
 function resetMock(overrides = {}) {
@@ -61,6 +62,7 @@ function resetMock(overrides = {}) {
     publishedPath:   null,
     publishOrder:    [],
     micrositeWrites: [],
+    liveCount:       0,            // agent's current LIVE-microsite count (cap query)
     ...overrides,
   };
 }
@@ -130,6 +132,9 @@ function makeFakeClient() {
         const terminal = {
           maybeSingle: async () => ({ data: existing, error: null }),
           limit: () => ({ maybeSingle: async () => ({ data: existing, error: null }) }),
+          // step 5b live-microsite cap count: select("id",{count,head})→eq(agent)
+          // →eq(published)→is(retired_at,null), awaited as { count, error }.
+          is: async () => ({ count: mockState.liveCount ?? 0, error: null }),
         };
         return {
           select: () => ({ eq: () => ({ eq: () => terminal }) }),
@@ -474,6 +479,58 @@ const BASE_PROPERTY_DATA = {
     check("cross-owner publish → 403", res.statusCode === 403, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
     check("cross-owner publish wrote nothing", mockState.micrositeWrites.length === 0);
     check("403 reason mentions ownership", /does not belong to you/i.test(res.body?.error || ""), res.body?.error);
+  }
+}
+
+// ── Scenario 6 — per-tier live-microsite cap (NEW-create only) ───────
+{
+  console.log("\n── Scenario 6: live-microsite cap gates NEW publishes only ──\n");
+
+  // 6a. NEW publish AT cap (Solo/starter cap 4, already 4 live) → 403, no write.
+  resetMock({
+    agent:   { id: "agent-1", role: "agent", is_beta: false, subscription_tier: "starter", subscription_status: "active" },
+    booking: { id: "booking-1", agent_id: "agent-1", invoice_paid: true, selected_package: "luxury", selected_addons: [], address: "5912 Velasco" },
+    voiceProfile: null,
+    liveCount: 4,                 // at the Solo cap
+    existingMicrosite: null,      // brand-new create
+  });
+  {
+    const res = makeRes();
+    await handler(makeReq({ bookingId: "booking-1", theme: "Prestige", slug: "cap-5th", propertyData: { ...BASE_PROPERTY_DATA } }), res);
+    check("new publish at cap → 403", res.statusCode === 403, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
+    check("at cap wrote nothing", mockState.micrositeWrites.length === 0);
+    check("403 message names the cap + retire guidance", /used your 4 live microsites.*retire one/i.test(res.body?.error || ""), res.body?.error);
+  }
+
+  // 6b. NEW publish UNDER cap (3 of 4 live) → proceeds (insert happens).
+  resetMock({
+    agent:   { id: "agent-1", role: "agent", is_beta: false, subscription_tier: "starter", subscription_status: "active" },
+    booking: { id: "booking-1", agent_id: "agent-1", invoice_paid: true, selected_package: "luxury", selected_addons: [], address: "5912 Velasco" },
+    voiceProfile: null,
+    liveCount: 3,                 // under the Solo cap
+    existingMicrosite: null,
+  });
+  {
+    const res = makeRes();
+    await handler(makeReq({ bookingId: "booking-1", theme: "Prestige", slug: "cap-4th", propertyData: { ...BASE_PROPERTY_DATA } }), res);
+    check("new publish under cap → 200", res.statusCode === 200, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
+    check("under cap inserted a row", mockState.micrositeWrites[0]?.op === "insert");
+  }
+
+  // 6c. RE-PUBLISH of an existing owned microsite while OVER cap → proceeds.
+  //     existingMicrosite present → cap skipped entirely; endpoint UPDATEs.
+  resetMock({
+    agent:   { id: "agent-1", role: "agent", is_beta: false, subscription_tier: "starter", subscription_status: "active" },
+    booking: { id: "booking-1", agent_id: "agent-1", invoice_paid: true, selected_package: "luxury", selected_addons: [], address: "5912 Velasco" },
+    voiceProfile: null,
+    liveCount: 99,                // way over cap — must NOT matter for re-publish
+    existingMicrosite: { id: "ms-1", agent_id: "agent-1" },
+  });
+  {
+    const res = makeRes();
+    await handler(makeReq({ bookingId: "booking-1", theme: "Prestige", slug: "existing-slug", propertyData: { ...BASE_PROPERTY_DATA } }), res);
+    check("re-publish over cap → 200 (cap exempt)", res.statusCode === 200, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
+    check("re-publish over cap used UPDATE", mockState.micrositeWrites[0]?.op === "update");
   }
 }
 

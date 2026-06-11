@@ -18,6 +18,9 @@ const HELPER_PATH = resolve(__dirname, "..", "api", "_lib", "entitlement.js");
 
 const { checkMicrositeEntitlement } = await import(HELPER_PATH);
 
+const SHARED_PATH = resolve(__dirname, "..", "shared", "micrositeAccess.js");
+const { withinMicrositeCap, micrositeCapForTier } = await import(SHARED_PATH);
+
 // ── Fixtures ──────────────────────────────────────────────────────────
 const admin = { id: "admin-uuid", role: "admin" };
 const alice = { id: "agent-alice", role: "agent" };
@@ -213,7 +216,55 @@ for (const c of cases) {
   }
 }
 
+// ── Per-tier live-microsite cap (withinMicrositeCap) ───────────────────
+// The cap is the NEW-create gate layered on top of the binary entitlement.
+// These assert the pure rule + the no-cap-tier behavior + the exemption.
+const capCases = [
+  // capped tiers: under cap → allowed, at/over cap → blocked
+  { name: "starter under cap (3 < 4) → allowed",  args: { tier: "starter", liveCount: 3 }, want: true },
+  { name: "starter at cap (4 >= 4) → blocked",    args: { tier: "starter", liveCount: 4 }, want: false },
+  { name: "starter over cap (5 >= 4) → blocked",  args: { tier: "starter", liveCount: 5 }, want: false },
+  { name: "pro under cap (7 < 8) → allowed",      args: { tier: "pro", liveCount: 7 },     want: true },
+  { name: "pro at cap (8) → blocked",             args: { tier: "pro", liveCount: 8 },     want: false },
+  { name: "elite under cap (15 < 16) → allowed",  args: { tier: "elite", liveCount: 15 },  want: true },
+  { name: "elite at cap (16) → blocked",          args: { tier: "elite", liveCount: 16 },  want: false },
+  // no-cap tiers: ALWAYS allowed regardless of count
+  { name: "teams (no cap entry) at 999 → allowed",      args: { tier: "teams", liveCount: 999 },      want: true },
+  { name: "enterprise (no cap entry) at 999 → allowed", args: { tier: "enterprise", liveCount: 999 }, want: true },
+  { name: "null tier (no subscription) at 999 → allowed", args: { tier: null, liveCount: 999 },       want: true },
+];
+for (const c of capCases) {
+  const got = withinMicrositeCap(c.args);
+  if (got === c.want) { console.log(`  ✓ cap: ${c.name}`); passed++; }
+  else { console.log(`  ✗ cap: ${c.name}\n      expected ${c.want}, got ${got}`); failed++; }
+}
+
+// micrositeCapForTier: numbers for the three, null for everything else
+const capLookup = [
+  ["starter", 4], ["pro", 8], ["elite", 16], ["teams", null], ["enterprise", null], [null, null],
+];
+for (const [tier, want] of capLookup) {
+  const got = micrositeCapForTier(tier);
+  if (got === want) { console.log(`  ✓ cap-lookup: ${tier} → ${want}`); passed++; }
+  else { console.log(`  ✗ cap-lookup: ${tier} → expected ${want}, got ${got}`); failed++; }
+}
+
+// Exemption: an existing owned microsite stays entitled (binary rule) even
+// for a capped tier — the cap is never applied to re-publish/edit. (The
+// endpoint enforces the new-create-only gate; checkMicrositeEntitlement
+// itself is cap-free and must keep returning entitled here.)
+{
+  const got = checkMicrositeEntitlement(
+    alice,
+    bookingFor(alice.id, { invoice_paid: false, selected_package: "essential", selected_addons: [] }),
+    { tier: "starter", status: "active" },
+    { existingMicrosite: { agent_id: alice.id } },
+  );
+  if (got.entitled === true) { console.log("  ✓ cap-exempt: existing owned microsite stays entitled (no cap on re-publish)"); passed++; }
+  else { console.log(`  ✗ cap-exempt: existing owned microsite should stay entitled, got ${JSON.stringify(got)}`); failed++; }
+}
+
 console.log("");
-console.log(`Result: ${passed} passed, ${failed} failed (out of ${cases.length})`);
+console.log(`Result: ${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
-console.log("✓ Entitlement helper is valid");
+console.log("✓ Entitlement helper + live-microsite cap are valid");
