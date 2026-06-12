@@ -234,5 +234,48 @@ const LIVE_URL = "https://app.milestonemediaphotography.com/p/the-home";
   check("no backyard → album omits backyard", !bundle.calls.uploads.some((u) => u.url === pub("yard.jpg")));
 }
 
+// 11. AGENT EXTRA PHOTOS — appended after the curated set, in selection order.
+{
+  const E1 = pub("extra-1.jpg"), E2 = pub("extra-2.jpg");
+  const { bundle } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook", extraPhotoUrls: [E1, E2] } });
+  const album = bundle.calls.uploads.map((u) => u.url);
+  check("extras appended after curated, in order", JSON.stringify(album) === JSON.stringify([...EXPECTED_ALBUM, E1, E2]));
+}
+
+// 12. Extra that's already in the curated set → de-duped (not added twice).
+{
+  const E1 = pub("extra-1.jpg");
+  const { bundle } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook", extraPhotoUrls: [pub("kitchen.jpg"), E1] } });
+  const album = bundle.calls.uploads.map((u) => u.url);
+  check("curated-dup extra skipped", JSON.stringify(album) === JSON.stringify([...EXPECTED_ALBUM, E1]));
+  check("kitchen appears exactly once", album.filter((u) => u === pub("kitchen.jpg")).length === 1);
+}
+
+// 13. Foreign-host extra dropped (same allowlist as curated).
+{
+  const E1 = pub("extra-1.jpg");
+  const { bundle } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook", extraPhotoUrls: ["https://evil.cdn.example/x.jpg", E1] } });
+  const album = bundle.calls.uploads.map((u) => u.url);
+  check("foreign-host extra dropped", !album.some((u) => u.includes("evil.cdn")));
+  check("valid extra kept", JSON.stringify(album) === JSON.stringify([...EXPECTED_ALBUM, E1]));
+}
+
+// 14. Absent / empty extras → exactly today's curated album.
+{
+  const { bundle: b1 } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook" } });
+  check("absent extras = curated album", JSON.stringify(b1.calls.uploads.map((u) => u.url)) === JSON.stringify(EXPECTED_ALBUM));
+  const { bundle: b2 } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook", extraPhotoUrls: [] } });
+  check("empty extras = curated album", JSON.stringify(b2.calls.uploads.map((u) => u.url)) === JSON.stringify(EXPECTED_ALBUM));
+}
+
+// 15. No cap — many extras all included.
+{
+  const many = Array.from({ length: 12 }, (_, i) => pub(`extra-${i}.jpg`));
+  const { bundle } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook", extraPhotoUrls: many } });
+  const album = bundle.calls.uploads.map((u) => u.url);
+  check("no cap → all extras included", album.length === EXPECTED_ALBUM.length + many.length);
+  check("no cap → extras after curated", JSON.stringify(album) === JSON.stringify([...EXPECTED_ALBUM, ...many]));
+}
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

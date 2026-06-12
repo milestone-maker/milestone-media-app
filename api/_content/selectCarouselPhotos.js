@@ -134,4 +134,43 @@ export function selectCarouselPhotos(photoLabels) {
   };
 }
 
+// Best includable photo within a category (agent_corrected, then confidence,
+// then sort_order) — same rule selectCarouselPhotos uses per category.
+function bestInCategory(photoLabels, category) {
+  const cands = (Array.isArray(photoLabels) ? photoLabels : [])
+    .filter((l) => l && l.category === category && includable(l));
+  if (!cands.length) return null;
+  cands.sort(bestFirst);
+  return cands[0]?.photo_url || null;
+}
+
+/**
+ * The CURATED Facebook album URL list for a listing (Facebook Stage 3): the
+ * same order the IG selection produces — cover, then the subject-room walk —
+ * PLUS the backyard photo whenever one exists (FB ungates it from the carousel's
+ * pool gate). De-duped, order-preserving. NO host filtering and NO cap (the
+ * server applies the storage-host allowlist; the client uses this only to know
+ * which photos are the defaults). Shared by api/social-post.js (server album)
+ * and the FB post UI (to mark defaults vs agent-added extras).
+ *
+ * @param {Array<object>} photoLabels rows from public.photo_labels
+ * @returns {string[]} ordered curated photo URLs
+ */
+export function facebookAlbumUrls(photoLabels) {
+  const sel = selectCarouselPhotos(photoLabels);
+  const ordered = [];
+  if (sel.coverPhoto?.photo_url) ordered.push(sel.coverPhoto.photo_url);
+  for (const s of sel.subjectSlides) if (s?.photo_url) ordered.push(s.photo_url);
+  const backyard = bestInCategory(photoLabels, "backyard");
+  if (backyard) ordered.push(backyard); // ungate: include whenever it exists
+  const seen = new Set();
+  const out = [];
+  for (const url of ordered) {
+    if (typeof url !== "string" || !url || seen.has(url)) continue;
+    seen.add(url);
+    out.push(url);
+  }
+  return out;
+}
+
 export default selectCarouselPhotos;
