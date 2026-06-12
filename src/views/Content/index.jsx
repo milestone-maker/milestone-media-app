@@ -25,17 +25,35 @@ import CarouselView from "./CarouselView";
 import UpcomingPosts from "./UpcomingPosts";
 import { includable } from "../../../api/_content/selectCarouselPhotos.js";
 
-// Friendly label → exact framework_name slug the endpoint expects.
-const FRAMEWORKS = [
-  { label: "Story-Driven",                slug: "story_driven_listing" },
-  { label: '"You" Hook',                  slug: "you_hook_listing" },
-  { label: "Walkthrough Carousel",        slug: "walkthrough_carousel" },
-  { label: "Behind-the-Scenes / Pre-List", slug: "behind_the_scenes_prelist" },
-  { label: "Neighborhood-First",          slug: "neighborhood_first" },
-  { label: "Problem → Solution",          slug: "problem_solution" },
-  { label: "POV: Day in the Life",        slug: "pov_day_in_life" },
+// Friendly label → exact framework_name slug the endpoint expects, keyed by
+// platform. Instagram keeps its 7 listing frameworks; Facebook (Stage 2) adds
+// 5 FB-native long-form frameworks. The style picker swaps lists when the
+// platform toggle changes.
+const FRAMEWORKS_BY_PLATFORM = {
+  instagram: [
+    { label: "Story-Driven",                 slug: "story_driven_listing" },
+    { label: '"You" Hook',                   slug: "you_hook_listing" },
+    { label: "Walkthrough Carousel",         slug: "walkthrough_carousel" },
+    { label: "Behind-the-Scenes / Pre-List", slug: "behind_the_scenes_prelist" },
+    { label: "Neighborhood-First",           slug: "neighborhood_first" },
+    { label: "Problem → Solution",           slug: "problem_solution" },
+    { label: "POV: Day in the Life",         slug: "pov_day_in_life" },
+  ],
+  facebook: [
+    { label: "Neighbor Story",      slug: "neighbor_story" },
+    { label: "Community Question",  slug: "community_question" },
+    { label: "Market Plain Talk",   slug: "market_plain_talk" },
+    { label: "Win Share",           slug: "win_share" },
+    { label: "Resource Drop",       slug: "resource_drop" },
+  ],
+};
+const PLATFORMS = [
+  { key: "instagram", label: "Instagram", emoji: "📷" },
+  { key: "facebook",  label: "Facebook",  emoji: "📘" },
 ];
-const labelForSlug = (slug) => FRAMEWORKS.find((f) => f.slug === slug)?.label || slug;
+const ALL_FRAMEWORKS = [...FRAMEWORKS_BY_PLATFORM.instagram, ...FRAMEWORKS_BY_PLATFORM.facebook];
+const labelForSlug = (slug) => ALL_FRAMEWORKS.find((f) => f.slug === slug)?.label || slug;
+const platformLabel = (key) => PLATFORMS.find((p) => p.key === key)?.label || key;
 
 // Map an HTTP status (and the server's bodyJson.error) to a friendly,
 // non-crashing message for the agent.
@@ -117,8 +135,19 @@ function ContentView() {
   const [showVoiceModal, setShowVoiceModal] = useState(false);
 
   // Generator inputs
-  const [framework, setFramework] = useState(FRAMEWORKS[0].slug);
+  const [platform, setPlatform] = useState("instagram");
+  const [framework, setFramework] = useState(FRAMEWORKS_BY_PLATFORM.instagram[0].slug);
   const [storyAngle, setStoryAngle] = useState("");
+
+  // Switch platform: swap the style list and reset the framework selection to
+  // that platform's first. Clears any showing result so the panels stay coherent.
+  const switchPlatform = (next) => {
+    if (next === platform) return;
+    setPlatform(next);
+    setFramework(FRAMEWORKS_BY_PLATFORM[next][0].slug);
+    setResult(null);
+    setErrorMsg("");
+  };
 
   // Photo-label count for the selected listing — drives the carousel nudge.
   // null = unknown / not applicable; a number once checked.
@@ -443,9 +472,12 @@ function ContentView() {
         voice_profile_id: voiceProfile.id,
         listing_id: selectedListingId,
         framework_name: framework,
-        platform: "instagram",
+        platform,
         content_type: "listing",
       };
+      // The single "Angle / Focus" input maps to the generic story_angle override
+      // (consumed by IG story-driven + FB neighbor_story; other FB frameworks fall
+      // back to their own per-framework defaults).
       if (storyAngle.trim()) body.story_angle = storyAngle.trim();
 
       const res = await fetch("/api/content-generate", {
@@ -566,10 +598,30 @@ function ContentView() {
           })}
         </div>
 
-        {/* Style picker */}
+        {/* Platform toggle — swaps the style list below */}
+        <label style={labelSt}>Platform</label>
+        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+          {PLATFORMS.map((p) => {
+            const selected = p.key === platform;
+            return (
+              <button key={p.key} onClick={() => switchPlatform(p.key)} style={{
+                padding: "9px 16px", borderRadius: 8, cursor: "pointer",
+                fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: "0.03em",
+                display: "flex", alignItems: "center", gap: 7,
+                border: selected ? "1px solid #c9a84c" : "1px solid rgba(255,255,255,0.12)",
+                background: selected ? "rgba(201,168,76,0.18)" : "rgba(255,255,255,0.04)",
+                color: selected ? "#c9a84c" : "rgba(255,255,255,0.55)",
+              }}>
+                <span style={{ fontSize: 14 }}>{p.emoji}</span>{p.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Style picker (platform-scoped) */}
         <label style={labelSt}>Content Style</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
-          {FRAMEWORKS.map((f) => {
+          {FRAMEWORKS_BY_PLATFORM[platform].map((f) => {
             const selected = f.slug === framework;
             return (
               <button key={f.slug} onClick={() => setFramework(f.slug)} style={{
@@ -649,6 +701,29 @@ function ContentView() {
               border: "1px solid rgba(255,255,255,0.06)",
             }}>{result.caption}</div>
           </div>
+
+          {/* Facebook microsite-link status. The endpoint appends the live
+              microsite URL into the caption above when one exists; when none
+              exists yet, the CTA stands alone and the link inserts at post time. */}
+          {result.platform === "facebook" && (
+            result.microsite_url ? (
+              <div style={{
+                marginBottom: 18, fontFamily: "'Jost', sans-serif", fontSize: 11.5, color: "#9fe3b0",
+                background: "rgba(74,222,128,0.06)", border: "1px solid rgba(74,222,128,0.22)",
+                borderRadius: 8, padding: "9px 12px", lineHeight: 1.5, wordBreak: "break-all",
+              }}>
+                ✓ Microsite link added to the caption: {result.microsite_url}
+              </div>
+            ) : (
+              <div style={{
+                marginBottom: 18, fontFamily: "'Jost', sans-serif", fontSize: 11.5, color: "#e8c97a",
+                background: "rgba(201,168,76,0.07)", border: "1px solid rgba(201,168,76,0.22)",
+                borderRadius: 8, padding: "9px 12px", lineHeight: 1.5,
+              }}>
+                No published microsite for this listing yet — the CTA stands alone for now. Publish a microsite and the link will be inserted automatically when this posts.
+              </div>
+            )
+          )}
 
           {/* Carousel — Style B sequence + download (walkthrough_carousel only) */}
           {Array.isArray(result.slides) && result.slides.length > 0 && (
@@ -737,6 +812,16 @@ function ContentView() {
                   <div onClick={() => setExpandedId(open ? null : h.id)} style={{
                     display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", cursor: "pointer",
                   }}>
+                    {/* Platform badge — rows now mix Instagram + Facebook */}
+                    <span style={{
+                      background: (h.platform === "facebook") ? "rgba(59,130,246,0.14)" : "rgba(225,48,108,0.12)",
+                      border: (h.platform === "facebook") ? "1px solid rgba(59,130,246,0.4)" : "1px solid rgba(225,48,108,0.35)",
+                      color: (h.platform === "facebook") ? "#93c5fd" : "#f9a8c4",
+                      borderRadius: 6, padding: "3px 7px", fontFamily: "'Jost', sans-serif", fontSize: 10, flexShrink: 0,
+                      display: "flex", alignItems: "center", gap: 4,
+                    }}>
+                      {(h.platform === "facebook") ? "📘" : "📷"}{platformLabel(h.platform || "instagram")}
+                    </span>
                     <span style={{
                       background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.3)", color: "#e8c97a",
                       borderRadius: 6, padding: "3px 8px", fontFamily: "'Jost', sans-serif", fontSize: 10, flexShrink: 0,

@@ -97,7 +97,57 @@ function defaultSupabase() {
 export const DEFAULT_MODEL      = "claude-sonnet-4-6";
 export const DEFAULT_MAX_TOKENS = 2048;
 
+// Public host that fronts published microsite pages (/p/{slug}). Same base as
+// api/publish-microsite.js — kept in sync by hand (no shared constant yet).
+const PUBLIC_APP_BASE = "https://app.milestonemediaphotography.com";
+
 // ── helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Resolve the LIVE published microsite URL for a listing, or null when none.
+ *
+ * Facebook Stage 2b. The listing↔microsite join: api/publish-microsite.js
+ * additively mirrors each published microsite into a public.listings row and
+ * sets microsites.listing_id back to it, so the reverse lookup
+ * (microsites WHERE listing_id = ?) finds the microsite that produced the
+ * listing the Content tab shows. LIVE = published = true AND retired_at IS NULL
+ * (migration 038). The mirror is best-effort, so this can legitimately return
+ * null (mirror failed at publish, or the listing wasn't microsite-sourced) — in
+ * which case the caller simply omits the link. listing_id is not unique on
+ * microsites, so we take the most recently created live one.
+ *
+ * STAGE 3 TODO (posting): re-resolve and substitute the LIVE microsite URL at
+ * POST time (in api/social-post.js / the FB post path), so a microsite
+ * published AFTER generation still gets linked, and a retired one is dropped.
+ * The URL baked into the stored caption here is a generation-time snapshot.
+ */
+async function defaultResolveMicrositeUrl(supabase, listingId) {
+  const { data, error } = await supabase
+    .from("microsites")
+    .select("slug")
+    .eq("listing_id", listingId)
+    .eq("published", true)
+    .is("retired_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("[content-generate] microsite lookup error (continuing without link):", error);
+    return null;
+  }
+  return data?.slug ? `${PUBLIC_APP_BASE}/p/${data.slug}` : null;
+}
+
+/**
+ * Append the resolved microsite URL to the caption immediately after the
+ * model's final CTA lead-in line (the colon line — the model never writes a
+ * URL). Placed BEFORE the trailing hashtag block, which canonicalizeHashtags
+ * appends afterward. Returns a shallow copy; no-ops if caption isn't a string.
+ */
+function appendMicrositeLink(parsed, url) {
+  if (!parsed || typeof parsed.caption !== "string" || !url) return parsed;
+  return { ...parsed, caption: parsed.caption.replace(/\s+$/, "") + "\n" + url };
+}
 
 function corsHeaders() {
   return {
@@ -173,6 +223,7 @@ export default async function handler(req, res, depsOverride) {
   const generate  = depsOverride?.generate  || generateAndParseObject;
   const model     = depsOverride?.model     || DEFAULT_MODEL;
   const maxTokens = depsOverride?.maxTokens || DEFAULT_MAX_TOKENS;
+  const resolveMicrositeUrl = depsOverride?.resolveMicrositeUrl || defaultResolveMicrositeUrl;
 
   try {
     // ── 1. Auth ──
@@ -314,11 +365,15 @@ export default async function handler(req, res, depsOverride) {
 
     // ── 7. Call the engine (caller injects already-built strings;
     //       engine stays stateless / domain-agnostic) ──
+    // Per-module token budget: a framework may declare its own maxTokens
+    // (FB long-form runs ~3500–4096); fall back to the endpoint default.
+    const effectiveMaxTokens = promptMod.maxTokens || maxTokens;
+
     let result;
     try {
       result = await generate({
         model,
-        maxTokens,
+        maxTokens: effectiveMaxTokens,
         promptBuilders: {
           buildSystemPrompt: () => built.systemPrompt,
           buildUserMessage:  () => built.userMessage,
@@ -340,10 +395,22 @@ export default async function handler(req, res, depsOverride) {
     }
 
     // ── 8. Validate the model's output shape ──
-    const parsed = result.parsed;
+    let parsed = result.parsed;
     if (!parsed || typeof parsed !== "object") {
       console.error("[content-generate] parsed result not an object", { raw: result.raw });
       return res.status(502).json({ error: "model returned non-object payload" });
+    }
+
+    // ── 8a. (Facebook ONLY) Append the listing's published microsite URL right
+    //        after the model's CTA lead-in (the model writes the lead-in copy
+    //        only — never a URL). Placed BEFORE the trailing hashtag block,
+    //        which canonicalizeHashtags appends next. Omitted when no live
+    //        microsite exists; never applied to Instagram. The resolved URL is
+    //        a generation-time snapshot (see STAGE 3 TODO on defaultResolveMicrositeUrl).
+    let micrositeUrl = null;
+    if (platform === "facebook") {
+      micrositeUrl = await resolveMicrositeUrl(supabase, listing_id);
+      if (micrositeUrl) parsed = appendMicrositeLink(parsed, micrositeUrl);
     }
 
     // Canonicalize hashtags so the caption-body block and the structured
@@ -439,7 +506,14 @@ export default async function handler(req, res, depsOverride) {
       });
     }
 
-    return res.status(200).json(savedId ? { ...finalParsed, saved_id: savedId } : finalParsed);
+    // Additive response fields: saved_id (when persisted) + microsite_url for
+    // Facebook (the resolved link, or null when none — the UI uses null to show
+    // the "link inserts at post time" note). Never added for Instagram.
+    return res.status(200).json({
+      ...finalParsed,
+      ...(savedId ? { saved_id: savedId } : {}),
+      ...(platform === "facebook" ? { microsite_url: micrositeUrl } : {}),
+    });
   } catch (err) {
     console.error("[content-generate] fatal:", err);
     return res.status(500).json({ error: err.message || "internal error" });
