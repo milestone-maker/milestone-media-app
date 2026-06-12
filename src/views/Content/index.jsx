@@ -58,6 +58,20 @@ const ALL_FRAMEWORKS = [...FRAMEWORKS_BY_PLATFORM.instagram, ...FRAMEWORKS_BY_PL
 const labelForSlug = (slug) => ALL_FRAMEWORKS.find((f) => f.slug === slug)?.label || slug;
 const platformLabel = (key) => PLATFORMS.find((p) => p.key === key)?.label || key;
 
+// Facebook captions carry a microsite-link PLACEHOLDER TOKEN (api/_lib/microsite.js)
+// instead of a baked URL. Resolve it for DISPLAY + COPY: substitute the live
+// microsite URL, or drop the token's line when the listing has no published
+// microsite. NEVER show the raw token. Mirrors the server's substituteMicrositeToken.
+const MICROSITE_TOKEN = "[[MILESTONE_MICROSITE_URL]]";
+const MICROSITE_PUBLIC_BASE = "https://app.milestonemediaphotography.com";
+function resolveCaptionForDisplay(caption, micrositeUrl) {
+  if (typeof caption !== "string" || !caption.includes(MICROSITE_TOKEN)) return caption;
+  if (micrositeUrl) return caption.split(MICROSITE_TOKEN).join(micrositeUrl);
+  return caption.includes("\n" + MICROSITE_TOKEN)
+    ? caption.split("\n" + MICROSITE_TOKEN).join("")
+    : caption.split(MICROSITE_TOKEN).join("");
+}
+
 // Map an HTTP status (and the server's bodyJson.error) to a friendly,
 // non-crashing message for the agent.
 function friendlyError(status, serverMsg) {
@@ -155,6 +169,10 @@ function ContentView() {
   // Photo-label count for the selected listing — drives the carousel nudge.
   // null = unknown / not applicable; a number once checked.
   const [photoLabelCount, setPhotoLabelCount] = useState(null);
+
+  // Live published-microsite URL for the selected listing — used to resolve the
+  // Facebook caption's microsite token for display + copy. null = none published.
+  const [micrositeUrlForListing, setMicrositeUrlForListing] = useState(null);
 
   // Includable photo pool for the selected listing — candidates for the
   // lightbox "Replace photo" picker. Filtered by the same includable() rule
@@ -442,6 +460,26 @@ function ContentView() {
     return () => { cancelled = true; };
   }, [selectedListingId]);
 
+  // ── Resolve the listing's live published-microsite URL (for FB caption token) ──
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedListingId) { setMicrositeUrlForListing(null); return; }
+    (async () => {
+      const { data } = await supabase
+        .from("microsites")
+        .select("slug")
+        .eq("listing_id", selectedListingId)
+        .eq("published", true)
+        .is("retired_at", null)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled) return;
+      setMicrositeUrlForListing(data?.slug ? `${MICROSITE_PUBLIC_BASE}/p/${data.slug}` : null);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedListingId]);
+
   const selectedListing = listings.find((l) => l.id === selectedListingId) || null;
   const hasUsableProfile = !!voiceProfile && !!String(voiceProfile.license_number || "").trim();
 
@@ -696,26 +734,27 @@ function ContentView() {
           <div style={{ marginBottom: 18 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <label style={{ ...labelSt, marginBottom: 0 }}>Caption</label>
-              <CopyButton text={result.caption} label="Copy caption" />
+              <CopyButton text={resolveCaptionForDisplay(result.caption, micrositeUrlForListing)} label="Copy caption" />
             </div>
             <div style={{
               whiteSpace: "pre-wrap", fontFamily: "'Jost', sans-serif", fontSize: 13.5, color: "#ECE7DC",
               lineHeight: 1.7, background: "rgba(0,0,0,0.2)", borderRadius: 10, padding: "16px 18px",
               border: "1px solid rgba(255,255,255,0.06)",
-            }}>{result.caption}</div>
+            }}>{resolveCaptionForDisplay(result.caption, micrositeUrlForListing)}</div>
           </div>
 
-          {/* Facebook microsite-link status. The endpoint appends the live
-              microsite URL into the caption above when one exists; when none
-              exists yet, the CTA stands alone and the link inserts at post time. */}
+          {/* Facebook microsite-link status. The caption carries a placeholder
+              token; we substitute the listing's LIVE microsite URL for display +
+              copy here, and authoritatively again at post time. When none exists
+              yet, the CTA stands alone and the link inserts once a microsite is published. */}
           {result.platform === "facebook" && (
-            result.microsite_url ? (
+            micrositeUrlForListing ? (
               <div style={{
                 marginBottom: 18, fontFamily: "'Jost', sans-serif", fontSize: 11.5, color: "#9fe3b0",
                 background: "rgba(74,222,128,0.06)", border: "1px solid rgba(74,222,128,0.22)",
                 borderRadius: 8, padding: "9px 12px", lineHeight: 1.5, wordBreak: "break-all",
               }}>
-                ✓ Microsite link added to the caption: {result.microsite_url}
+                ✓ Microsite link in the caption: {micrositeUrlForListing}
               </div>
             ) : (
               <div style={{
@@ -830,7 +869,7 @@ function ContentView() {
                       borderRadius: 6, padding: "3px 8px", fontFamily: "'Jost', sans-serif", fontSize: 10, flexShrink: 0,
                     }}>{labelForSlug(h.framework_name)}</span>
                     <span style={{ flex: 1, fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.6)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {(h.caption || "").replace(/\s+/g, " ").slice(0, 80)}
+                      {resolveCaptionForDisplay(h.caption || "", micrositeUrlForListing).replace(/\s+/g, " ").slice(0, 80)}
                     </span>
                     <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)", flexShrink: 0 }}>{fmtDate(h.created_at)}</span>
                     <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 12, flexShrink: 0 }}>{open ? "▲" : "▼"}</span>
@@ -838,10 +877,10 @@ function ContentView() {
                   {open && (
                     <div style={{ padding: "0 14px 14px" }}>
                       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-                        <CopyButton text={h.caption} label="Copy caption" />
+                        <CopyButton text={resolveCaptionForDisplay(h.caption, micrositeUrlForListing)} label="Copy caption" />
                       </div>
                       <div style={{ whiteSpace: "pre-wrap", fontFamily: "'Jost', sans-serif", fontSize: 12.5, color: "#ECE7DC", lineHeight: 1.7 }}>
-                        {h.caption}
+                        {resolveCaptionForDisplay(h.caption, micrositeUrlForListing)}
                       </div>
                       {Array.isArray(h.hashtags) && h.hashtags.length > 0 && (
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>

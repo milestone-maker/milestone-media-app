@@ -1,34 +1,42 @@
-// Vercel Serverless Function — publish a generated carousel to the agent's
-// connected Instagram via bundle.social (Stage 2a).
+// Vercel Serverless Function — publish generated content to the agent's
+// connected Instagram (carousel) or Facebook (photo album) via bundle.social.
 // POST /api/social-post
 //   Headers: Authorization: Bearer <supabase access token>
-//   Body:    { contentId, imageUrls: [ordered public Supabase Storage URLs] }
-//   Returns: { postId, status }
+//   Body:    { contentId, platform?, postDate?,
+//              imageUrls?: [ordered public Supabase Storage URLs] }
+//   Returns: { trackingId, postId, status, scheduledFor }
 //
-// Image approach is locked as Option C: a (later) client chunk composes the
-// carousel, uploads the images to a PUBLIC Supabase Storage bucket, and passes
-// the resulting public URLs here. This endpoint trusts those URLs only after
-// confirming they are on this project's Supabase Storage public host, hands
-// each to bundle (/upload/from-url → upload id), then creates one Instagram
-// carousel post (type POST, ordered uploadIds). Server-only — no UI, no
-// storage write, no migration in this chunk.
+// Per platform:
+//   • INSTAGRAM (default): the client composes the carousel, uploads the slide
+//     images to the public `carousel-posts` bucket, and passes the ordered
+//     PUBLIC URLs as imageUrls. (Option C — store-first.)
+//   • FACEBOOK: the SERVER builds a photo album from the listing's RAW photos —
+//     reusing the SAME Instagram photo selection (selectCarouselPhotos over
+//     photo_labels) but taking each chosen photo's raw photo_url (NO carousel
+//     compositing). imageUrls from the client is ignored for FB.
 //
-// Auth + gating mirror api/social-connect.js EXACTLY:
-//   1. CORS + method guard
-//   2. Bearer auth → supabase.auth.getUser
-//   3. Subscription gate (admins exempt) via _lib/subscription.isSubscribed
-//   4. Service-role load of agent_social_connections + generated_content
+// Both paths: validate each image URL is a public Supabase Storage URL on an
+// allowed host, hand each to bundle (/upload/from-url → upload id), then create
+// one post (type POST, ordered uploadIds) via the platform-generalized
+// createPost.
 //
-// Caption: the stored generated_content.caption is already IG-ready — the
-// generation pipeline's canonicalizeHashtags() merges the hashtags[] block
-// INTO the caption as its trailing paragraph. So the post text is the caption
-// verbatim; we deliberately do NOT re-append hashtags[] (that would duplicate
-// them).
+// Connection: read from agent_platform_connections by (agent_id, platform) for
+// BOTH platforms — FB: platform='facebook'; IG: platform='instagram' (Stage 1
+// backfilled + mirrors it). The legacy agent_social_connections table stays in
+// place (still mirror-written) and is NOT read here anymore — flag for later
+// cleanup once nothing reads it.
 //
-// Posting is IMMEDIATE. bundle's status enum is ["DRAFT","SCHEDULED"] with no
-// "publish now" value, so immediate = status "SCHEDULED" with postDate = now.
-// postDate/status flow through createPost as params, so Stage 3 scheduling
-// reuses this path with a future date.
+// Caption:
+//   • IG: the stored generated_content.caption is already IG-ready (hashtags
+//     merged in at generation); posted verbatim.
+//   • FB: the stored caption carries a microsite PLACEHOLDER TOKEN. We re-resolve
+//     the listing's LIVE microsite URL here and substitute it for the token
+//     (insert the live link, or drop the token line if no live microsite), so a
+//     microsite published/retired AFTER generation is reflected at post time.
+//     A caption with no token (legacy pre-token row) is posted unchanged.
+//
+// Posting is IMMEDIATE or SCHEDULED. bundle's status enum is ["DRAFT","SCHEDULED"]
+// with no "publish now", so immediate = status "SCHEDULED" with postDate = now.
 //
 // Required env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BUNDLE_API_KEY.
 
@@ -39,33 +47,35 @@ import {
   createPost as bundleCreatePost,
 } from "./_lib/bundle.js";
 import { INSTAGRAM_MAX_CAROUSEL_IMAGES } from "../shared/carouselPosting.js";
+import { selectCarouselPhotos } from "./_content/selectCarouselPhotos.js";
+import { resolvePublishedMicrositeUrl, substituteMicrositeToken } from "./_lib/microsite.js";
 
 const SUPABASE_URL              = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// Instagram's hard ceiling on carousel items — shared with the UI gate so the
-// two can never disagree. A backstop against handing bundle an oversized post.
-const MAX_CAROUSEL_IMAGES = INSTAGRAM_MAX_CAROUSEL_IMAGES;
+// Hard ceiling on images per post — shared with the IG UI gate. Also used to cap
+// the FB album (bundle/Facebook album limits are in the same ballpark).
+const MAX_IMAGES = INSTAGRAM_MAX_CAROUSEL_IMAGES;
 
 // The custom domain fronts the whole Supabase project (incl. Storage) — see
 // src/supabaseClient.js — so client-generated getPublicUrl() URLs use THIS
 // host, while the server env SUPABASE_URL is the raw *.supabase.co host. Allow
-// both so the locked client flow's URLs pass the trust check.
+// both so the locked client flow's URLs (and raw listing photo URLs) pass.
 const EXTRA_STORAGE_HOSTS = ["auth.milestonemediaphotography.com"];
 const PUBLIC_STORAGE_PATH = "/storage/v1/object/public/";
 
-// Minimum lead time between "now" and the effective postDate handed to bundle.
-// Two jobs: (1) for an immediate post, nudging postDate slightly into the
-// future avoids bundle rejecting a date that isn't > now by the time it lands;
-// (2) for a scheduled post, it's the floor a chosen time must clear so we never
-// schedule something effectively in the past. The client mirrors this value.
 const SCHEDULE_BUFFER_MS = 3 * 60 * 1000; // 3 minutes
 
-// Allowed target networks — mirrors the social_posts.platform CHECK
-// (migration 036). Only Instagram ships today; facebook/threads are forward
-// hooks (Stage 3b). The default when the client omits it is "instagram".
+// Allowed target networks — mirrors the social_posts.platform CHECK (036).
 const ALLOWED_PLATFORMS = ["instagram", "facebook", "threads"];
 const DEFAULT_PLATFORM = "instagram";
+
+// Human label for user-facing strings (so they're not Instagram-only).
+function platformDisplay(p) {
+  if (p === "facebook") return "Facebook";
+  if (p === "threads")  return "Threads";
+  return "Instagram";
+}
 
 let _supabaseSingleton = null;
 function defaultSupabase() {
@@ -107,6 +117,27 @@ function isAllowedStorageUrl(value) {
   return allowedStorageHosts().has(u.host);
 }
 
+// Build the Facebook album: reuse the EXACT Instagram photo selection
+// (selectCarouselPhotos) and take each chosen photo's RAW photo_url, in order —
+// cover first, then the subject-room walk. No carousel compositing. Only
+// allowed-host public URLs survive. Returns [] when the listing has no usable
+// photos (FB allows a text-only post).
+function buildFacebookAlbum(photoLabels) {
+  const sel = selectCarouselPhotos(Array.isArray(photoLabels) ? photoLabels : []);
+  const ordered = [];
+  if (sel.coverPhoto?.photo_url) ordered.push(sel.coverPhoto.photo_url);
+  for (const s of sel.subjectSlides) if (s?.photo_url) ordered.push(s.photo_url);
+  // De-dupe (cover should never repeat in subjects, but be safe) + host-filter.
+  const seen = new Set();
+  const album = [];
+  for (const url of ordered) {
+    if (seen.has(url) || !isAllowedStorageUrl(url)) continue;
+    seen.add(url);
+    album.push(url);
+  }
+  return album.slice(0, MAX_IMAGES);
+}
+
 export default async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
@@ -118,9 +149,10 @@ export default async function handler(req, res, depsOverride) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const supabase   = depsOverride?.supabase   || defaultSupabase();
+  const supabase     = depsOverride?.supabase     || defaultSupabase();
   const createUpload = depsOverride?.createUpload || bundleCreateUploadFromUrl;
   const createPost   = depsOverride?.createPost   || bundleCreatePost;
+  const resolveMicrositeUrl = depsOverride?.resolveMicrositeUrl || resolvePublishedMicrositeUrl;
   const now          = depsOverride?.now          || (() => new Date());
 
   try {
@@ -154,44 +186,42 @@ export default async function handler(req, res, depsOverride) {
     // ── 2. Validate request body ──
     const body = req.body || {};
     const { contentId } = body;
-    const imageUrls = body.imageUrls;
-
     if (!contentId || typeof contentId !== "string") {
       return res.status(400).json({ error: "contentId is required" });
     }
-    if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
-      return res.status(400).json({ error: "imageUrls must be a non-empty array" });
-    }
-    if (imageUrls.length > MAX_CAROUSEL_IMAGES) {
-      return res.status(400).json({ error: `too many images (max ${MAX_CAROUSEL_IMAGES})` });
-    }
-    for (const url of imageUrls) {
-      if (!isAllowedStorageUrl(url)) {
-        return res.status(400).json({ error: "imageUrls must be public Supabase Storage URLs for this project" });
-      }
-    }
 
-    // Optional platform — defaults to instagram (the only network that ships
-    // today). Validated against the same vocabulary as the DB CHECK so an
-    // unknown value fails here with a clean 400 rather than at insert time.
+    // Platform — default instagram. Validated against the DB CHECK vocabulary.
     const platform = body.platform === undefined || body.platform === null
       ? DEFAULT_PLATFORM
       : body.platform;
     if (!ALLOWED_PLATFORMS.includes(platform)) {
       return res.status(400).json({ error: `platform must be one of: ${ALLOWED_PLATFORMS.join(", ")}` });
     }
+    const isFacebook = platform === "facebook";
+
+    // Instagram requires client-supplied imageUrls (the composed carousel).
+    // Facebook builds its album server-side, so imageUrls is ignored for FB.
+    let clientImageUrls = null;
+    if (!isFacebook) {
+      const imageUrls = body.imageUrls;
+      if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
+        return res.status(400).json({ error: "imageUrls must be a non-empty array" });
+      }
+      if (imageUrls.length > MAX_IMAGES) {
+        return res.status(400).json({ error: `too many images (max ${MAX_IMAGES})` });
+      }
+      for (const url of imageUrls) {
+        if (!isAllowedStorageUrl(url)) {
+          return res.status(400).json({ error: "imageUrls must be public Supabase Storage URLs for this project" });
+        }
+      }
+      clientImageUrls = imageUrls;
+    }
 
     // ── 2b. Resolve the effective postDate (immediate vs scheduled) ──
-    // bundle's status enum is ["DRAFT","SCHEDULED"] with no "publish now", so
-    // BOTH paths post with status "SCHEDULED"; only the date differs.
-    //   • no postDate            → immediate: now + buffer (the buffer also
-    //                              keeps the date safely > now when it reaches
-    //                              bundle).
-    //   • postDate (ISO string)  → scheduled: must parse and be at least
-    //                              now + buffer in the future.
     const nowMs = now().getTime();
     const earliestMs = nowMs + SCHEDULE_BUFFER_MS;
-    let effectivePostDate; // ISO string handed to bundle + persisted
+    let effectivePostDate;
 
     if (body.postDate === undefined || body.postDate === null) {
       effectivePostDate = new Date(earliestMs).toISOString();
@@ -211,25 +241,26 @@ export default async function handler(req, res, depsOverride) {
       effectivePostDate = new Date(parsedMs).toISOString();
     }
 
-    // ── 3. Require a connected Instagram (team + status) ──
+    // ── 3. Require a connected account for this platform (agent_platform_connections) ──
     const { data: conn, error: connErr } = await supabase
-      .from("agent_social_connections")
+      .from("agent_platform_connections")
       .select("bundle_team_id, connection_status")
       .eq("agent_id", authUser.id)
+      .eq("platform", platform)
       .maybeSingle();
     if (connErr) {
       console.error("[social-post] connection lookup error:", connErr);
       return res.status(500).json({ error: "connection lookup failed", details: connErr.message });
     }
     if (!conn || !conn.bundle_team_id || conn.connection_status !== "connected") {
-      return res.status(409).json({ error: "Instagram not connected" });
+      return res.status(409).json({ error: `${platformDisplay(platform)} not connected` });
     }
     const teamId = conn.bundle_team_id;
 
-    // ── 4. Load + ownership-check the generated content ──
+    // ── 4. Load + ownership-check the generated content (+ listing_id for FB) ──
     const { data: content, error: contentErr } = await supabase
       .from("generated_content")
-      .select("id, agent_id, caption")
+      .select("id, agent_id, listing_id, caption")
       .eq("id", contentId)
       .maybeSingle();
     if (contentErr) {
@@ -241,12 +272,32 @@ export default async function handler(req, res, depsOverride) {
       return res.status(403).json({ error: "content does not belong to caller" });
     }
 
-    // Caption is already IG-ready (hashtags merged in at generation time).
-    const text = typeof content.caption === "string" ? content.caption : "";
+    // ── 4b. Resolve the album (IG: client carousel; FB: server-built from raw photos) ──
+    let imageUrls = clientImageUrls;
+    if (isFacebook) {
+      const { data: photoLabels, error: plErr } = await supabase
+        .from("photo_labels")
+        .select("*")
+        .eq("listing_id", content.listing_id)
+        .order("sort_order", { ascending: true });
+      if (plErr) {
+        console.error("[social-post] photo_labels fetch error:", plErr);
+        return res.status(500).json({ error: "could not load listing photos", details: plErr.message });
+      }
+      imageUrls = buildFacebookAlbum(photoLabels);
+      // Empty album is allowed (FB permits text-only); posting proceeds without media.
+    }
 
-    // ── 4b. Open a tracking row (pending) for this attempt ──
-    // Best-effort: a tracking write must never change the user-facing outcome,
-    // but we keep the id so we can mark it submitted/failed below.
+    // ── 4c. Resolve the post caption ──
+    // FB: substitute the microsite token with the LIVE url (or drop the line).
+    // IG: caption verbatim (no token in IG captions).
+    let text = typeof content.caption === "string" ? content.caption : "";
+    if (isFacebook) {
+      const liveUrl = await resolveMicrositeUrl(supabase, content.listing_id);
+      text = substituteMicrositeToken(text, liveUrl);
+    }
+
+    // ── 4d. Open a tracking row (pending) for this attempt ──
     let trackingId = null;
     {
       const { data: tracked, error: insErr } = await supabase
@@ -274,50 +325,43 @@ export default async function handler(req, res, depsOverride) {
       if (upErr) console.error("[social-post] tracking fail-update error:", upErr);
     };
 
-    // ── 5. Ingest each image into bundle, preserving order ──
-    // Uploads run in parallel with a small concurrency cap. bundle ingests each
-    // image server-side (it fetches the URL), so serial uploads of a 10-slide
-    // carousel can run tens of seconds and trip the function timeout. Results
-    // are written by ORIGINAL index, so slide order is preserved regardless of
-    // which upload finishes first. Cap kept low to stay gentle on bundle's rate
-    // limits. Any single upload failure rejects the batch → 502, as before.
+    // ── 5. Ingest each image into bundle, preserving order (skipped if no media) ──
     const UPLOAD_CONCURRENCY = 3;
     const uploadIds = new Array(imageUrls.length);
-    try {
-      let nextIndex = 0;
-      const worker = async () => {
-        // Each worker pulls the next un-claimed index until the queue drains.
-        // (nextIndex++ is race-free on JS's single-threaded event loop.)
-        for (let i = nextIndex++; i < imageUrls.length; i = nextIndex++) {
-          const upload = await createUpload({ teamId, url: imageUrls[i] });
-          uploadIds[i] = upload.id;
-        }
-      };
-      const workerCount = Math.min(UPLOAD_CONCURRENCY, imageUrls.length);
-      await Promise.all(Array.from({ length: workerCount }, () => worker()));
-    } catch (e) {
-      console.error("[social-post] bundle upload failed:", e?.status, e?.message);
-      await markFailed("could not upload images to Instagram provider");
-      return res.status(502).json({ error: "could not upload images to Instagram provider", details: e?.message });
+    if (imageUrls.length > 0) {
+      try {
+        let nextIndex = 0;
+        const worker = async () => {
+          for (let i = nextIndex++; i < imageUrls.length; i = nextIndex++) {
+            const upload = await createUpload({ teamId, url: imageUrls[i] });
+            uploadIds[i] = upload.id;
+          }
+        };
+        const workerCount = Math.min(UPLOAD_CONCURRENCY, imageUrls.length);
+        await Promise.all(Array.from({ length: workerCount }, () => worker()));
+      } catch (e) {
+        console.error("[social-post] bundle upload failed:", e?.status, e?.message);
+        await markFailed(`could not upload images to ${platformDisplay(platform)} provider`);
+        return res.status(502).json({ error: `could not upload images to ${platformDisplay(platform)} provider`, details: e?.message });
+      }
     }
 
-    // ── 6. Create the Instagram carousel post (immediate or scheduled) ──
-    // status stays "SCHEDULED" for both paths; effectivePostDate is now+buffer
-    // for immediate or the agent-chosen future time for scheduled.
+    // ── 6. Create the post (immediate or scheduled) ──
     let post;
     try {
       post = await createPost({
         teamId,
-        title: `Milestone carousel · ${effectivePostDate.slice(0, 10)}`, // bundle dashboard label, NOT the IG caption
+        title: `Milestone ${platformDisplay(platform)} · ${effectivePostDate.slice(0, 10)}`, // bundle dashboard label, NOT the caption
         postDate: effectivePostDate,
-        status: "SCHEDULED", // no publish-now status exists; immediate = SCHEDULED at now+buffer
+        status: "SCHEDULED", // no publish-now status; immediate = SCHEDULED at now+buffer
         text,
         uploadIds,
+        platform,
       });
     } catch (e) {
       console.error("[social-post] bundle create-post failed:", e?.status, e?.message);
-      await markFailed("could not create Instagram post");
-      return res.status(502).json({ error: "could not create Instagram post", details: e?.message });
+      await markFailed(`could not create ${platformDisplay(platform)} post`);
+      return res.status(502).json({ error: `could not create ${platformDisplay(platform)} post`, details: e?.message });
     }
 
     // ── 7. Record success ──

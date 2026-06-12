@@ -204,34 +204,45 @@ export async function createUploadFromUrl({ teamId, url, fetchImpl, apiKey } = {
 }
 
 /**
- * Create a post for the team's connected Instagram account, targeting by
- * team + type (no socialAccountId needed). An Instagram CAROUSEL is a
- * type:"POST" with multiple ordered uploadIds.
+ * Create a post for the team's connected account on `platform`, targeting by
+ * team + type (no socialAccountId needed). Both Instagram and Facebook use the
+ * same `data.<TYPE> = { type:"POST", text, uploadIds }` shape — confirmed
+ * against bundle's live OpenAPI (POST /api/v1/post/): data.FACEBOOK accepts
+ * type (POST|REEL|STORY), text, uploadIds[], plus optional mediaItems/link/etc.
+ * An Instagram CAROUSEL or a Facebook ALBUM is a type:"POST" with multiple
+ * ordered uploadIds. For Facebook the microsite link rides INSIDE the caption
+ * text (the album is the media), so no separate `link` field is set.
  *
- * `postDate` and `status` are parameters so Stage 3 scheduling reuses this by
- * passing a future ISO date with status "SCHEDULED". bundle's status enum is
+ * `postDate` and `status` are parameters so scheduling reuses this by passing a
+ * future ISO date with status "SCHEDULED". bundle's status enum is
  * ["DRAFT","SCHEDULED"] — there is NO "publish now" status, so IMMEDIATE
  * publishing = status "SCHEDULED" with postDate ≈ now (the caller decides).
  *
- * @param {{ teamId: string, title: string, postDate: string, status?: string, text: string, uploadIds: string[], fetchImpl?: typeof fetch, apiKey?: string }} args
+ * @param {{ teamId: string, title: string, postDate: string, status?: string, text: string, uploadIds: string[], platform?: string, fetchImpl?: typeof fetch, apiKey?: string }} args
  * @returns {Promise<{ id: string, status?: string }>} the created post
  */
-export async function createPost({ teamId, title, postDate, status = "SCHEDULED", text, uploadIds, fetchImpl, apiKey } = {}) {
+export async function createPost({ teamId, title, postDate, status = "SCHEDULED", text, uploadIds, platform = "instagram", fetchImpl, apiKey } = {}) {
   if (!teamId) throw new BundleApiError("teamId is required for create-post", { status: 0 });
-  if (!Array.isArray(uploadIds) || uploadIds.length === 0) {
+  const bundleType = platformToBundleType(platform); // INSTAGRAM / FACEBOOK / THREADS
+  const isFacebook = bundleType === "FACEBOOK";
+  // Instagram REQUIRES media (≥1 upload). Facebook does not (text-only allowed),
+  // so the empty-uploadIds guard is relaxed for FB — defensive only; our FB flow
+  // always sends a photo album.
+  if (!Array.isArray(uploadIds) || (uploadIds.length === 0 && !isFacebook)) {
     throw new BundleApiError("uploadIds must be a non-empty array for create-post", { status: 0 });
   }
+  const safeUploadIds = Array.isArray(uploadIds) ? uploadIds : [];
   const body = {
     teamId,
     title: title || "Milestone carousel",
     postDate,
     status,
-    socialAccountTypes: ["INSTAGRAM"],
+    socialAccountTypes: [bundleType],
     data: {
-      INSTAGRAM: {
+      [bundleType]: {
         type: "POST",
         text: text || "",
-        uploadIds,
+        uploadIds: safeUploadIds,
       },
     },
   };

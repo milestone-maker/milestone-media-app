@@ -30,6 +30,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
 
 const { default: handler, RECENT_HOOK_MEMORY } = await import(pathToFileURL(HANDLER_PATH).href);
 const { findPrompt, listPrompts } = await import(pathToFileURL(REGISTRY_PATH).href);
+const { MICROSITE_TOKEN } = await import(pathToFileURL(resolve(REPO_ROOT, "api", "_lib", "microsite.js")).href);
 
 let passed = 0, failed = 0;
 function check(name, cond, detail = "") {
@@ -204,11 +205,12 @@ for (const slug of FB_FRAMEWORKS) {
   check(`${slug} → TREC compliance line in caption`, res.body?.caption.includes("TREC License #0123456"));
   const expTokens = slug === "market_plain_talk" ? 4096 : 3500;
   check(`${slug} → maxTokens ${expTokens}`, capturedMaxTokens === expTokens, `got ${capturedMaxTokens}`);
-  // microsite append: URL present, after CTA lead-in, BEFORE hashtags
+  // Token model (Stage 3): the caption carries the PLACEHOLDER TOKEN (not a live
+  // URL); microsite_url (resolved at generation) is still returned for the UI note.
   check(`${slug} → microsite_url returned`, res.body?.microsite_url === MICROSITE_URL);
-  check(`${slug} → URL in caption`, res.body?.caption.includes(MICROSITE_URL));
-  check(`${slug} → URL after CTA lead-in`, res.body.caption.indexOf("book a tour here:") < res.body.caption.indexOf(MICROSITE_URL));
-  check(`${slug} → URL before hashtags`, res.body.caption.indexOf(MICROSITE_URL) < res.body.caption.indexOf("#prosper"));
+  check(`${slug} → TOKEN in caption (not a baked URL)`, res.body?.caption.includes(MICROSITE_TOKEN) && !res.body.caption.includes(MICROSITE_URL));
+  check(`${slug} → token after CTA lead-in`, res.body.caption.indexOf("book a tour here:") < res.body.caption.indexOf(MICROSITE_TOKEN));
+  check(`${slug} → token before hashtags`, res.body.caption.indexOf(MICROSITE_TOKEN) < res.body.caption.indexOf("#prosper"));
   check(`${slug} → resolver called with listing id`, resolver.calls.length === 1 && resolver.calls[0] === LISTING_ID);
   // investment_angle must carry the financial guardrails in its built prompt.
   if (slug === "investment_angle") {
@@ -227,7 +229,9 @@ for (const slug of FB_FRAMEWORKS) {
   });
   check("no-microsite → 200", res.statusCode === 200);
   check("no-microsite → microsite_url null", res.body?.microsite_url === null);
-  check("no-microsite → no http link in caption", !res.body.caption.includes("http"));
+  // Token is ALWAYS inserted for FB (re-resolved at post time); never a baked URL here.
+  check("no-microsite → TOKEN still inserted", res.body.caption.includes(MICROSITE_TOKEN));
+  check("no-microsite → no http link baked in caption", !res.body.caption.includes("http"));
   check("no-microsite → CTA lead-in still present", res.body.caption.includes("book a tour here:"));
 }
 
@@ -243,7 +247,7 @@ for (const slug of FB_FRAMEWORKS) {
   });
   check("persist → 200 + saved_id", res.statusCode === 200 && res.body?.saved_id === "gc_1");
   check("persist → row platform facebook", supa.inserted[0]?.platform === "facebook");
-  check("persist → row caption has URL", supa.inserted[0]?.caption.includes(MICROSITE_URL));
+  check("persist → row caption has TOKEN (not baked URL)", supa.inserted[0]?.caption.includes(MICROSITE_TOKEN) && !supa.inserted[0].caption.includes(MICROSITE_URL));
   check("persist → row slides absent (FB)", supa.inserted[0]?.slides === undefined);
 }
 

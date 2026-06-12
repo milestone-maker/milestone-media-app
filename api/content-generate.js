@@ -28,6 +28,7 @@ import { findPrompt } from "./_content/registry.js";
 import { canonicalizeHashtags } from "./_content/post-processors.js";
 import { UNIVERSAL_REQUIRED_OUTPUT_FIELDS } from "./_content/prompts/_helpers.js";
 import { selectCarouselPhotos } from "./_content/selectCarouselPhotos.js";
+import { resolvePublishedMicrositeUrl, appendMicrositeToken } from "./_lib/microsite.js";
 
 const CAROUSEL_FRAMEWORK = "walkthrough_carousel";
 
@@ -97,57 +98,14 @@ function defaultSupabase() {
 export const DEFAULT_MODEL      = "claude-sonnet-4-6";
 export const DEFAULT_MAX_TOKENS = 2048;
 
-// Public host that fronts published microsite pages (/p/{slug}). Same base as
-// api/publish-microsite.js — kept in sync by hand (no shared constant yet).
-const PUBLIC_APP_BASE = "https://app.milestonemediaphotography.com";
-
 // ── helpers ──────────────────────────────────────────────────────────
-
-/**
- * Resolve the LIVE published microsite URL for a listing, or null when none.
- *
- * Facebook Stage 2b. The listing↔microsite join: api/publish-microsite.js
- * additively mirrors each published microsite into a public.listings row and
- * sets microsites.listing_id back to it, so the reverse lookup
- * (microsites WHERE listing_id = ?) finds the microsite that produced the
- * listing the Content tab shows. LIVE = published = true AND retired_at IS NULL
- * (migration 038). The mirror is best-effort, so this can legitimately return
- * null (mirror failed at publish, or the listing wasn't microsite-sourced) — in
- * which case the caller simply omits the link. listing_id is not unique on
- * microsites, so we take the most recently created live one.
- *
- * STAGE 3 TODO (posting): re-resolve and substitute the LIVE microsite URL at
- * POST time (in api/social-post.js / the FB post path), so a microsite
- * published AFTER generation still gets linked, and a retired one is dropped.
- * The URL baked into the stored caption here is a generation-time snapshot.
- */
-async function defaultResolveMicrositeUrl(supabase, listingId) {
-  const { data, error } = await supabase
-    .from("microsites")
-    .select("slug")
-    .eq("listing_id", listingId)
-    .eq("published", true)
-    .is("retired_at", null)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) {
-    console.error("[content-generate] microsite lookup error (continuing without link):", error);
-    return null;
-  }
-  return data?.slug ? `${PUBLIC_APP_BASE}/p/${data.slug}` : null;
-}
-
-/**
- * Append the resolved microsite URL to the caption immediately after the
- * model's final CTA lead-in line (the colon line — the model never writes a
- * URL). Placed BEFORE the trailing hashtag block, which canonicalizeHashtags
- * appends afterward. Returns a shallow copy; no-ops if caption isn't a string.
- */
-function appendMicrositeLink(parsed, url) {
-  if (!parsed || typeof parsed.caption !== "string" || !url) return parsed;
-  return { ...parsed, caption: parsed.caption.replace(/\s+$/, "") + "\n" + url };
-}
+//
+// Microsite link (Facebook): generation inserts a PLACEHOLDER TOKEN at the link
+// slot via appendMicrositeToken (from api/_lib/microsite.js) rather than baking a
+// live URL. The live URL is resolved + substituted at DISPLAY time (Content tab)
+// and authoritatively at POST time (api/social-post.js FB path). We still resolve
+// the URL here (resolvePublishedMicrositeUrl) purely to return microsite_url in
+// the response so the UI can show whether a microsite exists yet.
 
 // How many recent Facebook hooks to feed the avoidance block. Tunable — larger
 // = stronger avoidance memory but a longer system prompt. 12 is a good balance.
@@ -278,7 +236,7 @@ export default async function handler(req, res, depsOverride) {
   const generate  = depsOverride?.generate  || generateAndParseObject;
   const model     = depsOverride?.model     || DEFAULT_MODEL;
   const maxTokens = depsOverride?.maxTokens || DEFAULT_MAX_TOKENS;
-  const resolveMicrositeUrl = depsOverride?.resolveMicrositeUrl || defaultResolveMicrositeUrl;
+  const resolveMicrositeUrl = depsOverride?.resolveMicrositeUrl || resolvePublishedMicrositeUrl;
   const resolveRecentHooks  = depsOverride?.resolveRecentHooks  || defaultResolveRecentHooks;
 
   try {
@@ -467,16 +425,18 @@ export default async function handler(req, res, depsOverride) {
       return res.status(502).json({ error: "model returned non-object payload" });
     }
 
-    // ── 8a. (Facebook ONLY) Append the listing's published microsite URL right
+    // ── 8a. (Facebook ONLY) Insert the microsite-link PLACEHOLDER TOKEN right
     //        after the model's CTA lead-in (the model writes the lead-in copy
-    //        only — never a URL). Placed BEFORE the trailing hashtag block,
-    //        which canonicalizeHashtags appends next. Omitted when no live
-    //        microsite exists; never applied to Instagram. The resolved URL is
-    //        a generation-time snapshot (see STAGE 3 TODO on defaultResolveMicrositeUrl).
+    //        only — never a URL). Placed BEFORE the trailing hashtag block, which
+    //        canonicalizeHashtags appends next. The token is ALWAYS inserted for
+    //        FB; the live URL is substituted for it at display time + at POST time
+    //        (so a microsite published/retired after generation is reflected).
+    //        Never applied to Instagram. We still resolve the current URL only to
+    //        return microsite_url in the response (UI "is there a microsite yet?").
     let micrositeUrl = null;
     if (platform === "facebook") {
       micrositeUrl = await resolveMicrositeUrl(supabase, listing_id);
-      if (micrositeUrl) parsed = appendMicrositeLink(parsed, micrositeUrl);
+      parsed = { ...parsed, caption: appendMicrositeToken(parsed.caption) };
     }
 
     // Canonicalize hashtags so the caption-body block and the structured
