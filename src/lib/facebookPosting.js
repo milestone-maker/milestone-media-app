@@ -17,12 +17,16 @@ import { centralWallClockToUtcIso, SCHEDULE_BUFFER_MS } from "./postScheduling.j
  * @param {'now'|'schedule'|'smart'} args.mode
  * @param {string} [args.scheduleLocal] datetime-local value (Central wall clock) for mode 'schedule'
  * @param {{postDate:string,label:string}|null} [args.smartSlot] for mode 'smart'
+ * @param {string[]} [args.extraPhotoUrls] agent-selected extra photo URLs to append to the album
  * @param {Date}   [args.now]           injectable clock (tests)
  * @returns {{ body: object } | { error: string }}
  */
-export function buildFacebookPostRequest({ contentId, mode, scheduleLocal, smartSlot, now = new Date() } = {}) {
+export function buildFacebookPostRequest({ contentId, mode, scheduleLocal, smartSlot, extraPhotoUrls = [], now = new Date() } = {}) {
   if (!contentId) return { error: "Missing content to post." };
   const base = { contentId, platform: "facebook" };
+  // Agent-added album photos (beyond the curated default set). Only attach when
+  // non-empty so the absent case is byte-identical to the original request.
+  if (Array.isArray(extraPhotoUrls) && extraPhotoUrls.length > 0) base.extraPhotoUrls = extraPhotoUrls;
 
   if (mode === "now") return { body: base };
 

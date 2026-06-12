@@ -63,6 +63,13 @@ console.log("\n── src/lib/facebookPosting.js ──\n");
 
   // Unknown mode → error.
   check("unknown mode → error", !!buildFacebookPostRequest({ contentId: CONTENT_ID, mode: "??", now: NOW }).error);
+
+  // Agent-added extra photos: attached as extraPhotoUrls; absent/empty omitted.
+  const withExtras = buildFacebookPostRequest({ contentId: CONTENT_ID, mode: "now", extraPhotoUrls: ["u1", "u2"], now: NOW });
+  check("extras → body.extraPhotoUrls in order", JSON.stringify(withExtras.body?.extraPhotoUrls) === JSON.stringify(["u1", "u2"]));
+  check("extras attach to scheduled too", "extraPhotoUrls" in (buildFacebookPostRequest({ contentId: CONTENT_ID, mode: "smart", smartSlot: { postDate: "2026-06-10T13:00:00.000Z" }, extraPhotoUrls: ["u1"], now: NOW }).body || {}));
+  check("no extras → no extraPhotoUrls key", !("extraPhotoUrls" in buildFacebookPostRequest({ contentId: CONTENT_ID, mode: "now", now: NOW }).body));
+  check("empty extras → no extraPhotoUrls key", !("extraPhotoUrls" in buildFacebookPostRequest({ contentId: CONTENT_ID, mode: "now", extraPhotoUrls: [], now: NOW }).body));
 }
 
 // interpretFacebookPostResponse

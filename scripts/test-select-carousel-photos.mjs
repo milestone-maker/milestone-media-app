@@ -10,7 +10,7 @@ import { dirname, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOD = resolve(__dirname, "..", "api", "_content", "selectCarouselPhotos.js");
-const { selectCarouselPhotos } = await import(pathToFileURL(MOD).href);
+const { selectCarouselPhotos, facebookAlbumUrls } = await import(pathToFileURL(MOD).href);
 // Pure sequence builder — used for the end-to-end pipeline/IG-limit checks.
 const COMPOSE = resolve(__dirname, "..", "src", "views", "Content", "carouselCompose.js");
 const { buildSlideSequence } = await import(pathToFileURL(COMPOSE).href);
@@ -247,6 +247,31 @@ console.log("\n── pipeline count + IG limit ──\n");
   const zipped = Math.min(modelReturned, selected);
   check("count mismatch detected (warn path)", mismatch === true);
   check("zips best-effort by position (min count)", zipped === 3);
+}
+
+// ── facebookAlbumUrls (Facebook curated album order; backyard ungated) ──
+console.log("\n── facebookAlbumUrls ──\n");
+{
+  check("empty → []", JSON.stringify(facebookAlbumUrls([])) === JSON.stringify([]));
+
+  // Drone cover, full subject walk, backyard present WITHOUT a pool → ungated.
+  const rows = [
+    L("drone", { url: "d" }), L("front_facade", { url: "f" }), L("living", { url: "l" }),
+    L("kitchen", { url: "k" }), L("primary_bedroom", { url: "pb" }), L("primary_bathroom", { url: "ba" }),
+    L("backyard", { url: "by" }), L("dining", { url: "dn" }),
+  ];
+  const urls = facebookAlbumUrls(rows);
+  check("curated order: drone,facade,living,kitchen,pbed,pbath,backyard", JSON.stringify(urls) === JSON.stringify(["d", "f", "l", "k", "pb", "ba", "by"]));
+  check("dining excluded", !urls.includes("dn"));
+  check("backyard ungated (no pool needed)", urls.includes("by"));
+
+  // No backyard → simply omitted.
+  const noYard = rows.filter((r) => r.category !== "backyard" && r.category !== "dining");
+  check("no backyard → omitted", !facebookAlbumUrls(noYard).includes("by"));
+
+  // De-dupe: same url twice in labels → appears once.
+  const dup = [L("kitchen", { url: "k" }), L("kitchen", { url: "k" })];
+  check("de-dupes repeated url", facebookAlbumUrls(dup).filter((u) => u === "k").length === 1);
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

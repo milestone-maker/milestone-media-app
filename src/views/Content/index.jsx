@@ -833,7 +833,7 @@ function ContentView() {
           {/* Facebook post / schedule control (FB has no carousel; server builds the album). */}
           {result.platform === "facebook" && result.saved_id && (
             <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-              <PostToFacebookButton contentId={result.saved_id} />
+              <PostToFacebookButton contentId={result.saved_id} photos={photoPool} />
             </div>
           )}
         </div>
@@ -928,7 +928,7 @@ function ContentView() {
                       {/* Facebook post / schedule control for FB history rows. */}
                       {h.platform === "facebook" && (
                         <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                          <PostToFacebookButton contentId={h.id} />
+                          <PostToFacebookButton contentId={h.id} photos={photoPool} />
                         </div>
                       )}
                     </div>

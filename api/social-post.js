@@ -47,7 +47,7 @@ import {
   createPost as bundleCreatePost,
 } from "./_lib/bundle.js";
 import { INSTAGRAM_MAX_CAROUSEL_IMAGES } from "../shared/carouselPosting.js";
-import { selectCarouselPhotos, includable } from "./_content/selectCarouselPhotos.js";
+import { facebookAlbumUrls } from "./_content/selectCarouselPhotos.js";
 import { resolvePublishedMicrositeUrl, substituteMicrositeToken } from "./_lib/microsite.js";
 
 const SUPABASE_URL              = process.env.SUPABASE_URL;
@@ -61,7 +61,15 @@ const MAX_IMAGES = INSTAGRAM_MAX_CAROUSEL_IMAGES;
 // src/supabaseClient.js — so client-generated getPublicUrl() URLs use THIS
 // host, while the server env SUPABASE_URL is the raw *.supabase.co host. Allow
 // both so the locked client flow's URLs (and raw listing photo URLs) pass.
-const EXTRA_STORAGE_HOSTS = ["auth.milestonemediaphotography.com"];
+//
+// HARDENING: the project's raw Storage host is ALSO listed explicitly. Every
+// stored listing photo (published-media bucket) lives on this host, and the
+// prod SUPABASE_URL env is "Sensitive" (its value isn't always introspectable),
+// so anchoring the allowlist to SUPABASE_URL alone risks silently emptying the
+// FB album if that env ever points at the custom domain instead of the raw
+// host. Listing the project host as a constant makes the allowlist env-proof.
+const PROJECT_STORAGE_HOST = "cbpnjuotoxtmefmedpmj.supabase.co";
+const EXTRA_STORAGE_HOSTS = ["auth.milestonemediaphotography.com", PROJECT_STORAGE_HOST];
 const PUBLIC_STORAGE_PATH = "/storage/v1/object/public/";
 
 const SCHEDULE_BUFFER_MS = 3 * 60 * 1000; // 3 minutes
@@ -117,49 +125,23 @@ function isAllowedStorageUrl(value) {
   return allowedStorageHosts().has(u.host);
 }
 
-// Best includable backyard photo (agent_corrected, then highest confidence,
-// then lowest sort_order) — mirrors selectCarouselPhotos' per-category pick.
-// Used to UNGATE the backyard for Facebook (see buildFacebookAlbum).
-function bestBackyard(photoLabels) {
-  const cands = (Array.isArray(photoLabels) ? photoLabels : [])
-    .filter((l) => l && l.category === "backyard" && includable(l));
-  if (!cands.length) return null;
-  cands.sort((a, b) => {
-    const corrected = (b.agent_corrected === true ? 1 : 0) - (a.agent_corrected === true ? 1 : 0);
-    if (corrected) return corrected;
-    const conf = (typeof b.confidence === "number" ? b.confidence : -Infinity)
-               - (typeof a.confidence === "number" ? a.confidence : -Infinity);
-    if (conf) return conf;
-    return (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity);
-  });
-  return cands[0]?.photo_url || null;
-}
-
-// Build the Facebook album: reuse the EXACT Instagram photo selection
-// (selectCarouselPhotos) and take each chosen photo's RAW photo_url — cover
-// first, then the subject-room walk. No carousel compositing. Only allowed-host
-// public URLs survive. Returns [] when the listing has no usable photos.
-//
-// FACEBOOK BACKYARD UNGATE: the IG carousel only includes a backyard slide when
-// a pool is detected. For Facebook we include the backyard photo whenever one
-// EXISTS, independent of pool — appended here (de-dupe below collapses the pool
-// case where the selection already added it). The IG selection is unchanged.
-function buildFacebookAlbum(photoLabels) {
-  const sel = selectCarouselPhotos(Array.isArray(photoLabels) ? photoLabels : []);
-  const ordered = [];
-  if (sel.coverPhoto?.photo_url) ordered.push(sel.coverPhoto.photo_url);
-  for (const s of sel.subjectSlides) if (s?.photo_url) ordered.push(s.photo_url);
-  const backyard = bestBackyard(photoLabels);
-  if (backyard) ordered.push(backyard); // de-dupe handles the pool case (already present)
-  // De-dupe (preserve first occurrence) + host-filter.
+// Build the Facebook album: the CURATED default set (facebookAlbumUrls — cover,
+// the subject-room walk, and the ungated backyard) FIRST, then the agent's
+// hand-picked EXTRA photos appended in selection order. De-duped (extras already
+// in the curated set are skipped) and host-filtered — every URL, curated or
+// added, must be a first-party public Storage URL. NO cap on the agent's
+// additions. Returns [] when nothing usable survives.
+function buildFacebookAlbum(photoLabels, extraPhotoUrls = []) {
   const seen = new Set();
   const album = [];
-  for (const url of ordered) {
-    if (seen.has(url) || !isAllowedStorageUrl(url)) continue;
+  const add = (url) => {
+    if (typeof url !== "string" || seen.has(url) || !isAllowedStorageUrl(url)) return;
     seen.add(url);
     album.push(url);
-  }
-  return album.slice(0, MAX_IMAGES);
+  };
+  for (const url of facebookAlbumUrls(photoLabels)) add(url);                    // curated defaults first
+  for (const url of (Array.isArray(extraPhotoUrls) ? extraPhotoUrls : [])) add(url); // agent additions, in order
+  return album;
 }
 
 export default async function handler(req, res, depsOverride) {
@@ -308,7 +290,11 @@ export default async function handler(req, res, depsOverride) {
         console.error("[social-post] photo_labels fetch error:", plErr);
         return res.status(500).json({ error: "could not load listing photos", details: plErr.message });
       }
-      imageUrls = buildFacebookAlbum(photoLabels);
+      // Optional agent-selected extra photos (other classified photos the agent
+      // chose to add). Appended after the curated set; validated + de-duped in
+      // buildFacebookAlbum. Non-array/absent → curated-only (today's behavior).
+      const extraPhotoUrls = Array.isArray(body.extraPhotoUrls) ? body.extraPhotoUrls : [];
+      imageUrls = buildFacebookAlbum(photoLabels, extraPhotoUrls);
       // NO-PHOTOS GUARD: the album is built from CLASSIFIED photos (photo_labels).
       // If a listing has none usable, we do NOT send a bare text-only Facebook
       // post — block with an actionable message so the agent runs photo analysis
