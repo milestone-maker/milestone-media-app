@@ -47,7 +47,7 @@ import {
   createPost as bundleCreatePost,
 } from "./_lib/bundle.js";
 import { INSTAGRAM_MAX_CAROUSEL_IMAGES } from "../shared/carouselPosting.js";
-import { selectCarouselPhotos } from "./_content/selectCarouselPhotos.js";
+import { selectCarouselPhotos, includable } from "./_content/selectCarouselPhotos.js";
 import { resolvePublishedMicrositeUrl, substituteMicrositeToken } from "./_lib/microsite.js";
 
 const SUPABASE_URL              = process.env.SUPABASE_URL;
@@ -117,17 +117,41 @@ function isAllowedStorageUrl(value) {
   return allowedStorageHosts().has(u.host);
 }
 
+// Best includable backyard photo (agent_corrected, then highest confidence,
+// then lowest sort_order) — mirrors selectCarouselPhotos' per-category pick.
+// Used to UNGATE the backyard for Facebook (see buildFacebookAlbum).
+function bestBackyard(photoLabels) {
+  const cands = (Array.isArray(photoLabels) ? photoLabels : [])
+    .filter((l) => l && l.category === "backyard" && includable(l));
+  if (!cands.length) return null;
+  cands.sort((a, b) => {
+    const corrected = (b.agent_corrected === true ? 1 : 0) - (a.agent_corrected === true ? 1 : 0);
+    if (corrected) return corrected;
+    const conf = (typeof b.confidence === "number" ? b.confidence : -Infinity)
+               - (typeof a.confidence === "number" ? a.confidence : -Infinity);
+    if (conf) return conf;
+    return (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity);
+  });
+  return cands[0]?.photo_url || null;
+}
+
 // Build the Facebook album: reuse the EXACT Instagram photo selection
-// (selectCarouselPhotos) and take each chosen photo's RAW photo_url, in order —
-// cover first, then the subject-room walk. No carousel compositing. Only
-// allowed-host public URLs survive. Returns [] when the listing has no usable
-// photos (FB allows a text-only post).
+// (selectCarouselPhotos) and take each chosen photo's RAW photo_url — cover
+// first, then the subject-room walk. No carousel compositing. Only allowed-host
+// public URLs survive. Returns [] when the listing has no usable photos.
+//
+// FACEBOOK BACKYARD UNGATE: the IG carousel only includes a backyard slide when
+// a pool is detected. For Facebook we include the backyard photo whenever one
+// EXISTS, independent of pool — appended here (de-dupe below collapses the pool
+// case where the selection already added it). The IG selection is unchanged.
 function buildFacebookAlbum(photoLabels) {
   const sel = selectCarouselPhotos(Array.isArray(photoLabels) ? photoLabels : []);
   const ordered = [];
   if (sel.coverPhoto?.photo_url) ordered.push(sel.coverPhoto.photo_url);
   for (const s of sel.subjectSlides) if (s?.photo_url) ordered.push(s.photo_url);
-  // De-dupe (cover should never repeat in subjects, but be safe) + host-filter.
+  const backyard = bestBackyard(photoLabels);
+  if (backyard) ordered.push(backyard); // de-dupe handles the pool case (already present)
+  // De-dupe (preserve first occurrence) + host-filter.
   const seen = new Set();
   const album = [];
   for (const url of ordered) {
@@ -285,7 +309,17 @@ export default async function handler(req, res, depsOverride) {
         return res.status(500).json({ error: "could not load listing photos", details: plErr.message });
       }
       imageUrls = buildFacebookAlbum(photoLabels);
-      // Empty album is allowed (FB permits text-only); posting proceeds without media.
+      // NO-PHOTOS GUARD: the album is built from CLASSIFIED photos (photo_labels).
+      // If a listing has none usable, we do NOT send a bare text-only Facebook
+      // post — block with an actionable message so the agent runs photo analysis
+      // first. We deliberately do NOT auto-classify inline here (vision calls
+      // risk the serverless timeout); auto-classify-on-delivery is future work.
+      if (imageUrls.length === 0) {
+        return res.status(409).json({
+          error: "This listing's photos haven't been analyzed yet — run photo analysis on the listing before posting to Facebook.",
+          code: "no_photos",
+        });
+      }
     }
 
     // ── 4c. Resolve the post caption ──

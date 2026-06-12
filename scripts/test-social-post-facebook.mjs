@@ -188,13 +188,14 @@ const LIVE_URL = "https://app.milestonemediaphotography.com/p/the-home";
   check("no bundle call when not connected", bundle.calls.postCount === 0);
 }
 
-// 6. No usable photos → empty album, still posts (FB allows text-only).
+// 6. No usable classified photos → BLOCKED (no text-only post), no bundle call.
 {
   const supa = makeSupabaseMock({ photoLabels: [] });
   const { res, bundle } = await callHandler({ supabase: supa });
-  check("empty album → 200 (text-only allowed)", res.statusCode === 200, `got ${res.statusCode}`);
-  check("empty album → no uploads", bundle.calls.uploads.length === 0);
-  check("empty album → createPost uploadIds = []", JSON.stringify(bundle.calls.post.uploadIds) === JSON.stringify([]));
+  check("no photos → 409 blocked", res.statusCode === 409, `got ${res.statusCode}`);
+  check("no photos → code 'no_photos'", res.body?.code === "no_photos");
+  check("no photos → actionable message (run photo analysis)", /photo analysis/i.test(res.body?.error || ""), res.body?.error);
+  check("no photos → no bundle call", bundle.calls.postCount === 0 && bundle.calls.uploads.length === 0);
 }
 
 // 7. Scheduled FB post — future postDate honored.
@@ -210,6 +211,27 @@ const LIVE_URL = "https://app.milestonemediaphotography.com/p/the-home";
 {
   const { bundle } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook", imageUrls: ["https://evil.cdn.example/x.jpg"] } });
   check("fb ignores client imageUrls (uses server album)", JSON.stringify(bundle.calls.uploads.map((u) => u.url)) === JSON.stringify(EXPECTED_ALBUM));
+}
+
+// 9. BACKYARD UNGATE — backyard photo present with NO pool (decoupled from the
+//    carousel's pool gate). Album still includes the backyard photo.
+{
+  const noPool = PHOTO_LABELS
+    .filter((p) => p.category !== "dining") // drop the foreign-host row's category noise
+    .map((p) => p.category === "backyard" ? { ...p, features: [] } : p); // remove pool feature
+  const supa = makeSupabaseMock({ photoLabels: noPool });
+  const { bundle } = await callHandler({ supabase: supa });
+  check("backyard ungate → album includes backyard (no pool)", bundle.calls.uploads.some((u) => u.url === pub("yard.jpg")));
+  check("backyard ungate → full album in order", JSON.stringify(bundle.calls.uploads.map((u) => u.url)) === JSON.stringify(EXPECTED_ALBUM));
+}
+
+// 10. No-backyard photo → album simply omits it (no crash).
+{
+  const noYard = PHOTO_LABELS.filter((p) => p.category !== "backyard" && p.category !== "dining");
+  const supa = makeSupabaseMock({ photoLabels: noYard });
+  const { res, bundle } = await callHandler({ supabase: supa });
+  check("no backyard → 200", res.statusCode === 200);
+  check("no backyard → album omits backyard", !bundle.calls.uploads.some((u) => u.url === pub("yard.jpg")));
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
