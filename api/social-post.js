@@ -290,11 +290,27 @@ export default async function handler(req, res, depsOverride) {
         console.error("[social-post] photo_labels fetch error:", plErr);
         return res.status(500).json({ error: "could not load listing photos", details: plErr.message });
       }
-      // Optional agent-selected extra photos (other classified photos the agent
-      // chose to add). Appended after the curated set; validated + de-duped in
-      // buildFacebookAlbum. Non-array/absent → curated-only (today's behavior).
-      const extraPhotoUrls = Array.isArray(body.extraPhotoUrls) ? body.extraPhotoUrls : [];
-      imageUrls = buildFacebookAlbum(photoLabels, extraPhotoUrls);
+      // Album resolution. PREFERRED: the agent's EXPLICIT ordered album
+      // (albumPhotoUrls) — their final selection from the result-panel editor.
+      // Each URL must pass the host allowlist AND belong to THIS listing's
+      // classified photos (photo_labels.photo_url) — only the listing's own
+      // analyzed photos can post. De-duped, order preserved.
+      // FALLBACK (back-compat): no album → curated default + legacy extraPhotoUrls.
+      const listingUrlSet = new Set((photoLabels || []).map((l) => l && l.photo_url).filter(Boolean));
+      if (Array.isArray(body.albumPhotoUrls) && body.albumPhotoUrls.length > 0) {
+        const seen = new Set();
+        const out = [];
+        for (const u of body.albumPhotoUrls) {
+          if (typeof u === "string" && !seen.has(u) && isAllowedStorageUrl(u) && listingUrlSet.has(u)) {
+            seen.add(u);
+            out.push(u);
+          }
+        }
+        imageUrls = out;
+      } else {
+        const extraPhotoUrls = Array.isArray(body.extraPhotoUrls) ? body.extraPhotoUrls : [];
+        imageUrls = buildFacebookAlbum(photoLabels, extraPhotoUrls);
+      }
       // NO-PHOTOS GUARD: the album is built from CLASSIFIED photos (photo_labels).
       // If a listing has none usable, we do NOT send a bare text-only Facebook
       // post — block with an actionable message so the agent runs photo analysis

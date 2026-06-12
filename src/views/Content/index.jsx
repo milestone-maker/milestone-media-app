@@ -22,7 +22,7 @@ import VoiceProfileModal from "../../components/VoiceProfileModal";
 import SubscriptionsView from "../Subscriptions";
 import PhotosPanel from "./PhotosPanel";
 import CarouselView from "./CarouselView";
-import PostToFacebookButton from "./FacebookPostButton";
+import FacebookAlbumEditor from "./FacebookAlbumEditor";
 import UpcomingPosts from "./UpcomingPosts";
 import { includable } from "../../../api/_content/selectCarouselPhotos.js";
 
@@ -830,10 +830,12 @@ function ContentView() {
             </div>
           )}
 
-          {/* Facebook post / schedule control (FB has no carousel; server builds the album). */}
+          {/* Facebook editable album + post/schedule (FB has no carousel). The
+              agent edits the album here — Add / Swap / Remove, category labels,
+              clickable preview — and posts exactly that set. */}
           {result.platform === "facebook" && result.saved_id && (
             <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-              <PostToFacebookButton contentId={result.saved_id} photos={photoPool} />
+              <FacebookAlbumEditor key={result.saved_id} contentId={result.saved_id} photos={photoPool} />
             </div>
           )}
         </div>
@@ -925,10 +927,10 @@ function ContentView() {
                         </div>
                       )}
 
-                      {/* Facebook post / schedule control for FB history rows. */}
+                      {/* Facebook editable album + post/schedule for FB history rows. */}
                       {h.platform === "facebook" && (
                         <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                          <PostToFacebookButton contentId={h.id} photos={photoPool} />
+                          <FacebookAlbumEditor key={h.id} contentId={h.id} photos={photoPool} />
                         </div>
                       )}
                     </div>
