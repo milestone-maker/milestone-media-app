@@ -61,7 +61,15 @@ const MAX_IMAGES = INSTAGRAM_MAX_CAROUSEL_IMAGES;
 // src/supabaseClient.js — so client-generated getPublicUrl() URLs use THIS
 // host, while the server env SUPABASE_URL is the raw *.supabase.co host. Allow
 // both so the locked client flow's URLs (and raw listing photo URLs) pass.
-const EXTRA_STORAGE_HOSTS = ["auth.milestonemediaphotography.com"];
+//
+// HARDENING: the project's raw Storage host is ALSO listed explicitly. Every
+// stored listing photo (published-media bucket) lives on this host, and the
+// prod SUPABASE_URL env is "Sensitive" (its value isn't always introspectable),
+// so anchoring the allowlist to SUPABASE_URL alone risks silently emptying the
+// FB album if that env ever points at the custom domain instead of the raw
+// host. Listing the project host as a constant makes the allowlist env-proof.
+const PROJECT_STORAGE_HOST = "cbpnjuotoxtmefmedpmj.supabase.co";
+const EXTRA_STORAGE_HOSTS = ["auth.milestonemediaphotography.com", PROJECT_STORAGE_HOST];
 const PUBLIC_STORAGE_PATH = "/storage/v1/object/public/";
 
 const SCHEDULE_BUFFER_MS = 3 * 60 * 1000; // 3 minutes
