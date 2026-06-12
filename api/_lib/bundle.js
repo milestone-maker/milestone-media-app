@@ -21,6 +21,33 @@
 
 const BUNDLE_API_BASE = "https://api.bundle.social/api/v1";
 
+// App platform slug → bundle social-account type. bundle's account-type enum is
+// upper-cased network names (confirmed against the live OpenAPI for INSTAGRAM;
+// FACEBOOK/THREADS follow the same convention). Centralised here so the connect
+// + status endpoints never hardcode a bundle type — they speak app slugs and let
+// the adapter translate. Facebook Stage 1 adds 'facebook'; 'threads' is listed
+// as a forward hook for the later Threads stage.
+export const PLATFORM_TO_BUNDLE_TYPE = {
+  instagram: "INSTAGRAM",
+  facebook:  "FACEBOOK",
+  threads:   "THREADS",
+};
+
+/**
+ * Translate an app platform slug ('instagram'|'facebook'|'threads') to its
+ * bundle social-account type ('INSTAGRAM'|'FACEBOOK'|'THREADS'). Throws a
+ * BundleApiError on an unknown slug so a bad value fails fast at the adapter
+ * boundary rather than reaching bundle.
+ *
+ * @param {string} platform
+ * @returns {string} bundle account type
+ */
+export function platformToBundleType(platform) {
+  const type = PLATFORM_TO_BUNDLE_TYPE[String(platform || "").toLowerCase()];
+  if (!type) throw new BundleApiError(`unsupported platform: ${platform}`, { status: 0 });
+  return type;
+}
+
 /**
  * Error thrown by bundleFetch on a non-OK response. Carries the HTTP status
  * and the parsed/raw bundle error body so callers can map to their own codes.
@@ -109,15 +136,25 @@ export async function createTeam({ name, fetchImpl, apiKey } = {}) {
 
 /**
  * Create a hosted portal link the agent opens to connect a social account.
- * Scoped to Instagram by default. `redirectUrl` is where bundle returns the
- * agent after the portal flow.
+ * `redirectUrl` is where bundle returns the agent after the portal flow.
  *
- * @param {{ teamId: string, redirectUrl?: string, socialAccountTypes?: string[], fetchImpl?: typeof fetch, apiKey?: string }} args
+ * Platform selection (back-compatible):
+ *   • `platforms` — app slugs (['facebook'], ['instagram',...]). When supplied,
+ *     they are translated to bundle types via platformToBundleType. This is the
+ *     preferred input so callers speak app slugs, not bundle types.
+ *   • `socialAccountTypes` — raw bundle types. Honoured when `platforms` is
+ *     absent. Defaults to ["INSTAGRAM"] so existing Instagram callers that pass
+ *     neither argument behave exactly as before.
+ *
+ * @param {{ teamId: string, redirectUrl?: string, platforms?: string[], socialAccountTypes?: string[], fetchImpl?: typeof fetch, apiKey?: string }} args
  * @returns {Promise<string>} the portal URL
  */
-export async function createPortalLink({ teamId, redirectUrl, socialAccountTypes = ["INSTAGRAM"], fetchImpl, apiKey } = {}) {
+export async function createPortalLink({ teamId, redirectUrl, platforms, socialAccountTypes = ["INSTAGRAM"], fetchImpl, apiKey } = {}) {
   if (!teamId) throw new BundleApiError("teamId is required for create-portal-link", { status: 0 });
-  const body = { teamId, socialAccountTypes };
+  const types = Array.isArray(platforms) && platforms.length
+    ? platforms.map(platformToBundleType)
+    : socialAccountTypes;
+  const body = { teamId, socialAccountTypes: types };
   if (redirectUrl) body.redirectUrl = redirectUrl;
   const out = await bundleFetch("/social-account/create-portal-link", { method: "POST", body, fetchImpl, apiKey });
   if (!out || !out.url) throw new BundleApiError("bundle create-portal-link returned no url", { status: 502, body: out });
@@ -167,34 +204,45 @@ export async function createUploadFromUrl({ teamId, url, fetchImpl, apiKey } = {
 }
 
 /**
- * Create a post for the team's connected Instagram account, targeting by
- * team + type (no socialAccountId needed). An Instagram CAROUSEL is a
- * type:"POST" with multiple ordered uploadIds.
+ * Create a post for the team's connected account on `platform`, targeting by
+ * team + type (no socialAccountId needed). Both Instagram and Facebook use the
+ * same `data.<TYPE> = { type:"POST", text, uploadIds }` shape — confirmed
+ * against bundle's live OpenAPI (POST /api/v1/post/): data.FACEBOOK accepts
+ * type (POST|REEL|STORY), text, uploadIds[], plus optional mediaItems/link/etc.
+ * An Instagram CAROUSEL or a Facebook ALBUM is a type:"POST" with multiple
+ * ordered uploadIds. For Facebook the microsite link rides INSIDE the caption
+ * text (the album is the media), so no separate `link` field is set.
  *
- * `postDate` and `status` are parameters so Stage 3 scheduling reuses this by
- * passing a future ISO date with status "SCHEDULED". bundle's status enum is
+ * `postDate` and `status` are parameters so scheduling reuses this by passing a
+ * future ISO date with status "SCHEDULED". bundle's status enum is
  * ["DRAFT","SCHEDULED"] — there is NO "publish now" status, so IMMEDIATE
  * publishing = status "SCHEDULED" with postDate ≈ now (the caller decides).
  *
- * @param {{ teamId: string, title: string, postDate: string, status?: string, text: string, uploadIds: string[], fetchImpl?: typeof fetch, apiKey?: string }} args
+ * @param {{ teamId: string, title: string, postDate: string, status?: string, text: string, uploadIds: string[], platform?: string, fetchImpl?: typeof fetch, apiKey?: string }} args
  * @returns {Promise<{ id: string, status?: string }>} the created post
  */
-export async function createPost({ teamId, title, postDate, status = "SCHEDULED", text, uploadIds, fetchImpl, apiKey } = {}) {
+export async function createPost({ teamId, title, postDate, status = "SCHEDULED", text, uploadIds, platform = "instagram", fetchImpl, apiKey } = {}) {
   if (!teamId) throw new BundleApiError("teamId is required for create-post", { status: 0 });
-  if (!Array.isArray(uploadIds) || uploadIds.length === 0) {
+  const bundleType = platformToBundleType(platform); // INSTAGRAM / FACEBOOK / THREADS
+  const isFacebook = bundleType === "FACEBOOK";
+  // Instagram REQUIRES media (≥1 upload). Facebook does not (text-only allowed),
+  // so the empty-uploadIds guard is relaxed for FB — defensive only; our FB flow
+  // always sends a photo album.
+  if (!Array.isArray(uploadIds) || (uploadIds.length === 0 && !isFacebook)) {
     throw new BundleApiError("uploadIds must be a non-empty array for create-post", { status: 0 });
   }
+  const safeUploadIds = Array.isArray(uploadIds) ? uploadIds : [];
   const body = {
     teamId,
     title: title || "Milestone carousel",
     postDate,
     status,
-    socialAccountTypes: ["INSTAGRAM"],
+    socialAccountTypes: [bundleType],
     data: {
-      INSTAGRAM: {
+      [bundleType]: {
         type: "POST",
         text: text || "",
-        uploadIds,
+        uploadIds: safeUploadIds,
       },
     },
   };

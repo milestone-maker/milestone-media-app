@@ -101,7 +101,18 @@ export const RECOMMENDED_SLOTS = {
     { weekday: 4, hour: 12, minute: 0 }, // Thu 12:00 — primary midday
     { weekday: 4, hour: 18, minute: 0 }, // Thu 18:00 — secondary early-evening
   ],
-  facebook: [], // TODO: fill when Facebook posting launches
+  // Facebook (DFW real-estate audience): weekday early-afternoon is the primary
+  // window, a Wed/Thu morning pass is secondary, and — unlike Instagram —
+  // weekend late-mornings work well for this niche (open-house browsing mindset).
+  facebook: [
+    { weekday: 3, hour: 8,  minute: 0 },  // Wed 08:00 — morning pass
+    { weekday: 4, hour: 8,  minute: 0 },  // Thu 08:00 — morning pass
+    { weekday: 3, hour: 13, minute: 0 },  // Wed 13:00 — primary early-afternoon
+    { weekday: 4, hour: 13, minute: 0 },  // Thu 13:00 — primary early-afternoon
+    { weekday: 5, hour: 13, minute: 0 },  // Fri 13:00 — primary early-afternoon
+    { weekday: 6, hour: 10, minute: 0 },  // Sat 10:00 — weekend late-morning
+    { weekday: 0, hour: 11, minute: 0 },  // Sun 11:00 — weekend late-morning
+  ],
   threads:  [], // TODO: fill when Threads posting launches
 };
 

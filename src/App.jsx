@@ -1038,10 +1038,10 @@ function AppShell() {
             cursor: "pointer", textAlign: "left",
           }}
         >
-          <span style={{ fontSize: 16 }}>📷</span>
+          <span style={{ fontSize: 16 }}>🔗</span>
           <div>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", fontWeight: 600, letterSpacing: "0.03em" }}>Instagram</div>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>Connect your account to post carousels</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#c9a84c", fontWeight: 600, letterSpacing: "0.03em" }}>Connected Accounts</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 1 }}>Instagram · Facebook — connect to post</div>
           </div>
         </button>
       </div>

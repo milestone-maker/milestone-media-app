@@ -109,8 +109,15 @@ for (const [nowIso, day] of [["2026-06-12T15:00:00Z", "Fri"], ["2026-06-13T15:00
 check("DST: winter Mon-noon = 18:00Z (CST -6)", centralWallClockToUtcIso("2026-01-12T12:00") === "2026-01-12T18:00:00.000Z");
 check("DST: summer Mon-noon = 17:00Z (CDT -5)", centralWallClockToUtcIso("2026-03-09T12:00") === "2026-03-09T17:00:00.000Z");
 
-// (g) empty platform tables → null, no crash.
-check("facebook (empty table) → null", nextRecommendedSlot(new Date("2026-06-09T11:00:00Z"), "facebook") === null);
+// (g) facebook now HAS slots (Stage 3) — returns a real upcoming slot, not null.
+// threads stays empty → null. Unknown platform → null. None crash.
+{
+  // Tue 2026-06-09 06:00 CT (11:00Z). The soonest FB slot is Wed 08:00 CT.
+  const fbSlot = nextRecommendedSlot(new Date("2026-06-09T11:00:00Z"), "facebook");
+  check("facebook (populated) → a slot object", fbSlot && typeof fbSlot.postDate === "string" && typeof fbSlot.label === "string", JSON.stringify(fbSlot));
+  check("facebook slot is in the future", fbSlot && new Date(fbSlot.postDate).getTime() > Date.parse("2026-06-09T11:00:00Z"));
+  check("facebook soonest from Tue morning = Wed 8:00 AM CT", fbSlot?.label === "Wednesday 8:00 AM CT", fbSlot?.label);
+}
 check("threads (empty table) → null", nextRecommendedSlot(new Date("2026-06-09T11:00:00Z"), "threads") === null);
 check("unknown platform → null", nextRecommendedSlot(new Date("2026-06-09T11:00:00Z"), "tiktok") === null);
 

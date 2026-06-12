@@ -28,6 +28,7 @@ import { findPrompt } from "./_content/registry.js";
 import { canonicalizeHashtags } from "./_content/post-processors.js";
 import { UNIVERSAL_REQUIRED_OUTPUT_FIELDS } from "./_content/prompts/_helpers.js";
 import { selectCarouselPhotos } from "./_content/selectCarouselPhotos.js";
+import { resolvePublishedMicrositeUrl, appendMicrositeToken } from "./_lib/microsite.js";
 
 const CAROUSEL_FRAMEWORK = "walkthrough_carousel";
 
@@ -98,6 +99,68 @@ export const DEFAULT_MODEL      = "claude-sonnet-4-6";
 export const DEFAULT_MAX_TOKENS = 2048;
 
 // ── helpers ──────────────────────────────────────────────────────────
+//
+// Microsite link (Facebook): generation inserts a PLACEHOLDER TOKEN at the link
+// slot via appendMicrositeToken (from api/_lib/microsite.js) rather than baking a
+// live URL. The live URL is resolved + substituted at DISPLAY time (Content tab)
+// and authoritatively at POST time (api/social-post.js FB path). We still resolve
+// the URL here (resolvePublishedMicrositeUrl) purely to return microsite_url in
+// the response so the UI can show whether a microsite exists yet.
+
+// How many recent Facebook hooks to feed the avoidance block. Tunable — larger
+// = stronger avoidance memory but a longer system prompt. 12 is a good balance.
+export const RECENT_HOOK_MEMORY = 12;
+
+/**
+ * Resolve an agent's recent Facebook opening hooks for the anti-repetition
+ * memory (Facebook Stage 2). Scoped by agent_id (the server-resolved caller —
+ * the same id persisted on generated_content.agent_id) AND platform='facebook'.
+ * Returns the most recent DISTINCT non-empty hook_lines, newest first, capped at
+ * RECENT_HOOK_MEMORY. New agent / no FB history → []. Never run for Instagram.
+ *
+ * History accumulates as the agent generates: each FB generation persists its
+ * hook_line, so the pool the next generation must avoid grows over time.
+ */
+async function defaultResolveRecentHooks(supabase, agentId) {
+  const { data, error } = await supabase
+    .from("generated_content")
+    .select("hook_line")
+    .eq("agent_id", agentId)
+    .eq("platform", "facebook")
+    .order("created_at", { ascending: false })
+    .limit(RECENT_HOOK_MEMORY);
+  if (error) {
+    console.error("[content-generate] recent-hooks lookup error (continuing without avoidance):", error);
+    return [];
+  }
+  const seen = new Set();
+  const hooks = [];
+  for (const row of data || []) {
+    const h = (row?.hook_line || "").trim();
+    if (!h || seen.has(h)) continue;
+    seen.add(h);
+    hooks.push(h);
+  }
+  return hooks;
+}
+
+/**
+ * Append a clearly delimited "recently used openers — do not repeat" block to
+ * the FB system prompt, AFTER the existing HOOK ORIGINALITY / BANNED OPENERS
+ * rules. No-ops (returns the prompt unchanged) when there are no recent hooks.
+ */
+function appendHookAvoidanceBlock(systemPrompt, recentHooks) {
+  if (!Array.isArray(recentHooks) || recentHooks.length === 0) return systemPrompt;
+  const list = recentHooks.map((h, i) => `${i + 1}. ${h}`).join("\n");
+  return (
+    systemPrompt +
+    "\n\nAGENT'S RECENTLY USED OPENERS — DO NOT REPEAT:\n" +
+    "The lines below are hooks this agent has ALREADY used on recent Facebook posts. Your new hook MUST NOT echo, " +
+    "paraphrase, or reuse the construction, wording, or angle of ANY of them — it must open in a clearly different " +
+    "way from every one of them:\n" +
+    list
+  );
+}
 
 function corsHeaders() {
   return {
@@ -173,6 +236,8 @@ export default async function handler(req, res, depsOverride) {
   const generate  = depsOverride?.generate  || generateAndParseObject;
   const model     = depsOverride?.model     || DEFAULT_MODEL;
   const maxTokens = depsOverride?.maxTokens || DEFAULT_MAX_TOKENS;
+  const resolveMicrositeUrl = depsOverride?.resolveMicrositeUrl || resolvePublishedMicrositeUrl;
+  const resolveRecentHooks  = depsOverride?.resolveRecentHooks  || defaultResolveRecentHooks;
 
   try {
     // ── 1. Auth ──
@@ -312,13 +377,27 @@ export default async function handler(req, res, depsOverride) {
       return res.status(400).json({ error: "prompt build failed", details: buildErr.message });
     }
 
+    // ── 6b. (Facebook ONLY) Anti-repetition memory: load the agent's recent FB
+    //        opening hooks and append an avoidance block to the FB system prompt
+    //        AFTER its HOOK ORIGINALITY / BANNED OPENERS rules, so the new hook
+    //        diverges from what this agent has already used. Never for Instagram;
+    //        no-ops when the agent has no FB history yet.
+    if (platform === "facebook") {
+      const recentHooks = await resolveRecentHooks(supabase, authUser.id);
+      built.systemPrompt = appendHookAvoidanceBlock(built.systemPrompt, recentHooks);
+    }
+
     // ── 7. Call the engine (caller injects already-built strings;
     //       engine stays stateless / domain-agnostic) ──
+    // Per-module token budget: a framework may declare its own maxTokens
+    // (FB long-form runs ~3500–4096); fall back to the endpoint default.
+    const effectiveMaxTokens = promptMod.maxTokens || maxTokens;
+
     let result;
     try {
       result = await generate({
         model,
-        maxTokens,
+        maxTokens: effectiveMaxTokens,
         promptBuilders: {
           buildSystemPrompt: () => built.systemPrompt,
           buildUserMessage:  () => built.userMessage,
@@ -340,10 +419,24 @@ export default async function handler(req, res, depsOverride) {
     }
 
     // ── 8. Validate the model's output shape ──
-    const parsed = result.parsed;
+    let parsed = result.parsed;
     if (!parsed || typeof parsed !== "object") {
       console.error("[content-generate] parsed result not an object", { raw: result.raw });
       return res.status(502).json({ error: "model returned non-object payload" });
+    }
+
+    // ── 8a. (Facebook ONLY) Insert the microsite-link PLACEHOLDER TOKEN right
+    //        after the model's CTA lead-in (the model writes the lead-in copy
+    //        only — never a URL). Placed BEFORE the trailing hashtag block, which
+    //        canonicalizeHashtags appends next. The token is ALWAYS inserted for
+    //        FB; the live URL is substituted for it at display time + at POST time
+    //        (so a microsite published/retired after generation is reflected).
+    //        Never applied to Instagram. We still resolve the current URL only to
+    //        return microsite_url in the response (UI "is there a microsite yet?").
+    let micrositeUrl = null;
+    if (platform === "facebook") {
+      micrositeUrl = await resolveMicrositeUrl(supabase, listing_id);
+      parsed = { ...parsed, caption: appendMicrositeToken(parsed.caption) };
     }
 
     // Canonicalize hashtags so the caption-body block and the structured
@@ -439,7 +532,14 @@ export default async function handler(req, res, depsOverride) {
       });
     }
 
-    return res.status(200).json(savedId ? { ...finalParsed, saved_id: savedId } : finalParsed);
+    // Additive response fields: saved_id (when persisted) + microsite_url for
+    // Facebook (the resolved link, or null when none — the UI uses null to show
+    // the "link inserts at post time" note). Never added for Instagram.
+    return res.status(200).json({
+      ...finalParsed,
+      ...(savedId ? { saved_id: savedId } : {}),
+      ...(platform === "facebook" ? { microsite_url: micrositeUrl } : {}),
+    });
   } catch (err) {
     console.error("[content-generate] fatal:", err);
     return res.status(500).json({ error: err.message || "internal error" });

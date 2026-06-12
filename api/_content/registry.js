@@ -17,6 +17,15 @@ import neighborhoodFirst       from "./prompts/instagram/listing/neighborhood-fi
 import problemSolution         from "./prompts/instagram/listing/problem-solution.js";
 import povDayInLife            from "./prompts/instagram/listing/pov-day-in-life.js";
 
+// Facebook Stage 2 — FB-native frameworks (long-form, conversation-first).
+import fbPropertyShowcase      from "./prompts/facebook/listing/property-showcase.js";
+import fbInvestmentAngle       from "./prompts/facebook/listing/investment-angle.js";
+import fbNeighborStory         from "./prompts/facebook/listing/neighbor-story.js";
+import fbCommunityQuestion     from "./prompts/facebook/listing/community-question.js";
+import fbMarketPlainTalk       from "./prompts/facebook/listing/market-plain-talk.js";
+import fbWinShare              from "./prompts/facebook/listing/win-share.js";
+import fbResourceDrop          from "./prompts/facebook/listing/resource-drop.js";
+
 const PROMPTS = [
   storyDrivenListing,
   youHookListing,
@@ -25,6 +34,14 @@ const PROMPTS = [
   neighborhoodFirst,
   problemSolution,
   povDayInLife,
+  // facebook/listing
+  fbPropertyShowcase,
+  fbInvestmentAngle,
+  fbNeighborStory,
+  fbCommunityQuestion,
+  fbMarketPlainTalk,
+  fbWinShare,
+  fbResourceDrop,
 ];
 
 const registry = Object.create(null);
