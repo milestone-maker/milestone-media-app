@@ -23,6 +23,7 @@ import SubscriptionsView from "../Subscriptions";
 import PhotosPanel from "./PhotosPanel";
 import CarouselView from "./CarouselView";
 import PostToFacebookButton from "./FacebookPostButton";
+import { FacebookAlbumStrip } from "./photoAlbum";
 import UpcomingPosts from "./UpcomingPosts";
 import { includable } from "../../../api/_content/selectCarouselPhotos.js";
 
@@ -743,6 +744,18 @@ function ContentView() {
               border: "1px solid rgba(255,255,255,0.06)",
             }}>{resolveCaptionForDisplay(result.caption, micrositeUrlForListing)}</div>
           </div>
+
+          {/* Facebook album preview — the curated photos that will post, each
+              labeled by category and clickable to preview large. Display-only
+              here; selecting/adding extras happens in the Post-to-Facebook modal. */}
+          {result.platform === "facebook" && (
+            <div style={{ marginBottom: 18 }}>
+              <FacebookAlbumStrip
+                photos={photoPool}
+                emptyNote="No analyzed photos on this listing yet — run photo analysis to build the album."
+              />
+            </div>
+          )}
 
           {/* Facebook microsite-link status. The caption carries a placeholder
               token; we substitute the listing's LIVE microsite URL for display +

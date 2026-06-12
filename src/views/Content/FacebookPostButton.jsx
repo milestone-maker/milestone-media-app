@@ -24,6 +24,7 @@ import {
 import { scheduleState } from "../../lib/scheduledPosts";
 import { buildFacebookPostRequest, interpretFacebookPostResponse } from "../../lib/facebookPosting";
 import { facebookAlbumUrls } from "../../../api/_content/selectCarouselPhotos.js";
+import { LabeledThumb, PhotoLightbox } from "./photoAlbum";
 
 const GOLD = "#c9a84c";
 const FB_BLUE = "#3b82f6";
@@ -44,21 +45,25 @@ function PostToFacebookButton({ contentId, photos = [] }) {
   const [existing, setExisting] = useState({ kind: "none", record: null });
   // Agent-added album photos (URLs), in selection order.
   const [extras, setExtras] = useState([]);
+  // Larger-preview lightbox: { photo, addable } | null.
+  const [preview, setPreview] = useState(null);
 
   // The curated default album (mirrors the server) + the listing's OTHER
   // classified photos the agent can add. Computed from the listing's photo_labels.
-  const { curated, others } = useMemo(() => {
+  const { curated, others, byUrl } = useMemo(() => {
     const curatedUrls = facebookAlbumUrls(photos);
     const inDefault = new Set(curatedUrls);
-    const byUrl = new Map();
+    const map = new Map();
     for (const p of (Array.isArray(photos) ? photos : [])) {
-      if (p?.photo_url && !byUrl.has(p.photo_url)) byUrl.set(p.photo_url, p);
+      if (p?.photo_url && !map.has(p.photo_url)) map.set(p.photo_url, p);
     }
-    const curatedRows = curatedUrls.map((u) => byUrl.get(u) || { photo_url: u, category: "" });
+    const curatedRows = curatedUrls.map((u) => map.get(u) || { photo_url: u, category: "" });
     const otherRows = [];
-    for (const p of byUrl.values()) if (!inDefault.has(p.photo_url)) otherRows.push(p);
-    return { curated: curatedRows, others: otherRows };
+    for (const p of map.values()) if (!inDefault.has(p.photo_url)) otherRows.push(p);
+    return { curated: curatedRows, others: otherRows, byUrl: map };
   }, [photos]);
+
+  const rowFor = (url) => byUrl.get(url) || { photo_url: url, category: "" };
 
   const toggleExtra = (url) =>
     setExtras((prev) => (prev.includes(url) ? prev.filter((u) => u !== url) : [...prev, url]));
@@ -96,7 +101,7 @@ function PostToFacebookButton({ contentId, photos = [] }) {
     setMsg("");
     if (connection !== "connected") { goConnect(); return; }
     if (!contentId) { setPhase("error"); setMsg("This post is still saving — try again in a moment."); return; }
-    setMode("now"); setScheduleLocal(""); setSmartSlot(null); setExtras([]);
+    setMode("now"); setScheduleLocal(""); setSmartSlot(null); setExtras([]); setPreview(null);
     setPhase("confirm");
   };
 
@@ -226,26 +231,21 @@ function PostToFacebookButton({ contentId, photos = [] }) {
             />
           )}
 
-          {/* Album preview: curated defaults + an "Add photos" picker of the
-              listing's OTHER classified photos (no cap). */}
-          {curated.length > 0 && (
+          {/* Album preview: curated defaults + the agent's added photos, each
+              labeled by category. Tap any to preview large. */}
+          {(curated.length > 0 || extras.length > 0) && (
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", marginBottom: 7 }}>
-                In the album · {curated.length + extras.length} photo{curated.length + extras.length === 1 ? "" : "s"}
+                In the album · {curated.length + extras.length} photo{curated.length + extras.length === 1 ? "" : "s"} <span style={{ textTransform: "none", letterSpacing: 0, color: "rgba(255,255,255,0.3)" }}>— tap to preview</span>
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {curated.map((p) => (
-                  <div key={p.photo_url} title="Default photo" style={{ position: "relative", width: 56, height: 56, borderRadius: 7, overflow: "hidden", border: `1px solid ${FB_BLUE}` }}>
-                    <img src={p.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    <span style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: 8, textAlign: "center", background: "rgba(59,130,246,0.85)", color: "#fff", fontFamily: "'Jost', sans-serif" }}>default</span>
-                  </div>
+                  <LabeledThumb key={p.photo_url} photo={p} badge="default" badgeColor={FB_BLUE} onClick={() => setPreview({ photo: p, addable: false })} />
                 ))}
-                {extras.map((url) => (
-                  <div key={url} title="Added by you" style={{ position: "relative", width: 56, height: 56, borderRadius: 7, overflow: "hidden", border: "1px solid #4ade80" }}>
-                    <img src={url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    <span style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: 8, textAlign: "center", background: "rgba(74,222,128,0.85)", color: "#06210f", fontFamily: "'Jost', sans-serif" }}>added</span>
-                  </div>
-                ))}
+                {extras.map((url) => {
+                  const p = rowFor(url);
+                  return <LabeledThumb key={url} photo={p} badge="added" badgeColor="#16a34a" onClick={() => setPreview({ photo: p, addable: true })} />;
+                })}
               </div>
             </div>
           )}
@@ -253,23 +253,31 @@ function PostToFacebookButton({ contentId, photos = [] }) {
           {others.length > 0 && (
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", marginBottom: 7 }}>
-                Add more photos <span style={{ textTransform: "none", letterSpacing: 0, color: "rgba(255,255,255,0.3)" }}>— tap to include</span>
+                Add more photos <span style={{ textTransform: "none", letterSpacing: 0, color: "rgba(255,255,255,0.3)" }}>— tap to preview &amp; add</span>
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {others.map((p) => {
-                  const on = extras.includes(p.photo_url);
-                  return (
-                    <button key={p.photo_url} onClick={() => toggleExtra(p.photo_url)} title={p.category || "photo"} style={{
-                      position: "relative", width: 56, height: 56, borderRadius: 7, overflow: "hidden", padding: 0, cursor: "pointer",
-                      border: on ? "2px solid #4ade80" : "1px solid rgba(255,255,255,0.15)",
-                    }}>
-                      <img src={p.photo_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", opacity: on ? 1 : 0.8 }} />
-                      {on && <span style={{ position: "absolute", top: 2, right: 3, fontSize: 12, color: "#4ade80" }}>✓</span>}
-                    </button>
-                  );
-                })}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {others.map((p) => (
+                  <LabeledThumb
+                    key={p.photo_url}
+                    photo={p}
+                    selected={extras.includes(p.photo_url)}
+                    onClick={() => setPreview({ photo: p, addable: true })}
+                  />
+                ))}
               </div>
             </div>
+          )}
+
+          {/* Shared larger-preview lightbox. Addable photos get an Add/Remove action. */}
+          {preview && (
+            <PhotoLightbox
+              photo={preview.photo}
+              onClose={() => setPreview(null)}
+              action={preview.addable ? {
+                label: extras.includes(preview.photo.photo_url) ? "Remove from album" : "Add to album",
+                onClick: () => toggleExtra(preview.photo.photo_url),
+              } : null}
+            />
           )}
 
           {msg && <div style={{ marginBottom: 12, fontFamily: "'Jost', sans-serif", fontSize: 11.5, color: "#f87171", lineHeight: 1.5 }}>{msg}</div>}
