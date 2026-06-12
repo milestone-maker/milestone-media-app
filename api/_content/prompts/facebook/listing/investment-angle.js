@@ -51,7 +51,7 @@ LISTING (THE SUBJECT — make the financial case for THIS home)
 FRAMEWORK: INVESTMENT ANGLE (listing-focused — the financial case)
 Write a grounded, multi-paragraph Facebook post making the QUALITATIVE financial case for this property. FIXED beats (voice only at HOOK, TAKE, CTA verb):
 
-1. HOOK (voice slot, 1–2 sentences): open on why THIS home is worth a smart buyer's attention financially, in the agent's voice.
+1. HOOK (voice slot, 1–2 sentences): open on why THIS home is worth a smart buyer's attention financially, in the agent's voice. Make it ORIGINAL to this post — vary the opener type per HOOK ORIGINALITY; no stock investment clichés.
 2. THE CASE (the bulk — 3–5 short paragraphs): make the value argument using ONLY the listing's real details — its price point, its size, its location, and features that tend to hold value (lot, layout, condition, durable finishes, flexibility for rental/long-term use). Talk in general, qualitative terms about what tends to support value here. Reference the home's actual {price}, {sqft}, {beds}/{baths}, and {neighborhood} / {city} as the factual anchors.
 3. LONG-TERM / USE POTENTIAL (1 short paragraph): discuss long-term ownership or rental potential in general terms grounded in the home's real attributes.
 4. TAKE (voice slot, 1–2 sentences): a reflective, honest line on how you think about value (no hype).

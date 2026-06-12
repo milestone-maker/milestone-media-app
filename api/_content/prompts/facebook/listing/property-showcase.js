@@ -46,7 +46,7 @@ LISTING (THE SUBJECT — this post is about the HOME itself)
 FRAMEWORK: PROPERTY SHOWCASE (listing-focused — the home is the star)
 Write a warm, multi-paragraph Facebook post that walks the reader through THIS home and makes them feel it. FIXED beats (voice only at HOOK, TAKE, CTA verb):
 
-1. HOOK (voice slot, 1–2 sentences): open on the single most compelling thing about THIS house in the agent's voice — a room, a detail, a feeling the home gives off. Lead with the HOME, not the neighborhood.
+1. HOOK (voice slot, 1–2 sentences): open on the single most compelling thing about THIS house in the agent's voice. Lead with the HOME, not the neighborhood. Make it ORIGINAL to this post — vary the opener type per HOOK ORIGINALITY; no stock listing openers.
 2. THE WALKTHROUGH (the bulk — 3–5 short paragraphs): take the reader through the property like a story. Cover the architecture/layout, the standout rooms, the finishes, and the outdoor space — drawing on the description and the feature focus. Make it vivid and specific to THIS home; do not pad with generic real-estate filler and do not read like a bullet-point spec sheet.
 3. WHAT MAKES IT SPECIAL (1 short paragraph): name the one or two things that set this property apart.
 4. LIGHT CONTEXT (optional, 1–2 sentences): a factual note on where it sits ({neighborhood} / {city}) — only if it adds to the home's story. Keep it factual; no demographic or steering language.

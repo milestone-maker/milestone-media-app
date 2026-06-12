@@ -43,7 +43,7 @@ LISTING (area-framing source — use factual details only)
 FRAMEWORK: NEIGHBOR STORY
 Write a warm, multi-paragraph Facebook post with these FIXED beats (voice only at HOOK, TAKE, CTA verb):
 
-1. HOOK (voice slot, 1–2 sentences): open on a vivid, specific local moment tied to the area — a factual place detail (a park, a morning coffee spot, the walk to a trailhead, the light at a certain hour). Do not mention the listing yet.
+1. HOOK (voice slot, 1–2 sentences): open on a vivid, specific local moment tied to the area, grounded in one real, factual place detail. Do not mention the listing yet. Make it ORIGINAL to this post — vary the opener type per HOOK ORIGINALITY, and do NOT reflexively open with the neighborhood name.
 2. STORY (2–4 short paragraphs): tell a small human arc about everyday life in and around {neighborhood} / {city}, anchored ONLY to factual area features — geography, amenities, distances, local landmarks. No demographic or steering language.
 3. BRIDGE (1 short paragraph): softly connect that sense of place to this home ({beds} bed / {baths} bath in {neighborhood}), referencing 1–2 standout features that fit the story.
 4. TAKE (voice slot, 1–2 sentences): a reflective line about what makes a place feel like home (no steering, no demographic framing).

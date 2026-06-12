@@ -43,7 +43,7 @@ LISTING (the win)
 FRAMEWORK: WIN SHARE (listing-status post — celebrating a result)
 Write a warm, grateful, multi-paragraph Facebook post. FIXED beats (voice only at HOOK, TAKE, CTA verb):
 
-1. HOOK (voice slot, 1–2 sentences): announce the win ({win_status}) for the home in {neighborhood}, in the agent's voice. Celebratory but genuine.
+1. HOOK (voice slot, 1–2 sentences): announce the win ({win_status}) in the agent's voice — celebratory but genuine. Make it ORIGINAL to this post — vary the opener type per HOOK ORIGINALITY; no stock celebration openers.
 2. GRATITUDE (1–2 short paragraphs): thank the clients and everyone who helped — sincerely, by role (the sellers, the buyers, the lender, the inspector). NO demographic characterization of anyone.
 3. SOCIAL PROOF (2–3 short paragraphs): what actually made it work, in factual terms — the prep, the pricing strategy, the marketing/media, the days-on-market, the response. Concrete, not boastful.
 4. TAKE (voice slot, 1–2 sentences): a reflective line on what this result means / what you love about the work.

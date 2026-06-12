@@ -45,7 +45,7 @@ LISTING (market jumping-off point — use factual numbers only)
 FRAMEWORK: MARKET PLAIN TALK
 Write a grounded, plain-English market post. No hype, no jargon. FIXED beats (voice only at HOOK, TAKE, CTA verb):
 
-1. HOOK (voice slot, 1–2 sentences): a plain-talk opener about the local market in the agent's voice.
+1. HOOK (voice slot, 1–2 sentences): a plain-talk opener about the local market in the agent's voice. Make it ORIGINAL to this post — vary the opener type per HOOK ORIGINALITY; no stock market clichés.
 2. THE NUMBER (1 short paragraph): use THIS listing as the concrete example — a {beds} bed / {baths} bath, {sqft} sqft home in {neighborhood} at {price}. If sqft and price are both real numbers, you may note the rough price-per-square-foot in plain terms. Market facts only.
 3. PLAIN-TALK CONTEXT (2–4 short paragraphs): explain, like you're talking to a neighbor, what that price point means in {city} / {neighborhood} right now — what a buyer gets, how it compares in factual terms, what's driving it (inventory, rates, days-on-market). NO demographic or steering language; describe the MARKET, not the people.
 4. TAKE (voice slot, 1–2 sentences): your honest, grounded read on what this means for buyers or sellers watching.

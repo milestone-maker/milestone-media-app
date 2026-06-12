@@ -42,7 +42,7 @@ LISTING (area-framing source — use factual details only)
 FRAMEWORK: COMMUNITY QUESTION
 Write a conversational, multi-paragraph Facebook post built to earn replies. FIXED beats (voice only at HOOK, TAKE, CTA verb):
 
-1. HOOK (voice slot, 1–2 sentences): frame the area or everyday-life topic in the agent's voice — grounded in a factual {city} / {neighborhood} detail.
+1. HOOK (voice slot, 1–2 sentences): open on the everyday-life topic in the agent's voice, grounded in one real, factual {city} / {neighborhood} detail. Make it ORIGINAL — vary the opener type per HOOK ORIGINALITY, and do NOT reflexively open with the neighborhood name.
 2. CONTEXT (2–3 short paragraphs): set up the question with factual local color — amenities, geography, what's nearby, seasonal rhythms. No demographic or steering language.
 3. THE QUESTION (1 short paragraph): ask ONE genuine, open question that invites locals to share (favorite spot, best-kept routine, what they'd change). It must feel real, not rhetorical — the whole post exists to start this thread.
 4. SOFT BRIDGE (1–2 sentences): mention, lightly, that you're helping someone find a home here ({beds} bed / {baths} bath in {neighborhood}) — a passing note, not a pitch.

@@ -265,5 +265,37 @@ for (const slug of FB_FRAMEWORKS) {
   check("UI FB order is listing-first, exact", JSON.stringify(slugOrder) === JSON.stringify(expected), slugOrder.join(","));
 }
 
+// 7. Hook originality: the shared system prompt carries the ORIGINALITY rule +
+//    BANNED OPENERS list, and the per-framework templates carry NO liftable
+//    example opener / sample caption text the model could copy verbatim.
+{
+  const { FACEBOOK_CAPTION_SYSTEM_PROMPT } = await import(
+    pathToFileURL(resolve(REPO_ROOT, "api", "_content", "prompts", "facebook", "_helpers.js")).href
+  );
+  const sp = FACEBOOK_CAPTION_SYSTEM_PROMPT;
+  check("system prompt has HOOK ORIGINALITY rule", sp.includes("HOOK ORIGINALITY"));
+  check("system prompt requires varying the opener type", sp.includes("VARY THE OPENER TYPE"));
+  check("system prompt has BANNED OPENERS list", sp.includes("BANNED OPENERS"));
+  for (const banned of ["Everybody sleeps on", "Welcome to", "Nestled in", "Looking for", "Imagine", "Picture this"]) {
+    check(`banned opener listed: ${banned}`, sp.includes(banned));
+  }
+  check("system prompt forbids reflexive neighborhood-name opener", sp.includes("reflexively naming the listing"));
+  // Old liftable examples removed from the shared prompt.
+  check("scrubbed: no 'book a tour here' sample in system prompt", !sp.includes("book a tour here"));
+  check("scrubbed: no 'what would you add' sample in system prompt", !sp.includes("what would you add"));
+
+  // Per-framework templates carry no liftable example opener / sample caption.
+  for (const slug of FB_FRAMEWORKS) {
+    const built = findPrompt("facebook", "listing", slug).build({ voiceProfile: VOICE_PROFILE, listing: LISTING, extras: {} });
+    const um = built.userMessage;
+    check(`${slug} template: no 'Everybody sleeps' example`, !um.includes("Everybody sleeps"));
+    check(`${slug} template: no 'book a tour here' sample`, !um.includes("book a tour here"));
+    check(`${slug} template: no 'what would you add' sample`, !um.includes("what would you add"));
+    check(`${slug} template: references HOOK ORIGINALITY`, um.includes("HOOK ORIGINALITY"));
+    // system prompt is the same binding one for every framework
+    check(`${slug} uses the FB system prompt`, built.systemPrompt === sp);
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
