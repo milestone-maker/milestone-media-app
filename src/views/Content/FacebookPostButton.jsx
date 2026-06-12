@@ -1,14 +1,12 @@
-// Facebook post/schedule control for the Content tab (Stage 3 Part B).
+// Facebook post/schedule control for the Content tab.
 //
 // FB generated content has no slides, so CarouselView never renders for it.
-// This is the FB equivalent — a Post / Schedule control shown in the FB result
-// panel AND FB History rows. Unlike Instagram, the client composites + uploads
-// NOTHING: it just POSTs { contentId, platform:'facebook', postDate? } and the
-// SERVER builds the photo album from the listing's classified photos and
-// re-resolves the microsite link. Mode picker mirrors CarouselView:
-//   • Post Now      → immediate
-//   • Schedule      → manual datetime (Central wall-clock)
-//   • Smart         → nextRecommendedSlot(now, 'facebook')
+// This is the FB equivalent — a Post / Schedule control. The album is owned by
+// FacebookAlbumEditor (the result-panel editor) and passed in as `album` (the
+// agent's EXPLICIT ordered final selection); this control just reflects it and
+// posts exactly it via albumPhotoUrls. The client uploads NOTHING — the server
+// ingests the album URLs and re-resolves the microsite link. Mode picker:
+//   • Post Now  → immediate   • Schedule → manual datetime   • Smart → recommended slot
 //
 // Reuses the shared schedule helpers + the platform-general /api/social-posts
 // reconciliation (already-scheduled indicator) and Upcoming Posts list.
@@ -17,13 +15,10 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../../supabaseClient";
 import {
   nextRecommendedSlot,
-  centralWallClockToUtcIso,
   formatCentral,
-  SCHEDULE_BUFFER_MS,
 } from "../../lib/postScheduling";
 import { scheduleState } from "../../lib/scheduledPosts";
 import { buildFacebookPostRequest, interpretFacebookPostResponse } from "../../lib/facebookPosting";
-import { facebookAlbumUrls } from "../../../api/_content/selectCarouselPhotos.js";
 import { LabeledThumb, PhotoLightbox } from "./photoAlbum";
 
 const GOLD = "#c9a84c";
@@ -34,7 +29,7 @@ async function getSession() {
   return { token: data?.session?.access_token || null };
 }
 
-function PostToFacebookButton({ contentId, photos = [] }) {
+function PostToFacebookButton({ contentId, photos = [], album = null }) {
   const [connection, setConnection] = useState("checking"); // checking|connected|none|error
   const [phase, setPhase] = useState("idle");               // idle|confirm|working|done|error
   const [msg, setMsg] = useState("");
@@ -43,30 +38,17 @@ function PostToFacebookButton({ contentId, photos = [] }) {
   const [smartSlot, setSmartSlot] = useState(null);
   const [scheduledLabel, setScheduledLabel] = useState("");
   const [existing, setExisting] = useState({ kind: "none", record: null });
-  // Agent-added album photos (URLs), in selection order.
-  const [extras, setExtras] = useState([]);
-  // Larger-preview lightbox: { photo, addable } | null.
-  const [preview, setPreview] = useState(null);
+  const [previewIndex, setPreviewIndex] = useState(null); // lightbox over the album
 
-  // The curated default album (mirrors the server) + the listing's OTHER
-  // classified photos the agent can add. Computed from the listing's photo_labels.
-  const { curated, others, byUrl } = useMemo(() => {
-    const curatedUrls = facebookAlbumUrls(photos);
-    const inDefault = new Set(curatedUrls);
-    const map = new Map();
+  // The album rows (for labeled thumbnails + lightbox), mapped from the explicit
+  // `album` URLs via the listing's photo_labels. This is exactly what posts.
+  const albumRows = useMemo(() => {
+    const byUrl = new Map();
     for (const p of (Array.isArray(photos) ? photos : [])) {
-      if (p?.photo_url && !map.has(p.photo_url)) map.set(p.photo_url, p);
+      if (p?.photo_url && !byUrl.has(p.photo_url)) byUrl.set(p.photo_url, p);
     }
-    const curatedRows = curatedUrls.map((u) => map.get(u) || { photo_url: u, category: "" });
-    const otherRows = [];
-    for (const p of map.values()) if (!inDefault.has(p.photo_url)) otherRows.push(p);
-    return { curated: curatedRows, others: otherRows, byUrl: map };
-  }, [photos]);
-
-  const rowFor = (url) => byUrl.get(url) || { photo_url: url, category: "" };
-
-  const toggleExtra = (url) =>
-    setExtras((prev) => (prev.includes(url) ? prev.filter((u) => u !== url) : [...prev, url]));
+    return (Array.isArray(album) ? album : []).map((u) => byUrl.get(u) || { photo_url: u, category: "" });
+  }, [photos, album]);
 
   // FB connection status (Stage 1 status endpoint is platform-aware).
   useEffect(() => {
@@ -101,7 +83,7 @@ function PostToFacebookButton({ contentId, photos = [] }) {
     setMsg("");
     if (connection !== "connected") { goConnect(); return; }
     if (!contentId) { setPhase("error"); setMsg("This post is still saving — try again in a moment."); return; }
-    setMode("now"); setScheduleLocal(""); setSmartSlot(null); setExtras([]); setPreview(null);
+    setMode("now"); setScheduleLocal(""); setSmartSlot(null); setPreviewIndex(null);
     setPhase("confirm");
   };
 
@@ -112,7 +94,7 @@ function PostToFacebookButton({ contentId, photos = [] }) {
   };
 
   const doPost = async () => {
-    const built = buildFacebookPostRequest({ contentId, mode, scheduleLocal, smartSlot, extraPhotoUrls: extras, now: new Date() });
+    const built = buildFacebookPostRequest({ contentId, mode, scheduleLocal, smartSlot, albumPhotoUrls: album, now: new Date() });
     if (built.error) { setMsg(built.error); return; }
     const isScheduled = mode === "schedule" || mode === "smart";
 
@@ -231,52 +213,27 @@ function PostToFacebookButton({ contentId, photos = [] }) {
             />
           )}
 
-          {/* Album preview: curated defaults + the agent's added photos, each
-              labeled by category. Tap any to preview large. */}
-          {(curated.length > 0 || extras.length > 0) && (
+          {/* The final album — exactly what will post. Edit it in the result
+              panel (Add / Swap / Remove); here it's reflected + previewable. */}
+          {albumRows.length > 0 && (
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", marginBottom: 7 }}>
-                In the album · {curated.length + extras.length} photo{curated.length + extras.length === 1 ? "" : "s"} <span style={{ textTransform: "none", letterSpacing: 0, color: "rgba(255,255,255,0.3)" }}>— tap to preview</span>
+                Posting {albumRows.length} photo{albumRows.length === 1 ? "" : "s"} <span style={{ textTransform: "none", letterSpacing: 0, color: "rgba(255,255,255,0.3)" }}>— tap to preview · edit in the album above</span>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {curated.map((p) => (
-                  <LabeledThumb key={p.photo_url} photo={p} badge="default" badgeColor={FB_BLUE} onClick={() => setPreview({ photo: p, addable: false })} />
-                ))}
-                {extras.map((url) => {
-                  const p = rowFor(url);
-                  return <LabeledThumb key={url} photo={p} badge="added" badgeColor="#16a34a" onClick={() => setPreview({ photo: p, addable: true })} />;
-                })}
-              </div>
-            </div>
-          )}
-
-          {others.length > 0 && (
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", marginBottom: 7 }}>
-                Add more photos <span style={{ textTransform: "none", letterSpacing: 0, color: "rgba(255,255,255,0.3)" }}>— tap to preview &amp; add</span>
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                {others.map((p) => (
-                  <LabeledThumb
-                    key={p.photo_url}
-                    photo={p}
-                    selected={extras.includes(p.photo_url)}
-                    onClick={() => setPreview({ photo: p, addable: true })}
-                  />
+                {albumRows.map((p, i) => (
+                  <LabeledThumb key={p.photo_url} photo={p} onClick={() => setPreviewIndex(i)} />
                 ))}
               </div>
             </div>
           )}
 
-          {/* Shared larger-preview lightbox. Addable photos get an Add/Remove action. */}
-          {preview && (
+          {previewIndex !== null && albumRows[previewIndex] && (
             <PhotoLightbox
-              photo={preview.photo}
-              onClose={() => setPreview(null)}
-              action={preview.addable ? {
-                label: extras.includes(preview.photo.photo_url) ? "Remove from album" : "Add to album",
-                onClick: () => toggleExtra(preview.photo.photo_url),
-              } : null}
+              items={albumRows}
+              index={previewIndex}
+              onIndex={setPreviewIndex}
+              onClose={() => setPreviewIndex(null)}
             />
           )}
 
@@ -287,7 +244,7 @@ function PostToFacebookButton({ contentId, photos = [] }) {
             {btn("Cancel", () => { setPhase("idle"); setMsg(""); }, { ghost: true })}
           </div>
           <div style={{ marginTop: 10, fontFamily: "'Jost', sans-serif", fontSize: 10.5, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>
-            We'll build the photo album from this listing's analyzed photos and add the live microsite link automatically.
+            We'll post exactly the album above and add the live microsite link automatically.
           </div>
         </div>
       )}

@@ -1,37 +1,68 @@
-// Shared FB album preview pieces — used by BOTH the Content result panel
-// (display-only strip) and the Post-to-Facebook modal (selectable grid):
-//   • LabeledThumb   — a thumbnail labeled by its photo category, clickable to
-//                      open the lightbox; optional selection ring + small badge.
-//   • PhotoLightbox  — the shared larger-preview overlay (full image + category
-//                      label + close).
-//   • FacebookAlbumStrip — the display-only curated-album strip for the result
-//                      panel (computes the curated set from photo_labels and
-//                      owns its own lightbox state).
+// Shared FB album preview pieces:
+//   • LabeledThumb  — a category-labeled, clickable thumbnail (optional badge +
+//                     selection ring).
+//   • PhotoLightbox — the shared larger-preview overlay that NAVIGATES a set
+//                     (prev/next arrows + keyboard ←/→ with wrap), shows the
+//                     category label + close, and an optional per-photo action
+//                     (e.g. Add/Remove).
+// The editable album strip + controls live in FacebookAlbumEditor; both it and
+// the Post modal use these pieces, so the preview/lightbox is one component.
 
-import { useState, useMemo } from "react";
+import { useEffect } from "react";
 import { categoryLabel } from "../../lib/photoCategories";
-import { facebookAlbumUrls } from "../../../api/_content/selectCarouselPhotos.js";
+import { stepIndex } from "../../lib/facebookAlbumEdit";
 
 const FB_BLUE = "#3b82f6";
 
-// Shared larger-preview overlay. `photo` = { photo_url, category }. Optional
-// `action` = { label, onClick } renders a button next to Close (the modal uses
-// it to add/remove the previewed photo from the album).
-export function PhotoLightbox({ photo, onClose, action }) {
+// Navigable larger-preview overlay over `items` (rows with {photo_url, category}).
+// `index` is the current item; `onIndex(next)` moves; arrows + ←/→ wrap; Esc
+// closes. `renderAction(photo)` may return { label, onClick } for a contextual
+// action (Add to / Remove from album).
+export function PhotoLightbox({ items = [], index = 0, onIndex, onClose, renderAction }) {
+  const list = Array.isArray(items) ? items : [];
+  const photo = list[index];
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") { onClose?.(); return; }
+      if (!list.length || !onIndex) return;
+      if (e.key === "ArrowRight") { e.preventDefault(); onIndex(stepIndex(index, list.length, +1)); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); onIndex(stepIndex(index, list.length, -1)); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [index, list.length, onIndex, onClose]);
+
   if (!photo?.photo_url) return null;
+  const multi = list.length > 1;
+  const action = renderAction ? renderAction(photo) : null;
+
+  const arrowBtn = (dir, glyph) => (
+    <button
+      onClick={(e) => { e.stopPropagation(); onIndex?.(stepIndex(index, list.length, dir)); }}
+      aria-label={dir < 0 ? "Previous photo" : "Next photo"}
+      style={{
+        position: "absolute", top: "50%", transform: "translateY(-50%)", [dir < 0 ? "left" : "right"]: -6,
+        width: 42, height: 42, borderRadius: "50%", border: "1px solid rgba(255,255,255,0.25)",
+        background: "rgba(0,0,0,0.55)", color: "#fff", cursor: "pointer", fontSize: 20, lineHeight: "40px",
+      }}
+    >{glyph}</button>
+  );
+
   return (
     <div
       onClick={onClose}
-      style={{
-        position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.82)",
-        display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
-      }}
+      style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.82)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
     >
       <div onClick={(e) => e.stopPropagation()} style={{ position: "relative", maxWidth: "92vw", maxHeight: "88vh", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-        <img src={photo.photo_url} alt={categoryLabel(photo.category)} style={{ maxWidth: "92vw", maxHeight: "78vh", objectFit: "contain", borderRadius: 10, boxShadow: "0 12px 48px rgba(0,0,0,0.6)" }} />
+        <div style={{ position: "relative" }}>
+          <img src={photo.photo_url} alt={categoryLabel(photo.category)} style={{ maxWidth: "92vw", maxHeight: "76vh", objectFit: "contain", borderRadius: 10, boxShadow: "0 12px 48px rgba(0,0,0,0.6)" }} />
+          {multi && arrowBtn(-1, "‹")}
+          {multi && arrowBtn(+1, "›")}
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
           <span style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#F5ECD7", letterSpacing: "0.04em" }}>
-            {categoryLabel(photo.category)}
+            {categoryLabel(photo.category)}{multi ? ` · ${index + 1}/${list.length}` : ""}
           </span>
           {action && (
             <button onClick={action.onClick} style={{
@@ -51,74 +82,30 @@ export function PhotoLightbox({ photo, onClose, action }) {
   );
 }
 
-// One labeled, clickable thumbnail. `badge` = optional small corner tag
-// ("default" / "added"); `selected` draws a green ring; `onClick` opens preview
-// or toggles selection (caller decides). Always shows the category label.
-export function LabeledThumb({ photo, size = 60, badge, badgeColor = FB_BLUE, selected = false, onClick }) {
+// One labeled, clickable thumbnail. `badge` = optional small corner tag;
+// `selected` draws a green ring; `corner` = optional extra top-left control
+// (e.g. a remove ×). Always shows the category label.
+export function LabeledThumb({ photo, size = 60, badge, badgeColor = FB_BLUE, selected = false, onClick, corner }) {
   const label = categoryLabel(photo?.category);
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      style={{
-        position: "relative", width: size, height: size + 16, padding: 0, cursor: "pointer",
-        background: "transparent", border: "none", display: "flex", flexDirection: "column", gap: 2,
-      }}
-    >
-      <div style={{
-        position: "relative", width: size, height: size, borderRadius: 7, overflow: "hidden",
-        border: selected ? "2px solid #4ade80" : "1px solid rgba(255,255,255,0.18)",
-      }}>
+    <div style={{ position: "relative", width: size, display: "flex", flexDirection: "column", gap: 2 }}>
+      <button
+        type="button"
+        onClick={onClick}
+        title={label}
+        style={{
+          position: "relative", width: size, height: size, padding: 0, cursor: "pointer", borderRadius: 7, overflow: "hidden",
+          border: selected ? "2px solid #4ade80" : "1px solid rgba(255,255,255,0.18)", background: "transparent",
+        }}
+      >
         <img src={photo?.photo_url} alt={label} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         {badge && (
-          <span style={{
-            position: "absolute", top: 2, right: 2, fontSize: 7.5, lineHeight: 1.4, padding: "0 4px",
-            borderRadius: 4, background: badgeColor, color: "#fff", fontFamily: "'Jost', sans-serif",
-          }}>{badge}</span>
+          <span style={{ position: "absolute", bottom: 0, left: 0, right: 0, fontSize: 7.5, lineHeight: 1.6, textAlign: "center", background: badgeColor, color: "#fff", fontFamily: "'Jost', sans-serif" }}>{badge}</span>
         )}
         {selected && <span style={{ position: "absolute", top: 2, left: 3, fontSize: 12, color: "#4ade80" }}>✓</span>}
-      </div>
-      <span style={{
-        width: size, fontSize: 8.5, lineHeight: 1.2, textAlign: "center", color: "rgba(255,255,255,0.6)",
-        fontFamily: "'Jost', sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-      }}>{label}</span>
-    </button>
-  );
-}
-
-// Display-only curated-album strip for the FB result panel. `photos` is the
-// listing's classified photo_labels (the photoPool); the curated set is derived
-// here (same facebookAlbumUrls the server + modal use). Owns its lightbox state.
-export function FacebookAlbumStrip({ photos = [], emptyNote }) {
-  const [preview, setPreview] = useState(null);
-
-  const curated = useMemo(() => {
-    const urls = facebookAlbumUrls(photos);
-    const byUrl = new Map();
-    for (const p of (Array.isArray(photos) ? photos : [])) {
-      if (p?.photo_url && !byUrl.has(p.photo_url)) byUrl.set(p.photo_url, p);
-    }
-    return urls.map((u) => byUrl.get(u) || { photo_url: u, category: "" });
-  }, [photos]);
-
-  if (curated.length === 0) {
-    return emptyNote ? (
-      <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11.5, color: "rgba(255,255,255,0.4)" }}>{emptyNote}</div>
-    ) : null;
-  }
-
-  return (
-    <div>
-      <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10.5, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", marginBottom: 8 }}>
-        Album · {curated.length} photo{curated.length === 1 ? "" : "s"} <span style={{ textTransform: "none", letterSpacing: 0, color: "rgba(255,255,255,0.3)" }}>— tap to preview</span>
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-        {curated.map((p) => (
-          <LabeledThumb key={p.photo_url} photo={p} onClick={() => setPreview(p)} />
-        ))}
-      </div>
-      {preview && <PhotoLightbox photo={preview} onClose={() => setPreview(null)} />}
+      </button>
+      {corner}
+      <span style={{ width: size, fontSize: 8.5, lineHeight: 1.2, textAlign: "center", color: "rgba(255,255,255,0.6)", fontFamily: "'Jost', sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
     </div>
   );
 }

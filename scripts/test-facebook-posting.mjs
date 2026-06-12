@@ -70,6 +70,15 @@ console.log("\n── src/lib/facebookPosting.js ──\n");
   check("extras attach to scheduled too", "extraPhotoUrls" in (buildFacebookPostRequest({ contentId: CONTENT_ID, mode: "smart", smartSlot: { postDate: "2026-06-10T13:00:00.000Z" }, extraPhotoUrls: ["u1"], now: NOW }).body || {}));
   check("no extras → no extraPhotoUrls key", !("extraPhotoUrls" in buildFacebookPostRequest({ contentId: CONTENT_ID, mode: "now", now: NOW }).body));
   check("empty extras → no extraPhotoUrls key", !("extraPhotoUrls" in buildFacebookPostRequest({ contentId: CONTENT_ID, mode: "now", extraPhotoUrls: [], now: NOW }).body));
+
+  // Explicit album (preferred): attaches albumPhotoUrls and supersedes extras.
+  const withAlbum = buildFacebookPostRequest({ contentId: CONTENT_ID, mode: "now", albumPhotoUrls: ["a", "b"], extraPhotoUrls: ["x"], now: NOW });
+  check("album → body.albumPhotoUrls in order", JSON.stringify(withAlbum.body?.albumPhotoUrls) === JSON.stringify(["a", "b"]));
+  check("album supersedes extras (no extraPhotoUrls)", !("extraPhotoUrls" in withAlbum.body));
+  check("album attaches to scheduled too", "albumPhotoUrls" in (buildFacebookPostRequest({ contentId: CONTENT_ID, mode: "smart", smartSlot: { postDate: "2026-06-10T13:00:00.000Z" }, albumPhotoUrls: ["a"], now: NOW }).body || {}));
+  check("no album + extras → extras path", JSON.stringify(buildFacebookPostRequest({ contentId: CONTENT_ID, mode: "now", extraPhotoUrls: ["x"], now: NOW }).body?.extraPhotoUrls) === JSON.stringify(["x"]));
+  check("empty album falls through to extras", JSON.stringify(buildFacebookPostRequest({ contentId: CONTENT_ID, mode: "now", albumPhotoUrls: [], extraPhotoUrls: ["x"], now: NOW }).body?.extraPhotoUrls) === JSON.stringify(["x"]));
+  check("no album, no extras → neither key", (() => { const b = buildFacebookPostRequest({ contentId: CONTENT_ID, mode: "now", now: NOW }).body; return !("albumPhotoUrls" in b) && !("extraPhotoUrls" in b); })());
 }
 
 // interpretFacebookPostResponse

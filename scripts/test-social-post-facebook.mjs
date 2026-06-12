@@ -277,5 +277,56 @@ const LIVE_URL = "https://app.milestonemediaphotography.com/p/the-home";
   check("no cap → extras after curated", JSON.stringify(album) === JSON.stringify([...EXPECTED_ALBUM, ...many]));
 }
 
+// 16. EXPLICIT ALBUM (albumPhotoUrls) — the agent's final ordered selection.
+{
+  // Subset + reorder of valid listing photos → posts exactly that.
+  const album = [pub("kitchen.jpg"), pub("drone.jpg"), pub("yard.jpg")];
+  const { bundle } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook", albumPhotoUrls: album } });
+  check("explicit album → posts exactly that order", JSON.stringify(bundle.calls.uploads.map((u) => u.url)) === JSON.stringify(album));
+}
+
+// 17. Explicit album supersedes curated (does NOT append the default set).
+{
+  const album = [pub("kitchen.jpg")];
+  const { bundle } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook", albumPhotoUrls: album } });
+  check("explicit album is the WHOLE album (no curated merge)", JSON.stringify(bundle.calls.uploads.map((u) => u.url)) === JSON.stringify([pub("kitchen.jpg")]));
+}
+
+// 18. Validation: foreign-host URL dropped; non-listing valid-host URL dropped.
+{
+  const album = ["https://evil.cdn.example/x.jpg", pub("kitchen.jpg"), pub("ghost-not-in-listing.jpg")];
+  const { bundle } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook", albumPhotoUrls: album } });
+  check("album: foreign-host dropped, non-listing dropped, valid kept", JSON.stringify(bundle.calls.uploads.map((u) => u.url)) === JSON.stringify([pub("kitchen.jpg")]));
+}
+
+// 19. A listing photo that lives on a FOREIGN host is still rejected (host AND listing).
+{
+  // PHOTO_LABELS id 8 (dining) is on evil.cdn — in the listing set but bad host.
+  const album = ["https://evil.cdn.example/yard2.jpg"];
+  const { res, bundle } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook", albumPhotoUrls: album } });
+  check("foreign-host listing photo → album empties → 409 no_photos", res.statusCode === 409 && res.body?.code === "no_photos");
+  check("foreign-host listing photo → no bundle call", bundle.calls.postCount === 0);
+}
+
+// 20. De-dupe + order preserved in the explicit album.
+{
+  const album = [pub("kitchen.jpg"), pub("kitchen.jpg"), pub("drone.jpg")];
+  const { bundle } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook", albumPhotoUrls: album } });
+  check("explicit album de-duped, order kept", JSON.stringify(bundle.calls.uploads.map((u) => u.url)) === JSON.stringify([pub("kitchen.jpg"), pub("drone.jpg")]));
+}
+
+// 21. Empty/all-invalid explicit album → no_photos (no text-only post).
+{
+  const { res, bundle } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook", albumPhotoUrls: ["https://evil.cdn.example/x.jpg"] } });
+  check("all-invalid album → 409 no_photos", res.statusCode === 409 && res.body?.code === "no_photos");
+  check("all-invalid album → no bundle call", bundle.calls.postCount === 0);
+}
+
+// 22. No album sent → falls back to the curated default (back-compat).
+{
+  const { bundle } = await callHandler({ body: { contentId: CONTENT_ID, platform: "facebook" } });
+  check("no album → curated fallback", JSON.stringify(bundle.calls.uploads.map((u) => u.url)) === JSON.stringify(EXPECTED_ALBUM));
+}
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);
