@@ -32,9 +32,10 @@ export const FACEBOOK_CAPTION_SYSTEM_PROMPT =
   "4. VOICE INJECTION — the agent's distinct voice appears at ONLY THREE slots: (a) the opening HOOK line, " +
   "(b) the reflective TAKE/lesson line, and (c) the CTA verb. The structural beats of each framework are FIXED; " +
   "only the language at those three slots varies with the agent's voice. Everywhere else, write clean neutral prose.\n" +
-  "5. AREA FRAMING: lead with neighborhood / market / community framing seeded from the listing's area. A hard " +
-  "listing sales pitch is the MINORITY angle — the home is woven in, not shouted. (The win-share framework is the " +
-  "exception: it is explicitly about a listing's status.)\n" +
+  "5. FOCUS: each framework declares its OWN focus in its template — some center the home itself, others center the " +
+  "neighborhood, market, or community. Follow the focus the framework's template specifies; do not force a particular " +
+  "angle here. (There is NO blanket rule that posts must lead with area framing — listing-focused content is a " +
+  "first-class option.)\n" +
   "6. MICROSITE-LINK CTA: end the caption with a short CTA lead-in that points the reader INTO the property's page " +
   "(e.g. 'See every photo and book a tour here:'). Write the lead-in copy ONLY. You MUST NOT write any URL, link, " +
   "domain, or placeholder — the system appends the exact link afterward. The CTA lead-in must be the FINAL line of " +

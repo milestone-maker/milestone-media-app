@@ -18,6 +18,8 @@ import problemSolution         from "./prompts/instagram/listing/problem-solutio
 import povDayInLife            from "./prompts/instagram/listing/pov-day-in-life.js";
 
 // Facebook Stage 2 — FB-native frameworks (long-form, conversation-first).
+import fbPropertyShowcase      from "./prompts/facebook/listing/property-showcase.js";
+import fbInvestmentAngle       from "./prompts/facebook/listing/investment-angle.js";
 import fbNeighborStory         from "./prompts/facebook/listing/neighbor-story.js";
 import fbCommunityQuestion     from "./prompts/facebook/listing/community-question.js";
 import fbMarketPlainTalk       from "./prompts/facebook/listing/market-plain-talk.js";
@@ -33,6 +35,8 @@ const PROMPTS = [
   problemSolution,
   povDayInLife,
   // facebook/listing
+  fbPropertyShowcase,
+  fbInvestmentAngle,
   fbNeighborStory,
   fbCommunityQuestion,
   fbMarketPlainTalk,

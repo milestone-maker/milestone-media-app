@@ -117,12 +117,14 @@ function cannedIg() {
 }
 
 let capturedMaxTokens = null;
+let capturedUserMessage = null;
 function makeGenerate(canned) {
   return async (opts) => {
     capturedMaxTokens = opts.maxTokens;
-    // Exercise the injected builders so a template error would surface here.
+    // Exercise the injected builders so a template error would surface here,
+    // and capture the built user message for guardrail assertions.
     opts.promptBuilders.buildSystemPrompt({});
-    opts.promptBuilders.buildUserMessage({});
+    capturedUserMessage = opts.promptBuilders.buildUserMessage({});
     return { parsed: canned, raw: JSON.stringify(canned) };
   };
 }
@@ -140,15 +142,19 @@ async function callHandler({ body, supabase, generate, resolveMicrositeUrl } = {
   return res;
 }
 
-const FB_FRAMEWORKS = ["neighbor_story", "community_question", "market_plain_talk", "win_share", "resource_drop"];
+// Listing-focused frameworks first, then community/market (matches UI order).
+const FB_FRAMEWORKS = [
+  "property_showcase", "investment_angle",
+  "neighbor_story", "community_question", "market_plain_talk", "win_share", "resource_drop",
+];
 const MICROSITE_URL = "https://app.milestonemediaphotography.com/p/2410-prosperity";
 
 console.log("\n── api/content-generate.js — Facebook Stage 2 content set ──\n");
 
-// 0. Registration: all 5 FB frameworks present under facebook/listing.
+// 0. Registration: all 7 FB frameworks present under facebook/listing.
 {
   const fb = listPrompts().filter((p) => p.platform === "facebook");
-  check("5 FB frameworks registered", fb.length === 5, `got ${fb.length}`);
+  check("7 FB frameworks registered", fb.length === 7, `got ${fb.length}`);
   for (const slug of FB_FRAMEWORKS) {
     check(`findPrompt facebook/listing/${slug}`, !!findPrompt("facebook", "listing", slug));
   }
@@ -180,6 +186,11 @@ for (const slug of FB_FRAMEWORKS) {
   check(`${slug} → URL after CTA lead-in`, res.body.caption.indexOf("book a tour here:") < res.body.caption.indexOf(MICROSITE_URL));
   check(`${slug} → URL before hashtags`, res.body.caption.indexOf(MICROSITE_URL) < res.body.caption.indexOf("#prosper"));
   check(`${slug} → resolver called with listing id`, resolver.calls.length === 1 && resolver.calls[0] === LISTING_ID);
+  // investment_angle must carry the financial guardrails in its built prompt.
+  if (slug === "investment_angle") {
+    check("investment_angle → no-fabricated-figures guardrail in prompt", capturedUserMessage.includes("Do NOT fabricate specific financial figures"));
+    check("investment_angle → no-guaranteed-returns guardrail in prompt", capturedUserMessage.includes("Do NOT guarantee, promise, or imply assured future returns"));
+  }
 }
 
 // 2. Microsite omitted when none published → no URL, microsite_url null, CTA stands.
@@ -237,6 +248,21 @@ for (const slug of FB_FRAMEWORKS) {
     resolveMicrositeUrl: makeResolver(null).fn,
   });
   check("unknown FB framework → 400", res.statusCode === 400, `got ${res.statusCode}`);
+}
+
+// 6. UI order: the Content view's facebook framework list is listing-first, in
+//    the exact required order. Parsed from source (the list lives in JSX state).
+{
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(resolve(REPO_ROOT, "src", "views", "Content", "index.jsx"), "utf8");
+  const fbBlock = src.split("facebook: [")[1]?.split("],")[0] || "";
+  const slugOrder = [...fbBlock.matchAll(/slug:\s*"([a-z_]+)"/g)].map((m) => m[1]);
+  const expected = [
+    "property_showcase", "investment_angle", "neighbor_story",
+    "community_question", "market_plain_talk", "win_share", "resource_drop",
+  ];
+  check("UI FB list has 7 frameworks", slugOrder.length === 7, `got ${slugOrder.length}`);
+  check("UI FB order is listing-first, exact", JSON.stringify(slugOrder) === JSON.stringify(expected), slugOrder.join(","));
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

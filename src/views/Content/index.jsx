@@ -40,9 +40,12 @@ const FRAMEWORKS_BY_PLATFORM = {
     { label: "POV: Day in the Life",         slug: "pov_day_in_life" },
   ],
   facebook: [
+    // Listing-focused first, then community/market frameworks.
+    { label: "Property Showcase",   slug: "property_showcase" },
+    { label: "Investment Angle",    slug: "investment_angle" },
     { label: "Neighbor Story",      slug: "neighbor_story" },
     { label: "Community Question",  slug: "community_question" },
-    { label: "Market Plain Talk",   slug: "market_plain_talk" },
+    { label: "Market Plain-Talk",   slug: "market_plain_talk" },
     { label: "Win Share",           slug: "win_share" },
     { label: "Resource Drop",       slug: "resource_drop" },
   ],
