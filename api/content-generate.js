@@ -149,6 +149,61 @@ function appendMicrositeLink(parsed, url) {
   return { ...parsed, caption: parsed.caption.replace(/\s+$/, "") + "\n" + url };
 }
 
+// How many recent Facebook hooks to feed the avoidance block. Tunable — larger
+// = stronger avoidance memory but a longer system prompt. 12 is a good balance.
+export const RECENT_HOOK_MEMORY = 12;
+
+/**
+ * Resolve an agent's recent Facebook opening hooks for the anti-repetition
+ * memory (Facebook Stage 2). Scoped by agent_id (the server-resolved caller —
+ * the same id persisted on generated_content.agent_id) AND platform='facebook'.
+ * Returns the most recent DISTINCT non-empty hook_lines, newest first, capped at
+ * RECENT_HOOK_MEMORY. New agent / no FB history → []. Never run for Instagram.
+ *
+ * History accumulates as the agent generates: each FB generation persists its
+ * hook_line, so the pool the next generation must avoid grows over time.
+ */
+async function defaultResolveRecentHooks(supabase, agentId) {
+  const { data, error } = await supabase
+    .from("generated_content")
+    .select("hook_line")
+    .eq("agent_id", agentId)
+    .eq("platform", "facebook")
+    .order("created_at", { ascending: false })
+    .limit(RECENT_HOOK_MEMORY);
+  if (error) {
+    console.error("[content-generate] recent-hooks lookup error (continuing without avoidance):", error);
+    return [];
+  }
+  const seen = new Set();
+  const hooks = [];
+  for (const row of data || []) {
+    const h = (row?.hook_line || "").trim();
+    if (!h || seen.has(h)) continue;
+    seen.add(h);
+    hooks.push(h);
+  }
+  return hooks;
+}
+
+/**
+ * Append a clearly delimited "recently used openers — do not repeat" block to
+ * the FB system prompt, AFTER the existing HOOK ORIGINALITY / BANNED OPENERS
+ * rules. No-ops (returns the prompt unchanged) when there are no recent hooks.
+ */
+function appendHookAvoidanceBlock(systemPrompt, recentHooks) {
+  if (!Array.isArray(recentHooks) || recentHooks.length === 0) return systemPrompt;
+  const list = recentHooks.map((h, i) => `${i + 1}. ${h}`).join("\n");
+  return (
+    systemPrompt +
+    "\n\nAGENT'S RECENTLY USED OPENERS — DO NOT REPEAT:\n" +
+    "The lines below are hooks this agent has ALREADY used on recent Facebook posts. Your new hook MUST NOT echo, " +
+    "paraphrase, or reuse the construction, wording, or angle of ANY of them — it must open in a clearly different " +
+    "way from every one of them:\n" +
+    list
+  );
+}
+
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin":  "*",
@@ -224,6 +279,7 @@ export default async function handler(req, res, depsOverride) {
   const model     = depsOverride?.model     || DEFAULT_MODEL;
   const maxTokens = depsOverride?.maxTokens || DEFAULT_MAX_TOKENS;
   const resolveMicrositeUrl = depsOverride?.resolveMicrositeUrl || defaultResolveMicrositeUrl;
+  const resolveRecentHooks  = depsOverride?.resolveRecentHooks  || defaultResolveRecentHooks;
 
   try {
     // ── 1. Auth ──
@@ -361,6 +417,16 @@ export default async function handler(req, res, depsOverride) {
     } catch (buildErr) {
       console.error("[content-generate] prompt build error:", buildErr);
       return res.status(400).json({ error: "prompt build failed", details: buildErr.message });
+    }
+
+    // ── 6b. (Facebook ONLY) Anti-repetition memory: load the agent's recent FB
+    //        opening hooks and append an avoidance block to the FB system prompt
+    //        AFTER its HOOK ORIGINALITY / BANNED OPENERS rules, so the new hook
+    //        diverges from what this agent has already used. Never for Instagram;
+    //        no-ops when the agent has no FB history yet.
+    if (platform === "facebook") {
+      const recentHooks = await resolveRecentHooks(supabase, authUser.id);
+      built.systemPrompt = appendHookAvoidanceBlock(built.systemPrompt, recentHooks);
     }
 
     // ── 7. Call the engine (caller injects already-built strings;

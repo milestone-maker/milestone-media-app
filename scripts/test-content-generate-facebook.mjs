@@ -28,7 +28,7 @@ const REGISTRY_PATH = resolve(REPO_ROOT, "api", "_content", "registry.js");
 process.env.SUPABASE_URL              = process.env.SUPABASE_URL              || "https://example.invalid";
 process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "placeholder";
 
-const { default: handler } = await import(pathToFileURL(HANDLER_PATH).href);
+const { default: handler, RECENT_HOOK_MEMORY } = await import(pathToFileURL(HANDLER_PATH).href);
 const { findPrompt, listPrompts } = await import(pathToFileURL(REGISTRY_PATH).href);
 
 let passed = 0, failed = 0;
@@ -66,22 +66,37 @@ const LISTING = {
 };
 
 // Supabase mock — captures generated_content inserts so we can assert persistence.
-function makeSupabaseMock({ agent = { role: "agent", subscription_status: "active" } } = {}) {
+function makeSupabaseMock({ agent = { role: "agent", subscription_status: "active" }, recentRows = [] } = {}) {
   const inserted = [];
   const single = (data) => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data, error: null }) }) }) });
-  return {
+  const obj = {
     inserted,
+    recentQuery: null, // records the resolver's filters/limit for assertions
     auth: { getUser: async () => ({ data: { user: { id: AGENT_ID } }, error: null }) },
     from: (table) => {
       if (table === "agents")               return single(agent);
       if (table === "agent_voice_profiles") return single(VOICE_PROFILE);
       if (table === "listings")             return single(LISTING);
       if (table === "generated_content") {
-        return { insert: (row) => { inserted.push(row); return { select: () => ({ maybeSingle: async () => ({ data: { id: "gc_1" }, error: null }) }) }; } };
+        return {
+          // Persistence path (after generation).
+          insert: (row) => { inserted.push(row); return { select: () => ({ maybeSingle: async () => ({ data: { id: "gc_1" }, error: null }) }) }; },
+          // Recent-hooks resolver path: .select('hook_line').eq(agent_id).eq(platform).order().limit()
+          select: () => ({
+            eq: (c1, v1) => ({
+              eq: (c2, v2) => ({
+                order: () => ({
+                  limit: async (n) => { obj.recentQuery = { [c1]: v1, [c2]: v2, limit: n }; return { data: recentRows, error: null }; },
+                }),
+              }),
+            }),
+          }),
+        };
       }
       throw new Error(`Unexpected table: ${table}`);
     },
   };
+  return obj;
 }
 
 // Canned FB model output for a framework. Caption: body → compliance line →
@@ -118,15 +133,22 @@ function cannedIg() {
 
 let capturedMaxTokens = null;
 let capturedUserMessage = null;
+let capturedSystemPrompt = null;
 function makeGenerate(canned) {
   return async (opts) => {
     capturedMaxTokens = opts.maxTokens;
     // Exercise the injected builders so a template error would surface here,
-    // and capture the built user message for guardrail assertions.
-    opts.promptBuilders.buildSystemPrompt({});
+    // and capture the built prompts for guardrail / avoidance assertions.
+    capturedSystemPrompt = opts.promptBuilders.buildSystemPrompt({});
     capturedUserMessage = opts.promptBuilders.buildUserMessage({});
     return { parsed: canned, raw: JSON.stringify(canned) };
   };
+}
+
+// Recent-hooks resolver spy.
+function makeHooksSpy(hooks) {
+  const calls = [];
+  return { calls, fn: async (_sb, agentId) => { calls.push(agentId); return hooks; } };
 }
 
 // Microsite resolver spy.
@@ -135,12 +157,14 @@ function makeResolver(url) {
   return { calls, fn: async (_sb, listingId) => { calls.push(listingId); return url; } };
 }
 
-async function callHandler({ body, supabase, generate, resolveMicrositeUrl } = {}) {
+async function callHandler({ body, supabase, generate, resolveMicrositeUrl, resolveRecentHooks } = {}) {
   const req = { method: "POST", headers: { authorization: `Bearer ${VALID_TOKEN}` }, body };
   const res = makeRes();
-  await handler(req, res, { supabase: supabase || makeSupabaseMock(), generate, resolveMicrositeUrl });
+  await handler(req, res, { supabase: supabase || makeSupabaseMock(), generate, resolveMicrositeUrl, resolveRecentHooks });
   return res;
 }
+
+const AVOIDANCE_HEADER = "AGENT'S RECENTLY USED OPENERS — DO NOT REPEAT";
 
 // Listing-focused frameworks first, then community/market (matches UI order).
 const FB_FRAMEWORKS = [
@@ -295,6 +319,80 @@ for (const slug of FB_FRAMEWORKS) {
     // system prompt is the same binding one for every framework
     check(`${slug} uses the FB system prompt`, built.systemPrompt === sp);
   }
+}
+
+// 8. Anti-repetition memory (Facebook only).
+const fbBody = (slug) => ({ voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: slug, platform: "facebook", content_type: "listing" });
+
+// 8a. Real default resolver: scope (agent_id + platform=facebook), limit, distinct,
+//     non-empty, recency order, and the avoidance block injected after the rules.
+{
+  const rows = [
+    { hook_line: "First fresh hook." },
+    { hook_line: "Second fresh hook." },
+    { hook_line: "First fresh hook." }, // duplicate → collapsed
+    { hook_line: "" },                  // empty → dropped
+    { hook_line: null },                // null → dropped
+    { hook_line: "Third fresh hook." },
+  ];
+  const supa = makeSupabaseMock({ recentRows: rows });
+  const res = await callHandler({
+    body: fbBody("neighbor_story"), supabase: supa,
+    generate: makeGenerate(cannedFb("neighbor_story")),
+    resolveMicrositeUrl: makeResolver(null).fn,
+    // no resolveRecentHooks override → exercises the REAL default resolver
+  });
+  const sp = capturedSystemPrompt;
+  check("8a → 200", res.statusCode === 200, `got ${res.statusCode}`);
+  check("8a resolver scoped by agent_id", supa.recentQuery?.agent_id === AGENT_ID);
+  check("8a resolver filtered platform=facebook", supa.recentQuery?.platform === "facebook");
+  check("8a resolver limit === RECENT_HOOK_MEMORY", supa.recentQuery?.limit === RECENT_HOOK_MEMORY, `got ${supa.recentQuery?.limit}`);
+  check("8a avoidance block present", sp.includes(AVOIDANCE_HEADER));
+  // Scope the "only 3 listed" check to the avoidance block (the HARD RULES are
+  // also numbered, so "4. " appears earlier in the prompt).
+  const avoidancePart = sp.slice(sp.indexOf(AVOIDANCE_HEADER));
+  check("8a lists distinct non-empty hooks", avoidancePart.includes("1. First fresh hook.") && avoidancePart.includes("2. Second fresh hook.") && avoidancePart.includes("3. Third fresh hook."));
+  check("8a dedupes + drops empty/null (only 3 listed)", !avoidancePart.includes("4. "));
+  check("8a recency order preserved", sp.indexOf("1. First fresh hook.") < sp.indexOf("2. Second fresh hook."));
+  check("8a avoidance block AFTER the originality/banned rules", sp.indexOf("HOOK ORIGINALITY") < sp.indexOf(AVOIDANCE_HEADER) && sp.indexOf("BANNED OPENERS") < sp.indexOf(AVOIDANCE_HEADER));
+}
+
+// 8b. No FB history → no avoidance block.
+{
+  const supa = makeSupabaseMock({ recentRows: [] });
+  await callHandler({
+    body: fbBody("win_share"), supabase: supa,
+    generate: makeGenerate(cannedFb("win_share")),
+    resolveMicrositeUrl: makeResolver(null).fn,
+  });
+  check("8b no history → no avoidance block", !capturedSystemPrompt.includes(AVOIDANCE_HEADER));
+}
+
+// 8c. Spy resolver: called once for FB with the agent id; its hooks land in the block.
+{
+  const spy = makeHooksSpy(["Old opener A.", "Old opener B."]);
+  await callHandler({
+    body: fbBody("neighbor_story"),
+    generate: makeGenerate(cannedFb("neighbor_story")),
+    resolveMicrositeUrl: makeResolver(null).fn,
+    resolveRecentHooks: spy.fn,
+  });
+  check("8c resolver called once for FB with agent id", spy.calls.length === 1 && spy.calls[0] === AGENT_ID);
+  check("8c avoidance block lists the spy hooks", capturedSystemPrompt.includes("Old opener A.") && capturedSystemPrompt.includes("Old opener B."));
+}
+
+// 8d. Instagram → resolver NOT called, no avoidance block (never for IG).
+{
+  const spy = makeHooksSpy(["Should not appear."]);
+  await callHandler({
+    body: { voice_profile_id: VOICE_PROFILE_ID, listing_id: LISTING_ID, framework_name: "story_driven_listing", platform: "instagram", content_type: "listing" },
+    generate: makeGenerate(cannedIg()),
+    resolveMicrositeUrl: makeResolver(null).fn,
+    resolveRecentHooks: spy.fn,
+  });
+  check("8d IG → resolver NOT called", spy.calls.length === 0);
+  check("8d IG → no avoidance block in system prompt", !capturedSystemPrompt.includes(AVOIDANCE_HEADER));
+  check("8d IG → no recent-hooks suffix leaked", !capturedSystemPrompt.includes("Should not appear."));
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
