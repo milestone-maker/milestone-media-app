@@ -438,6 +438,7 @@ function PublicMicrosite() {
       listingId={microsite.property_data?.listing_id || microsite.listing_id}
       micrositeSlug={microsite.slug}
       brokerageName={brokerageName}
+      sold={microsite.sold_at ? { soldAt: microsite.sold_at, soldPrice: microsite.sold_price } : null}
     />
   );
 }

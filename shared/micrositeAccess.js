@@ -36,25 +36,35 @@
 export const MICROSITE_TIERS = new Set(["pro", "elite"]);
 
 // ── CANONICAL "LIVE microsite" definition — single source of truth ──────
-// A microsite is LIVE when it is published AND has not been retired.
-// Retirement ("mark sold / take down") sets published = false AND
-// retired_at, so either condition failing makes a microsite non-live.
-// This is the JS mirror of the SQL predicate MICROSITE_LIVE_SQL below and
-// of the column comment in migration 038. The live-cap (step 2) counts
-// LIVE microsites per agent — reuse isMicrositeLive() / MICROSITE_LIVE_SQL
-// everywhere so the three layers can never disagree on "what counts."
+// A microsite is STRICTLY LIVE when it is published, has not been retired,
+// AND has not been marked sold. Retirement ("take down") sets published =
+// false AND retired_at; marking SOLD (sold-pages step 1, migration 042) sets
+// sold_at while KEEPING published = true (a sold page stays publicly served
+// and indexable — see api/render-microsite.js). For the purpose of the
+// live-cap COUNT, a sold listing is no longer live and FREES the agent's slot,
+// exactly like a retired one. Any of: not published, retired, or sold → not
+// live. This is the JS mirror of the SQL predicate MICROSITE_LIVE_SQL below
+// and of the column comments in migrations 038/042. Reuse isMicrositeLive() /
+// MICROSITE_LIVE_SQL everywhere so the layers can never disagree on "what counts."
 //
-// @param {{ published?: boolean, retired_at?: string|null }} m  a microsites row
+// NOTE: the migration 039 RLS cap function still mirrors the pre-042 predicate
+// (it does not yet exclude sold_at). That is latent until the "mark as sold"
+// action (sold-pages step 2) can actually set sold_at; a follow-up migration
+// should add `sold_at is null` to the RLS predicate to restore three-layer parity.
+//
+// @param {{ published?: boolean, retired_at?: string|null, sold_at?: string|null }} m  a microsites row
 // @returns {boolean}
 export function isMicrositeLive(m) {
   if (!m) return false;
-  return m.published === true && (m.retired_at === null || m.retired_at === undefined);
+  const notRetired = m.retired_at === null || m.retired_at === undefined;
+  const notSold = m.sold_at === null || m.sold_at === undefined;
+  return m.published === true && notRetired && notSold;
 }
 
 // SQL predicate form of isMicrositeLive(), for endpoint count queries and
 // any RLS/SQL that must agree with the JS rule. Embed against the microsites
 // table (e.g. `where agent_id = $1 and ${MICROSITE_LIVE_SQL}`).
-export const MICROSITE_LIVE_SQL = "published = true and retired_at is null";
+export const MICROSITE_LIVE_SQL = "published = true and retired_at is null and sold_at is null";
 
 // ── PER-TIER LIVE-MICROSITE CAP — single source of truth ────────────────
 // Max number of CONCURRENT live microsites a tier may have. Keyed by the

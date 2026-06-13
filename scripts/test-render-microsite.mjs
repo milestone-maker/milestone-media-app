@@ -359,7 +359,7 @@ function fakeSupabase(outcome) {
   const res = makeRes();
   const poison = {};
   Object.defineProperty(poison, "address", { get() { throw new Error("boom getter"); }, enumerable: true });
-  await handler({ query: { slug: "p" } }, res, { supabase: fakeSupabase({ data: { property_data: poison } }) });
+  await handler({ query: { slug: "p" } }, res, { supabase: fakeSupabase({ data: { published: true, property_data: poison } }) });
   check("handler(builder-throw): HTTP 200", res.statusCode === 200, `got ${res.statusCode}`);
   check("handler(builder-throw): plain shell, no canonical", !/<link rel="canonical"/.test(res.body || ""));
   check("handler(builder-throw): no noindex", !/name="robots" content="noindex"/.test(res.body || ""));
@@ -381,15 +381,84 @@ function fakeSupabase(outcome) {
   check("handler(empty-slug): noindex present", /name="robots" content="noindex"/.test(res.body || ""));
 }
 
-// (6) Happy path through the handler → 200 with injected per-listing head.
+// (6) Happy path / LIVE through the handler → 200 with injected per-listing head.
 {
   const res = makeRes();
-  await handler({ query: { slug: "2410-luxury" } }, res, { supabase: fakeSupabase({ data: { property_data: FULL } }) });
-  check("handler(happy): HTTP 200", res.statusCode === 200, `got ${res.statusCode}`);
-  check("handler(happy): per-listing canonical injected", /<link rel="canonical" href="[^"]+\/p\/2410-luxury"/.test(res.body || ""));
-  check("handler(happy): ld+json injected", /application\/ld\+json/.test(res.body || ""));
-  check("handler(happy): no noindex on a real listing", !/name="robots" content="noindex"/.test(res.body || ""));
-  check("handler(happy): cache-control set", /s-maxage=600/.test(res.headers["cache-control"] || ""));
+  await handler({ query: { slug: "2410-luxury" } }, res, { supabase: fakeSupabase({ data: { published: true, retired_at: null, sold_at: null, property_data: FULL } }) });
+  check("handler(live): HTTP 200", res.statusCode === 200, `got ${res.statusCode}`);
+  check("handler(live): per-listing canonical injected", /<link rel="canonical" href="[^"]+\/p\/2410-luxury"/.test(res.body || ""));
+  check("handler(live): ld+json injected", /application\/ld\+json/.test(res.body || ""));
+  check("handler(live): no noindex on a real listing", !/name="robots" content="noindex"/.test(res.body || ""));
+  check("handler(live): cache-control set", /s-maxage=600/.test(res.headers["cache-control"] || ""));
+  check("handler(live): NO sold badge", !/sold-badge/.test(res.body || ""));
+  check("handler(live): offer is NOT SoldOut", !/SoldOut/.test(res.body || ""));
+}
+
+// ── SOLD-pages state model (precedence: withdrawn > sold > live > draft) ─────
+const LIVE_ROW = { published: true, retired_at: null, sold_at: null, property_data: FULL };
+
+// Byte-identical LIVE regression: handler(live) output must equal renderFound(FULL) directly.
+{
+  const res = makeRes();
+  await handler({ query: { slug: "2410-luxury" } }, res, { supabase: fakeSupabase({ data: LIVE_ROW }) });
+  const direct = renderFound(await (await import("node:fs/promises")).readFile(new URL("../dist/index.html", import.meta.url), "utf8"), FULL, "2410-luxury");
+  check("state(live): byte-identical to renderFound(no sold)", res.body === direct, "live output drifted");
+}
+
+// SOLD (no sold_price): badge + sold date + SoldOut, indexable 200, price omitted.
+{
+  const res = makeRes();
+  const SOLD_ROW = { published: true, retired_at: null, sold_at: "2026-06-12T10:00:00.000Z", sold_price: null, property_data: FULL };
+  await handler({ query: { slug: "2410-luxury" } }, res, { supabase: fakeSupabase({ data: SOLD_ROW }) });
+  const body = res.body || "";
+  check("state(sold): HTTP 200", res.statusCode === 200, `got ${res.statusCode}`);
+  check("state(sold): NOT noindex (indexable)", !/name="robots" content="noindex"/.test(body));
+  check("state(sold): SOLD badge in body", /class="sold-badge"[^>]*>[\s\S]*SOLD/.test(body));
+  check("state(sold): sold date present in body", body.includes("Sold 2026-06-12"));
+  check("state(sold): SOLD in <title>", /<title>\s*SOLD —/.test(body));
+  check("state(sold): SOLD + date in meta description", /<meta name="description" content="SOLD \(2026-06-12\)/.test(body));
+  check("state(sold): JSON-LD offer availability SoldOut", body.includes("https://schema.org/SoldOut"));
+  check("state(sold): NO price in sold offer (price undisclosed)", (() => {
+    const m = body.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+    if (!m) return false;
+    try { const o = JSON.parse(m[1]); return o.offers && o.offers.availability === "https://schema.org/SoldOut" && o.offers.price === undefined; } catch { return false; }
+  })());
+  check("state(sold): list price NOT shown as sale price (no $1,500,450 in offer)", (() => {
+    const m = body.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+    try { const o = JSON.parse(m[1]); return !o.offers || o.offers.price !== 1500450; } catch { return false; }
+  })());
+}
+
+// SOLD (with sold_price): price appears in the SoldOut offer + body.
+{
+  const res = makeRes();
+  const SOLD_PRICED = { published: true, retired_at: null, sold_at: "2026-06-12T10:00:00.000Z", sold_price: "1,425,000", property_data: FULL };
+  await handler({ query: { slug: "2410-luxury" } }, res, { supabase: fakeSupabase({ data: SOLD_PRICED }) });
+  const body = res.body || "";
+  const m = body.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  let offer = null; try { offer = JSON.parse(m[1]).offers; } catch {}
+  check("state(sold+price): offer.price = parsed sold price", offer?.price === 1425000, JSON.stringify(offer));
+  check("state(sold+price): offer SoldOut", offer?.availability === "https://schema.org/SoldOut");
+  check("state(sold+price): sale price shown in body", body.includes("Sold for $1,425,000"));
+}
+
+// WITHDRAWN (retired_at set, published false) → 404 + noindex (precedence over sold).
+{
+  const res = makeRes();
+  const WITHDRAWN = { published: false, retired_at: "2026-06-01T00:00:00.000Z", sold_at: "2026-06-12T00:00:00.000Z", property_data: FULL };
+  await handler({ query: { slug: "2410-luxury" } }, res, { supabase: fakeSupabase({ data: WITHDRAWN }) });
+  check("state(withdrawn): HTTP 404", res.statusCode === 404, `got ${res.statusCode}`);
+  check("state(withdrawn): noindex present", /name="robots" content="noindex"/.test(res.body || ""));
+  check("state(withdrawn): no sold badge (withdrawn beats sold)", !/sold-badge/.test(res.body || ""));
+}
+
+// DRAFT (published false, not sold/retired) → 404 + noindex.
+{
+  const res = makeRes();
+  const DRAFT = { published: false, retired_at: null, sold_at: null, property_data: FULL };
+  await handler({ query: { slug: "2410-luxury" } }, res, { supabase: fakeSupabase({ data: DRAFT }) });
+  check("state(draft): HTTP 404", res.statusCode === 404, `got ${res.statusCode}`);
+  check("state(draft): noindex present", /name="robots" content="noindex"/.test(res.body || ""));
 }
 
 // ── Report ───────────────────────────────────────────────────────────────────

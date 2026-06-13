@@ -192,16 +192,18 @@ export default async function handler(req, res, depsOverride) {
     //   re-publish/edit of a microsite the agent already owns for this
     //   booking (existingMicrosite truthy) is fully exempt — never counted,
     //   never blocked. Count the agent's LIVE microsites (the indexed
-    //   agent_id count; published = true AND retired_at IS NULL — i.e.
-    //   MICROSITE_LIVE_SQL from shared/micrositeAccess.js) and apply the
-    //   pure cap rule. At/over cap → 403 with an actionable message.
+    //   agent_id count; published = true AND retired_at IS NULL AND sold_at
+    //   IS NULL — i.e. MICROSITE_LIVE_SQL from shared/micrositeAccess.js) and
+    //   apply the pure cap rule. A sold listing (like a retired one) is not
+    //   live and frees the slot. At/over cap → 403 with an actionable message.
     if (!existingMicrosite) {
       const { count: liveCount, error: countErr } = await supabase
         .from("microsites")
         .select("id", { count: "exact", head: true })
         .eq("agent_id", user.id)
         .eq("published", true)
-        .is("retired_at", null);
+        .is("retired_at", null)
+        .is("sold_at", null);
       if (countErr) {
         console.error("live-microsite count error:", countErr);
         return res.status(500).json({ error: "failed to check microsite cap" });

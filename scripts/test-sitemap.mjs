@@ -69,6 +69,11 @@ const overridden = buildSitemapXml([{ slug: "s", created_at: "2026-01-01T00:00:0
 check("sitemap: honors explicit base arg", overridden.includes("<loc>https://example.test/p/s</loc>"));
 check("sitemap: prefers updated_at over created_at when present", overridden.includes("<lastmod>2026-09-09</lastmod>"), overridden);
 
+// ── Sitemap: SOLD rows stay included; sold_at wins as lastmod ────────────────
+const soldXml = buildSitemapXml([{ slug: "sold-home", created_at: "2026-01-01T00:00:00Z", sold_at: "2026-06-12T00:00:00Z" }]);
+check("sitemap: sold row is INCLUDED (still published)", (soldXml.match(/<url>/g) || []).length === 1);
+check("sitemap: sold_at wins as lastmod over created_at", soldXml.includes("<lastmod>2026-06-12</lastmod>") && !soldXml.includes("2026-01-01"), soldXml);
+
 // ── Robots.txt ───────────────────────────────────────────────────────────────
 const robots = buildRobotsTxt();
 check("robots: User-agent *", robots.includes("User-agent: *"));

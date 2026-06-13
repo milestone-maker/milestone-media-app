@@ -133,8 +133,13 @@ function makeFakeClient() {
           maybeSingle: async () => ({ data: existing, error: null }),
           limit: () => ({ maybeSingle: async () => ({ data: existing, error: null }) }),
           // step 5b live-microsite cap count: select("id",{count,head})→eq(agent)
-          // →eq(published)→is(retired_at,null), awaited as { count, error }.
-          is: async () => ({ count: mockState.liveCount ?? 0, error: null }),
+          // →eq(published)→is(retired_at,null)→is(sold_at,null), awaited as
+          // { count, error }. Chainable + thenable so any number of .is() works.
+          is: () => {
+            const countResult = { count: mockState.liveCount ?? 0, error: null };
+            const countChain = { is: () => countChain, then: (resolve) => resolve(countResult) };
+            return countChain;
+          },
         };
         return {
           select: () => ({ eq: () => ({ eq: () => terminal }) }),
