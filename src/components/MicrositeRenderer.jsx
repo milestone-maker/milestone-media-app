@@ -320,7 +320,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
   //   logo image → agency name text → Milestone Media fallback
   const brandMark = (accentColor = "#C9A84C", subColor = "rgba(255,255,255,0.35)") => {
     if (agentBranding?.agency_logo_url) {
-      return <img src={agentBranding.agency_logo_url} alt="Agency Logo" style={{ height: 34, maxWidth: 160, objectFit: "contain" }} />;
+      return <img src={agentBranding.agency_logo_url} alt={`${agentBranding.agency_name || "Agency"} logo`} decoding="async" style={{ height: 34, maxWidth: 160, objectFit: "contain" }} />;
     }
     if (agentBranding?.agency_name) {
       return (
@@ -343,7 +343,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
     const name = agentBranding?.full_name || agentName || "Agent";
     const initials = name.split(" ").map(n => n[0]).filter(Boolean).join("").slice(0, 2).toUpperCase() || "A";
     if (agentBranding?.profile_photo_url) {
-      return <img src={agentBranding.profile_photo_url} alt={name} style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />;
+      return <img src={agentBranding.profile_photo_url} alt={name} loading="lazy" decoding="async" style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />;
     }
     return (
       <div style={{
@@ -518,7 +518,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
               )}
               {activeTab === "floorplan" && finalFloorplan && (
                 <div style={{ display: "flex", justifyContent: "center" }}>
-                  <img src={finalFloorplan} alt="Floorplan" style={{ maxWidth: 900, width: "100%", borderRadius: 8 }} />
+                  <img src={finalFloorplan} alt="Floorplan" loading="lazy" decoding="async" style={{ maxWidth: 900, width: "100%", aspectRatio: "3 / 2", objectFit: "contain", borderRadius: 8 }} />
                 </div>
               )}
             </div>
@@ -541,7 +541,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
                   {[...presGallery, ...presGallery].map((photo, idx) => (
                     <div key={idx} onClick={() => { setLightboxIndex(idx % presGallery.length); setLightboxOpen(true); }}
                       style={{ height: 380, flexShrink: 0, overflow: "hidden" }}>
-                      <img src={photo} alt="" style={{ height: "100%", width: "auto", objectFit: "cover", display: "block", pointerEvents: "none" }} />
+                      <img src={photo} alt={`${data.address || "Property"} photo`} loading="lazy" decoding="async" style={{ height: "100%", width: "auto", objectFit: "cover", display: "block", pointerEvents: "none" }} />
                     </div>
                   ))}
                 </div>
@@ -551,7 +551,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
                   {[...presGallery, ...presGallery].map((photo, idx) => (
                     <div key={idx} onClick={() => { setLightboxIndex(idx % presGallery.length); setLightboxOpen(true); }}
                       style={{ height: 280, flexShrink: 0, overflow: "hidden" }}>
-                      <img src={photo} alt="" style={{ height: "100%", width: "auto", objectFit: "cover", display: "block", pointerEvents: "none" }} />
+                      <img src={photo} alt={`${data.address || "Property"} photo`} loading="lazy" decoding="async" style={{ height: "100%", width: "auto", objectFit: "cover", display: "block", pointerEvents: "none" }} />
                     </div>
                   ))}
                 </div>
@@ -648,7 +648,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
           <div onClick={() => setLightboxOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.96)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <button onClick={() => setLightboxOpen(false)} style={{ position: "absolute", top: 20, right: 30, background: "none", border: "none", color: "#fff", fontSize: 36, cursor: "pointer" }}>✕</button>
             <button onClick={(e) => { e.stopPropagation(); setLightboxIndex((p) => (p - 1 + presGallery.length) % presGallery.length); }} style={{ position: "absolute", left: 30, background: "none", border: "none", color: "#fff", fontSize: 48, cursor: "pointer" }}>‹</button>
-            <img src={presGallery[lightboxIndex]} alt="" style={{ maxWidth: "90%", maxHeight: "90%", objectFit: "contain" }} onClick={(e) => e.stopPropagation()} />
+            <img src={presGallery[lightboxIndex]} alt={`${data.address || "Property"} photo`} decoding="async" style={{ maxWidth: "90%", maxHeight: "90%", objectFit: "contain" }} onClick={(e) => e.stopPropagation()} />
             <button onClick={(e) => { e.stopPropagation(); setLightboxIndex((p) => (p + 1) % presGallery.length); }} style={{ position: "absolute", right: 30, background: "none", border: "none", color: "#fff", fontSize: 48, cursor: "pointer" }}>›</button>
             <div style={{ position: "absolute", bottom: 30, color: "#fff", fontFamily: "'Jost', sans-serif", fontSize: 14 }}>{lightboxIndex + 1} / {presGallery.length}</div>
           </div>
@@ -707,7 +707,8 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
       {layout === "split" ? (
         <div style={{ display: "grid", gridTemplateColumns: "55fr 45fr", minHeight: "85vh", marginTop: 60 }}>
           <div style={{ position: "relative", overflow: "hidden" }}>
-            <img src={data.hero_img || galleryPhotos[0] || ""} alt="Property"
+            <img src={data.hero_img || galleryPhotos[0] || ""} alt={`${data.address || "Property"} — exterior`}
+              loading="eager" fetchpriority="high" decoding="async"
               style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
           </div>
           <div style={{
@@ -743,7 +744,8 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
         </div>
       ) : layout === "minimal" ? (
         <div style={{ position: "relative", height: "80vh", marginTop: 60, overflow: "hidden" }}>
-          <img src={data.hero_img || galleryPhotos[0] || ""} alt="Property"
+          <img src={data.hero_img || galleryPhotos[0] || ""} alt={`${data.address || "Property"} — exterior`}
+            loading="eager" fetchpriority="high" decoding="async"
             style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           <div style={{ position: "absolute", inset: 0, background: isDarkTheme ? "rgba(0,0,0,0.45)" : "rgba(255,255,255,0.35)" }} />
           <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", gap: 16, padding: "0 40px" }}>
@@ -767,7 +769,8 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
       ) : layout === "editorial" ? (
         <div style={{ position: "relative", height: "90vh", marginTop: 60, overflow: "hidden" }}>
           <style>{`@keyframes heroZoom { from { transform: scale(1); } to { transform: scale(1.06); } }`}</style>
-          <img src={data.hero_img || galleryPhotos[0] || ""} alt="Property"
+          <img src={data.hero_img || galleryPhotos[0] || ""} alt={`${data.address || "Property"} — exterior`}
+            loading="eager" fetchpriority="high" decoding="async"
             style={{ width: "100%", height: "100%", objectFit: "cover", animation: "heroZoom 12s ease-out forwards" }} />
           <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 55%)" }} />
           <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, padding: "40px 48px", display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
@@ -799,7 +802,8 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
         </div>
       ) : (
         <div style={{ position: "relative", height: "90vh", marginTop: 60, background: "#000", overflow: "hidden" }}>
-          <img src={data.hero_img || galleryPhotos[0] || ""} alt="Property"
+          <img src={data.hero_img || galleryPhotos[0] || ""} alt={`${data.address || "Property"} — exterior`}
+            loading="eager" fetchpriority="high" decoding="async"
             style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.85 }} />
           <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 55%)" }} />
           <div style={{ position: "absolute", bottom: 48, left: 48 }}>
@@ -863,7 +867,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
           {galleryPhotos.map((photo, idx) => (
             <div key={idx} onClick={() => { setLightboxIndex(idx); setLightboxOpen(true); }}
               style={{ height: 360, flexShrink: 0, overflow: "hidden", borderRadius: 4, cursor: "pointer" }}>
-              <img src={photo} alt="" style={{ height: "100%", width: "auto", objectFit: "cover", display: "block" }} />
+              <img src={photo} alt={`${data.address || "Property"} photo`} loading="lazy" decoding="async" style={{ height: "100%", width: "auto", objectFit: "cover", display: "block" }} />
             </div>
           ))}
         </div>
@@ -891,7 +895,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
           <button onClick={(e) => { e.stopPropagation(); setLightboxIndex((prev) => (prev - 1 + galleryPhotos.length) % galleryPhotos.length); }} style={{
             position: "absolute", left: 30, background: "none", border: "none", color: "#fff", fontSize: 36, cursor: "pointer",
           }}>‹</button>
-          <img src={galleryPhotos[lightboxIndex]} alt="Lightbox"
+          <img src={galleryPhotos[lightboxIndex]} alt={`${data.address || "Property"} photo`} decoding="async"
             style={{ maxWidth: "90%", maxHeight: "90%", objectFit: "contain" }}
             onClick={(e) => e.stopPropagation()} />
           <button onClick={(e) => { e.stopPropagation(); setLightboxIndex((prev) => (prev + 1) % galleryPhotos.length); }} style={{
@@ -915,8 +919,8 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
               <div style={{ width: 60, height: 1, background: pubT.accent }} />
             </div>
             <div style={{ display: "flex", justifyContent: "center" }}>
-              <img src={finalFloorplan} alt="Floorplan"
-                style={{ maxWidth: 900, width: "100%", borderRadius: 8, boxShadow: "0 10px 30px rgba(0,0,0,0.1)" }} />
+              <img src={finalFloorplan} alt="Floorplan" loading="lazy" decoding="async"
+                style={{ maxWidth: 900, width: "100%", aspectRatio: "3 / 2", objectFit: "contain", borderRadius: 8, boxShadow: "0 10px 30px rgba(0,0,0,0.1)" }} />
             </div>
           </div>
         </div>
