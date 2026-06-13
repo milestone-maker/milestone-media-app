@@ -1,0 +1,187 @@
+// Google Search Console client + pure row→listing mapper.
+//
+// Stage 1 of the admin-only Search Console monitor. The property was verified
+// as a DOMAIN property, so the GSC site identifier is
+// "sc-domain:milestonemediaphotography.com" (stored in GSC_SITE_URL), and the
+// pages we care about are the public listing pages at {PUBLIC_APP_BASE}/p/{slug}.
+//
+// Auth uses an OAuth refresh token tied to the Google account that owns the
+// property — the same fetch-the-token-yourself pattern as api/calendar.js
+// (exchange a long-lived refresh_token for a short-lived access_token). No SDK.
+//
+// fetchGscRows() is the injectable seam the handler calls — tests inject a fake
+// so they never need real credentials or network. mapGscRowsToListings() is a
+// pure, exported function so the mapping/totals math is fully unit-testable.
+//
+// Required env vars (only when actually wired to a live property):
+//   GSC_OAUTH_CLIENT_ID      OAuth client id
+//   GSC_OAUTH_CLIENT_SECRET  OAuth client secret
+//   GSC_REFRESH_TOKEN        offline refresh token (scope webmasters.readonly)
+//   GSC_SITE_URL             e.g. "sc-domain:milestonemediaphotography.com"
+
+import { PUBLIC_APP_BASE } from "./microsite.js";
+
+const TOKEN_URL = "https://oauth2.googleapis.com/token";
+
+function round2(n) { return Math.round(n * 100) / 100; }
+function round4(n) { return Math.round(n * 10000) / 10000; }
+
+// Simple in-module token cache so we don't re-exchange on every call. Refresh
+// ~60s before expiry. Module-scoped (one per warm function instance).
+let _tokenCache = null; // { token, exp }  exp = unix seconds
+
+/**
+ * Exchange the offline refresh token for a short-lived access token (calendar.js
+ * style). Throws on a failed exchange — callers turn that into a 500. The thrown
+ * message comes from Google's response, never the client secret / refresh token.
+ */
+export async function getAccessToken(deps = {}) {
+  const fetchFn = deps.fetch || fetch;
+  const nowSec  = Math.floor(Date.now() / 1000);
+  if (_tokenCache && _tokenCache.exp - 60 > nowSec) return _tokenCache.token;
+
+  const res = await fetchFn(TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id:     process.env.GSC_OAUTH_CLIENT_ID,
+      client_secret: process.env.GSC_OAUTH_CLIENT_SECRET,
+      refresh_token: process.env.GSC_REFRESH_TOKEN,
+      grant_type:    "refresh_token",
+    }),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`GSC token refresh failed (${res.status}): ${txt}`);
+  }
+  const data = await res.json();
+  _tokenCache = { token: data.access_token, exp: nowSec + (data.expires_in || 3600) };
+  return data.access_token;
+}
+
+/**
+ * Query Search Analytics for the given site + date range, filtered to pages
+ * under pagePrefix. Returns the rows array. Throws on a non-OK response with
+ * the HTTP status attached as err.status (so callers can detect 401/403).
+ */
+export async function querySearchAnalytics(
+  { accessToken, siteUrl, startDate, endDate, pagePrefix },
+  deps = {},
+) {
+  const fetchFn = deps.fetch || fetch;
+  const url =
+    `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
+  const res = await fetchFn(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      startDate,
+      endDate,
+      dimensions: ["page"],
+      rowLimit: 1000,
+      dimensionFilterGroups: [
+        { filters: [{ dimension: "page", operator: "contains", expression: pagePrefix }] },
+      ],
+    }),
+  });
+  if (!res.ok) {
+    const err = new Error(`GSC query failed: ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  const data = await res.json();
+  return Array.isArray(data.rows) ? data.rows : [];
+}
+
+/**
+ * The injectable seam the handler calls. Contract:
+ *   • any OAuth env var OR GSC_SITE_URL missing  → { status: "not_configured" }
+ *   • GSC query responds 401/403 (token lacks
+ *     access to the property)                    → { status: "no_access" }
+ *   • success                                     → { status: "ok", rows }
+ *   • any other failure (token refresh, 5xx,
+ *     network)                                    → throws (handler → 500)
+ */
+export async function fetchGscRows({ startDate, endDate }, deps = {}) {
+  const siteUrl = process.env.GSC_SITE_URL;
+  const configured =
+    process.env.GSC_OAUTH_CLIENT_ID &&
+    process.env.GSC_OAUTH_CLIENT_SECRET &&
+    process.env.GSC_REFRESH_TOKEN &&
+    siteUrl;
+  if (!configured) return { status: "not_configured" };
+
+  // A token-refresh failure here propagates (not caught) → handler 500.
+  const accessToken = await (deps.getAccessToken || getAccessToken)(deps);
+
+  try {
+    const rows = await (deps.querySearchAnalytics || querySearchAnalytics)(
+      { accessToken, siteUrl, startDate, endDate, pagePrefix: `${PUBLIC_APP_BASE}/p/` },
+      deps,
+    );
+    return { status: "ok", rows };
+  } catch (err) {
+    if (err && (err.status === 401 || err.status === 403)) return { status: "no_access" };
+    throw err;
+  }
+}
+
+/**
+ * PURE. Map GSC page-dimension rows back to listings via slugMap.
+ *
+ * Each row's keys[0] is the page URL. Strip the exact `${base}/p/` prefix to
+ * recover the slug; skip rows whose slug isn't in slugMap (non-listing or
+ * unpublished pages). Emit per-listing
+ *   { slug, listing_id, label, url, impressions, clicks, ctr, position }
+ * plus totals { impressions, clicks, ctr, position } where ctr = clicks/impr
+ * (0 when no impressions) and position is the impression-WEIGHTED average.
+ *
+ * @param {Array}  rows     GSC rows ([{ keys:[url], impressions, clicks, ctr, position }])
+ * @param {Object} slugMap  { slug → { label, listing_id } }
+ * @param {string} base     PUBLIC_APP_BASE
+ */
+export function mapGscRowsToListings(rows, slugMap, base) {
+  const prefix = `${base}/p/`;
+  const map = slugMap || {};
+  const listings = [];
+  let sumImpr = 0, sumClicks = 0, weightedPos = 0;
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const url = row && Array.isArray(row.keys) ? row.keys[0] : undefined;
+    if (typeof url !== "string" || !url.startsWith(prefix)) continue;
+    const slug = url.slice(prefix.length);
+    const entry = map[slug];
+    if (!entry) continue; // unknown / unpublished page → skip
+
+    const impressions = row.impressions || 0;
+    const clicks      = row.clicks || 0;
+    const position    = row.position || 0;
+
+    listings.push({
+      slug,
+      listing_id: entry.listing_id ?? null,
+      label:      entry.label,
+      url,
+      impressions,
+      clicks,
+      ctr:      impressions > 0 ? round4(clicks / impressions) : 0,
+      position: round2(position),
+    });
+
+    sumImpr     += impressions;
+    sumClicks   += clicks;
+    weightedPos += position * impressions;
+  }
+
+  const totals = {
+    impressions: sumImpr,
+    clicks:      sumClicks,
+    ctr:         sumImpr > 0 ? round4(sumClicks / sumImpr) : 0,
+    position:    sumImpr > 0 ? round2(weightedPos / sumImpr) : 0,
+  };
+
+  return { listings, totals };
+}

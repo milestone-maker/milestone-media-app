@@ -9,6 +9,7 @@ import MicrositeView from "./views/Microsite";
 import AnalyticsView from "./views/Analytics";
 import SubscriptionsView from "./views/Subscriptions";
 import InstagramView from "./views/Instagram";
+import SearchConsoleView from "./views/SearchConsole";
 // Shared modules — see src/lib/ for the why. These extractions broke
 // a circular import that App.jsx had with every view (App imported
 // the views; the views imported pricing/auth/UI symbols back from App).
@@ -895,7 +896,7 @@ function AppShell() {
     { label: "Microsite", icon: "🌐" },
   ];
   const navItems = isAdmin
-    ? [...baseNavItems, { label: "Bookings", icon: "📋" }, { label: "Admin", icon: "⚙" }]
+    ? [...baseNavItems, { label: "Bookings", icon: "📋" }, { label: "Search Console", icon: "🔍" }, { label: "Admin", icon: "⚙" }]
     : [...baseNavItems, { label: "Bookings", icon: "📋" }];
 
   const viewMap = {
@@ -909,7 +910,7 @@ function AppShell() {
     // Instagram (Connected Accounts) — off-nav, profile dropdown only.
     Instagram: <InstagramView />,
     Bookings: <BookingsManagerView />,
-    ...(isAdmin && { Admin: <AdminView /> }),
+    ...(isAdmin && { "Search Console": <SearchConsoleView />, Admin: <AdminView /> }),
   };
   // If extraView is set (off-nav route like Subscriptions), it takes precedence.
   const activeView = extraView
