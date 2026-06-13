@@ -22,6 +22,17 @@ const MICROSITE_ADDON_PRICE = ADDONS.find(a => a.id === "microsite")?.price ?? 0
 // (h:mm AM/PM) strings. Live rows carry a single `created_at`
 // timestamptz, so we format it into those two strings at map time
 // without changing how the UI renders lead.date / lead.time.
+// Lifecycle state of a microsites row, precedence withdrawn > sold > live > draft
+// (mirrors the server state model in api/render-microsite.js). Used for the
+// state-aware action controls and the per-row status badge.
+function micrositeStateLabel(m) {
+  if (!m) return "draft";
+  if (m.retired_at) return "withdrawn";
+  if (m.sold_at) return "sold";
+  if (m.published === true) return "live";
+  return "draft";
+}
+
 function formatLeadDate(d) {
   if (!d || isNaN(d.getTime())) return "";
   return `${d.getMonth() + 1}/${d.getDate()}/${d.getFullYear()}`;
@@ -259,7 +270,10 @@ function MicrositeView() {
   const [themeIdx, setThemeIdx] = useState(0);
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false); // in-flight guard for Save & Republish / Publish
-  const [retiring, setRetiring] = useState(false); // in-flight guard for Mark sold / take down
+  const [retiring, setRetiring] = useState(false); // in-flight guard for Take down (retire)
+  const [markingSold, setMarkingSold] = useState(false); // in-flight guard for Mark as sold
+  const [markSoldOpen, setMarkSoldOpen] = useState(false); // mark-as-sold dialog visibility
+  const [soldPriceInput, setSoldPriceInput] = useState(""); // optional sale price (blank = undisclosed)
   const [requestingAddon, setRequestingAddon] = useState(false); // in-flight guard for "Add Microsite — $price"
   const [published, setPublished] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -336,7 +350,7 @@ function MicrositeView() {
       setLoadingMicrosites(true);
       const { data: rows } = await supabase
         .from("microsites")
-        .select("id, slug, theme, published, retired_at, property_data, agent_name, agent_phone, created_at")
+        .select("id, slug, theme, published, retired_at, sold_at, sold_price, property_data, agent_name, agent_phone, created_at")
         .eq("agent_id", user.id)
         .order("created_at", { ascending: false });
       if (rows) setMyMicrosites(rows);
@@ -925,7 +939,7 @@ function MicrositeView() {
       // Refresh the microsites list so it's up to date
       const { data: refreshed } = await supabase
         .from("microsites")
-        .select("id, slug, theme, published, retired_at, property_data, agent_name, agent_phone, created_at")
+        .select("id, slug, theme, published, retired_at, sold_at, sold_price, property_data, agent_name, agent_phone, created_at")
         .eq("agent_id", user?.id)
         .order("created_at", { ascending: false });
       if (refreshed) setMyMicrosites(refreshed);
@@ -950,7 +964,7 @@ function MicrositeView() {
       return;
     }
     const proceed = window.confirm(
-      "Mark this property as sold and take the microsite down?\n\nThe public page will stop showing immediately. Nothing is deleted — you can re-publish it anytime from Edit."
+      "Take this microsite down?\n\nThe public page will stop showing immediately (removed from search). Nothing is deleted — you can re-publish it anytime from Edit. To keep a public 'Sold' page instead, use 'Mark as sold'."
     );
     if (!proceed) return;
     setRetiring(true);
@@ -983,7 +997,7 @@ function MicrositeView() {
       // leave the live screen — the page is no longer live.
       const { data: refreshed } = await supabase
         .from("microsites")
-        .select("id, slug, theme, published, retired_at, property_data, agent_name, agent_phone, created_at")
+        .select("id, slug, theme, published, retired_at, sold_at, sold_price, property_data, agent_name, agent_phone, created_at")
         .eq("agent_id", user?.id)
         .order("created_at", { ascending: false });
       if (refreshed) setMyMicrosites(refreshed);
@@ -991,12 +1005,70 @@ function MicrositeView() {
       setPublishedSlug(null);
       setLeads([]);
       setStep("build");
-      alert("Microsite taken down. The property is marked sold and the public page is no longer live. You can re-publish it anytime from Edit.");
+      alert("Microsite taken down. The public page is no longer live and is removed from search. You can re-publish it anytime from Edit.");
     } catch (err) {
       console.error("Retire error:", err);
       alert("Couldn't take the microsite down. Please try again.");
     } finally {
       setRetiring(false);
+    }
+  };
+
+  // Mark as sold: stamp sold_at server-side (keeps published=true). The public
+  // /p/<slug> page stays live + indexable but renders a SOLD badge + SoldOut
+  // (see api/render-microsite.js); the slot is freed from the live cap. Nothing
+  // is deleted — "Relist" (republish) clears sold_at and brings it back to live.
+  // Mirrors handleRetire: session token, /api/mark-sold, refresh, success.
+  const handleMarkSold = async () => {
+    if (markingSold) return;
+    const micrositeId = myMicrosites.find(m => m.slug === publishedSlug)?.id;
+    if (!micrositeId) {
+      alert("Couldn't find this microsite to mark sold. Refresh and try again.");
+      return;
+    }
+    setMarkingSold(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        alert("Your session expired. Please sign in again.");
+        return;
+      }
+      const trimmed = (soldPriceInput || "").trim();
+      const res = await fetch("/api/mark-sold", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ micrositeId, sold_price: trimmed || null }),
+      });
+      if (res.status === 401) {
+        alert("Your session expired. Please sign in again.");
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        console.error("Mark-sold error:", body);
+        alert("Couldn't mark this property sold: " + (body.error || "please try again."));
+        return;
+      }
+      // Refresh the list so the row reflects sold_at; stay on the published
+      // screen (the page is still live, now marked sold).
+      const { data: refreshed } = await supabase
+        .from("microsites")
+        .select("id, slug, theme, published, retired_at, sold_at, sold_price, property_data, agent_name, agent_phone, created_at")
+        .eq("agent_id", user?.id)
+        .order("created_at", { ascending: false });
+      if (refreshed) setMyMicrosites(refreshed);
+      setMarkSoldOpen(false);
+      setSoldPriceInput("");
+      alert("Marked as sold. The public page now shows a SOLD badge and stays live for search. Relist anytime from the controls to bring it back to a normal listing.");
+    } catch (err) {
+      console.error("Mark-sold error:", err);
+      alert("Couldn't mark this property sold. Please try again.");
+    } finally {
+      setMarkingSold(false);
     }
   };
 
@@ -1276,6 +1348,56 @@ function MicrositeView() {
         </div>
       )}
 
+      {/* Mark-as-sold dialog — optional sale price (blank = undisclosed). */}
+      {markSoldOpen && (
+        <div onClick={() => !markingSold && setMarkSoldOpen(false)} style={{
+          position: "fixed", inset: 0, zIndex: 200, background: "rgba(5,10,20,0.7)",
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            width: "100%", maxWidth: 420, background: "#0f0f1a",
+            border: "1px solid rgba(201,168,76,0.35)", borderRadius: 14,
+            padding: "24px 24px 20px", boxShadow: "0 16px 48px rgba(0,0,0,0.6)",
+          }}>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: "#F5ECD7", fontWeight: 700, marginBottom: 6 }}>
+              Mark this property as sold?
+            </div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.6)", lineHeight: 1.5, marginBottom: 18 }}>
+              The public page stays live and indexable with a <strong style={{ color: "#e5c97e" }}>SOLD</strong> badge. It no longer counts against your live-microsite limit. You can relist anytime.
+            </div>
+            <label style={{ display: "block", fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.5)", marginBottom: 6 }}>
+              Sale price <span style={{ color: "rgba(255,255,255,0.3)", textTransform: "none", letterSpacing: 0 }}>(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={soldPriceInput}
+              onChange={e => setSoldPriceInput(e.target.value)}
+              placeholder="e.g. 1,425,000 — leave blank to keep private"
+              style={{
+                width: "100%", boxSizing: "border-box", background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(201,168,76,0.25)", borderRadius: 8, color: "#fff",
+                fontFamily: "'Jost', sans-serif", fontSize: 14, padding: "11px 13px", marginBottom: 8,
+              }}
+            />
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.4)", lineHeight: 1.5, marginBottom: 20 }}>
+              A price appears on the public Sold page only if you fill this in. Leave it blank for non-disclosure.
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button onClick={() => !markingSold && setMarkSoldOpen(false)} disabled={markingSold} style={{
+                background: "transparent", border: "1px solid rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.6)",
+                padding: "9px 16px", borderRadius: 8, fontFamily: "'Jost', sans-serif", fontSize: 12,
+                letterSpacing: "0.05em", textTransform: "uppercase", cursor: markingSold ? "not-allowed" : "pointer", fontWeight: 600,
+              }}>Cancel</button>
+              <button onClick={handleMarkSold} disabled={markingSold} style={{
+                background: "linear-gradient(135deg,#c9a84c,#e5c97e)", border: "none", color: "#0a1628",
+                padding: "9px 18px", borderRadius: 8, fontFamily: "'Jost', sans-serif", fontSize: 12,
+                letterSpacing: "0.05em", textTransform: "uppercase", cursor: markingSold ? "wait" : "pointer", fontWeight: 700,
+              }}>{markingSold ? "Marking sold…" : "🏷️ Mark as sold"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
@@ -1303,13 +1425,44 @@ function MicrositeView() {
             padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
             letterSpacing: "0.06em", textTransform: "uppercase", cursor: "pointer",
           }}>+ New</button>
-          {/* Mark sold / take down — retires the live microsite (frees a slot).
-              Re-publish stays available via Edit; nothing is deleted. */}
-          <button onClick={handleRetire} disabled={retiring} title="Mark this property sold and take the public page down" style={{
-            background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.35)", color: "#f87171",
-            padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
-            letterSpacing: "0.06em", textTransform: "uppercase", cursor: retiring ? "wait" : "pointer", fontWeight: 600,
-          }}>{retiring ? "Taking down…" : "🏷️ Mark sold / take down"}</button>
+          {/* State-aware lifecycle controls. LIVE → Mark as sold / Take down.
+              SOLD → Sold label + Relist (republish clears sold_at) / Take down.
+              (Withdrawn rows leave this screen — published=false.) */}
+          {(() => {
+            const currentMs = myMicrosites.find(m => m.slug === publishedSlug);
+            const state = micrositeStateLabel(currentMs);
+            const takeDownBtn = (
+              <button key="takedown" onClick={handleRetire} disabled={retiring} title="Take the public page down (removed from search)" style={{
+                background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.35)", color: "#f87171",
+                padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
+                letterSpacing: "0.06em", textTransform: "uppercase", cursor: retiring ? "wait" : "pointer", fontWeight: 600,
+              }}>{retiring ? "Taking down…" : "Take down"}</button>
+            );
+            if (state === "sold") {
+              return [
+                <span key="badge" title="This listing is marked sold — its public page stays live with a SOLD badge" style={{
+                  background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.4)", color: "#e5c97e",
+                  padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
+                  letterSpacing: "0.06em", textTransform: "uppercase", fontWeight: 700, display: "inline-flex", alignItems: "center",
+                }}>🏷️ Sold</span>,
+                <button key="relist" onClick={() => currentMs && loadMicrositeForEdit(currentMs)} title="Relist: re-publish to clear the sold status and return to a normal live page" style={{
+                  background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.35)", color: "#4ade80",
+                  padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
+                  letterSpacing: "0.06em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600,
+                }}>↩︎ Relist</button>,
+                takeDownBtn,
+              ];
+            }
+            // LIVE (default for this published screen)
+            return [
+              <button key="marksold" onClick={() => { setSoldPriceInput(""); setMarkSoldOpen(true); }} title="Mark this property sold — keeps a public, indexable Sold page" style={{
+                background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.35)", color: "#e5c97e",
+                padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
+                letterSpacing: "0.06em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600,
+              }}>🏷️ Mark as sold</button>,
+              takeDownBtn,
+            ];
+          })()}
         </div>
       </div>
 
@@ -1615,6 +1768,13 @@ function MicrositeView() {
               const pd = ms.property_data || {};
               const th = THEMES.find(t => t.name === ms.theme) || THEMES[0];
               const isEditing = publishedSlug === ms.slug;
+              const state = micrositeStateLabel(ms);
+              const stateChip = {
+                live:      { label: "Live",      color: "#4ade80", bg: "rgba(74,222,128,0.12)", bd: "rgba(74,222,128,0.35)" },
+                sold:      { label: "Sold",      color: "#e5c97e", bg: "rgba(201,168,76,0.14)", bd: "rgba(201,168,76,0.4)" },
+                withdrawn: { label: "Withdrawn", color: "#f87171", bg: "rgba(239,68,68,0.1)",   bd: "rgba(239,68,68,0.35)" },
+                draft:     { label: "Draft",     color: "rgba(255,255,255,0.5)", bg: "rgba(255,255,255,0.05)", bd: "rgba(255,255,255,0.15)" },
+              }[state];
               return (
                 <div key={ms.id} style={{
                   background: isEditing ? "rgba(201,168,76,0.07)" : "rgba(255,255,255,0.03)",
@@ -1629,8 +1789,15 @@ function MicrositeView() {
                     ))}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {pd.address || ms.slug}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {pd.address || ms.slug}
+                      </div>
+                      <span style={{
+                        flexShrink: 0, fontFamily: "'Jost', sans-serif", fontSize: 9, fontWeight: 700,
+                        letterSpacing: "0.08em", textTransform: "uppercase", padding: "2px 7px", borderRadius: 5,
+                        color: stateChip.color, background: stateChip.bg, border: `1px solid ${stateChip.bd}`,
+                      }}>{stateChip.label}</span>
                     </div>
                     <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>
                       {ms.theme} · /p/{ms.slug}
