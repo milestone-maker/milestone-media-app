@@ -1,6 +1,7 @@
 {
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/p/:slug", "destination": "/api/render-microsite?slug=:slug" },
     { "source": "/(.*)", "destination": "/" }
   ],
   "functions": {
@@ -8,7 +9,8 @@
     "api/parse-comps.js": { "maxDuration": 60 },
     "api/microsite-chat.js": { "maxDuration": 60 },
     "api/classify-photos.js": { "maxDuration": 120 },
-    "api/social-post.js": { "maxDuration": 60 }
+    "api/social-post.js": { "maxDuration": 60 },
+    "api/render-microsite.js": { "includeFiles": "dist/**" }
   },
   "crons": [
     { "path": "/api/refresh-mortgage-rates", "schedule": "0 20 * * *" }
