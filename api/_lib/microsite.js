@@ -12,9 +12,13 @@
 // Shared by api/content-generate.js (insert token) and api/social-post.js
 // (re-resolve + substitute). Kept in api/_lib so it is not a deployable route.
 
-// Public host that fronts published microsite pages (/p/{slug}). Same base as
-// api/publish-microsite.js (PUBLIC_APP_BASE) — kept in sync by hand.
-export const PUBLIC_APP_BASE = "https://app.milestonemediaphotography.com";
+// Public host that fronts published microsite pages (/p/{slug}). THE single
+// source of truth for the app base across the backend — every other api/* file
+// imports this rather than re-declaring its own literal. Env-overridable
+// (PUBLIC_APP_BASE) with the production host as the default, so with no env var
+// set the value is byte-for-byte identical to the previous hardcoded literal.
+export const PUBLIC_APP_BASE =
+  process.env.PUBLIC_APP_BASE || "https://app.milestonemediaphotography.com";
 
 // Stable sentinel inserted at the microsite-link slot in a Facebook caption.
 // Distinct, URL-unsafe, and unlikely to collide with model text. Always sits

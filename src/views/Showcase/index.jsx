@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
 import { useAuth } from "../../lib/auth";
+import { PUBLIC_APP_BASE } from "../../lib/siteConfig";
 
 function ShowcaseView({ onBook }) {
   const { user } = useAuth();
@@ -176,7 +177,7 @@ function ShowcaseView({ onBook }) {
             const address = msData.address || "Property";
             const city    = msData.city || "";
             const price   = msData.price || "";
-            const liveUrl = `https://app.milestonemediaphotography.com/p/${ms.slug}`;
+            const liveUrl = `${PUBLIC_APP_BASE}/p/${ms.slug}`;
             const isHovered = msHover === ms.id;
             const isActive  = idx === active;
             return (

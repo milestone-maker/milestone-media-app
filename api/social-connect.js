@@ -36,6 +36,7 @@ import {
   createTeam as bundleCreateTeam,
   createPortalLink as bundleCreatePortalLink,
 } from "./_lib/bundle.js";
+import { PUBLIC_APP_BASE } from "./_lib/microsite.js";
 
 // Networks an agent can connect today. Mirrors the platform CHECK on
 // agent_platform_connections (migration 040) and social_posts (036). Only
@@ -79,7 +80,7 @@ function redirectUrlFrom(req, platform) {
   const proto = req.headers?.["x-forwarded-proto"] || "https";
   const host  = req.headers?.["x-forwarded-host"] || req.headers?.host;
   if (host) return `${proto}://${host}/${qs}`;
-  return `https://app.milestonemediaphotography.com/${qs}`;
+  return `${PUBLIC_APP_BASE}/${qs}`;
 }
 
 export default async function handler(req, res, depsOverride) {
