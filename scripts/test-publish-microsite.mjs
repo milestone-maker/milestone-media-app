@@ -199,6 +199,10 @@ const handlerMod = await import(pathToFileURL(resolve(REPO_ROOT, "api", "publish
 const rawHandler = handlerMod.default;
 const handler = (req, res) => rawHandler(req, res, { supabase: makeFakeClient() });
 
+const { listingPayloadFromMicrosite } = await import(
+  pathToFileURL(resolve(REPO_ROOT, "api", "_lib", "listingFromMicrosite.js")).href
+);
+
 // ── Test harness ─────────────────────────────────────────────────────
 let passed = 0, failed = 0;
 function check(name, cond, detail = "") {
@@ -542,6 +546,45 @@ const BASE_PROPERTY_DATA = {
     check("re-publish over cap → 200 (cap exempt)", res.statusCode === 200, `got ${res.statusCode} ${JSON.stringify(res.body)}`);
     check("re-publish over cap used UPDATE", mockState.micrositeWrites[0]?.op === "update");
   }
+}
+
+// ── Scenario 7 — optional neighborhood: capture → bake → listings mirror ────
+{
+  console.log("\n── Scenario 7: neighborhood baked into property_data + listings mirror ──\n");
+
+  // 7a. neighborhood present → baked into property_data, and surfaced by
+  //     listingPayloadFromMicrosite onto listings.neighborhood (no change to
+  //     that mapping — just confirm it receives the value).
+  resetMock();
+  await handler(makeReq({
+    bookingId: "booking-1", theme: "Prestige", slug: "5912-velasco-deadbeef",
+    propertyData: { ...BASE_PROPERTY_DATA, neighborhood: "Lakewood" },
+  }), makeRes());
+  const pdA = mockState.micrositeWrites[0]?.row?.property_data;
+  check("7a: property_data.neighborhood baked", pdA?.neighborhood === "Lakewood", JSON.stringify(pdA?.neighborhood));
+  check("7a: listingFromMicrosite surfaces neighborhood",
+    listingPayloadFromMicrosite({ propertyData: pdA, agentId: "agent-1" }).neighborhood === "Lakewood");
+
+  // 7b. blank neighborhood → normalized to null (never an empty string), so the
+  //     downstream "neighborhood || city" fallback works.
+  resetMock();
+  await handler(makeReq({
+    bookingId: "booking-1", theme: "Prestige", slug: "5912-velasco-deadbeef",
+    propertyData: { ...BASE_PROPERTY_DATA, neighborhood: "   " },
+  }), makeRes());
+  const pdB = mockState.micrositeWrites[0]?.row?.property_data;
+  check("7b: blank neighborhood → null in property_data", pdB?.neighborhood === null, JSON.stringify(pdB?.neighborhood));
+  check("7b: listingFromMicrosite → null neighborhood (falls back to city downstream)",
+    listingPayloadFromMicrosite({ propertyData: pdB, agentId: "agent-1" }).neighborhood === null);
+
+  // 7c. neighborhood key entirely absent → also null (additive, no breakage).
+  resetMock();
+  await handler(makeReq({
+    bookingId: "booking-1", theme: "Prestige", slug: "5912-velasco-deadbeef",
+    propertyData: { ...BASE_PROPERTY_DATA },
+  }), makeRes());
+  const pdC = mockState.micrositeWrites[0]?.row?.property_data;
+  check("7c: absent neighborhood → null in property_data", pdC?.neighborhood === null, JSON.stringify(pdC?.neighborhood));
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);
