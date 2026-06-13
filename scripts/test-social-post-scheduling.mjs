@@ -77,6 +77,13 @@ function makeSupabaseMock({
       if (table === "agent_social_connections") {
         return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: connection, error: null }) }) }) };
       }
+      if (table === "agent_platform_connections") {
+        // Per-platform model (migration 040): the handler reads the connection
+        // by (agent_id, platform) → select().eq().eq().maybeSingle(). Chainable
+        // eq() so any number of filters resolves to the same connection row.
+        const conn = { eq: () => conn, maybeSingle: async () => ({ data: connection, error: null }) };
+        return { select: () => conn };
+      }
       if (table === "generated_content") {
         return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: content, error: null }) }) }) };
       }
