@@ -4,39 +4,35 @@
 process.on("unhandledRejection", (err) => { console.error("✗ Unhandled rejection:", err); process.exit(1); });
 process.on("uncaughtException",  (err) => { console.error("✗ Uncaught exception:",  err); process.exit(1); });
 
-// Unit tests for api/retire-microsite.js — the "mark sold / take down" action.
+// Unit tests for api/mark-sold.js — the "mark as sold" action.
 //
-// The handler takes its supabase client via the depsOverride 3rd arg, so we
-// inject a small filter-aware mock directly — no module-cache stubbing, no
-// real DB. The mock holds ONE microsites row and honors .eq() filters, so a
-// non-owner (agent_id mismatch) naturally reads back null → 404.
+// Mirrors scripts/test-retire-microsite.mjs: the handler takes its supabase
+// client via the depsOverride 3rd arg, so we inject a small filter-aware mock
+// directly — no module-cache stubbing, no real DB. The mock holds ONE
+// microsites row and honors .eq() filters, so a non-owner reads back null → 404.
 //
 // Cases:
-//   (a) owner retires a LIVE microsite → 200, published=false + retired_at set, row returned
-//   (b) non-owner → 404 (owner-scoped query yields null; existence not leaked)
-//   (c) already-retired OR not-published → 409, NO write
-//   (d) missing id → 400
-//   (+) missing auth header → 401; non-POST → 405
+//   (a) owner marks a LIVE microsite sold → 200; sold_at set, published STAYS true,
+//       sold_price null when not provided, retired_at untouched
+//   (b) sold_price provided → stored verbatim (free-form text)
+//   (c) non-owner → 404, no write
+//   (d) not live: already-sold / retired / unpublished → 409, no write
+//   (e) missing id → 400; missing auth → 401; non-POST → 405; by-slug works
 //
-//   node scripts/test-retire-microsite.mjs
+//   node scripts/test-mark-sold.mjs
 
 import assert from "node:assert";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const HANDLER_PATH = resolve(__dirname, "..", "api", "retire-microsite.js");
+const HANDLER_PATH = resolve(__dirname, "..", "api", "mark-sold.js");
 const { default: handler } = await import(HANDLER_PATH);
 
-// ── Mocks ──────────────────────────────────────────────────────────────
-
-// A filter-aware microsites-table mock around a single stored row. Records
-// any update patch so tests can assert exactly what was written.
+// ── Mocks (same shape as test-retire-microsite.mjs) ─────────────────────
 function makeSupabase({ authUser, row }) {
   const calls = { updatePatch: null, updateCalled: false };
 
-  // Build a chainable query object that accumulates eq() filters and, at the
-  // terminal (maybeSingle/single), applies them against `row`.
   function selectChain() {
     const filters = {};
     const chain = {
@@ -98,14 +94,14 @@ function makeRes() {
     writeHead(code) { this.statusCode = code; return this; },
     end() { return this; },
     status(code) { this.statusCode = code; return this; },
-    // Vercel/Express: res.json() with no prior res.status() defaults to 200.
     json(body) { if (this.statusCode === null) this.statusCode = 200; this.jsonBody = body; return this; },
   };
   return res;
 }
 
 const liveRow = () => ({
-  id: "ms-1", agent_id: "agent-1", slug: "5912-velasco", published: true, retired_at: null,
+  id: "ms-1", agent_id: "agent-1", slug: "5912-velasco",
+  published: true, retired_at: null, sold_at: null, sold_price: null,
 });
 
 // ── Runner ──────────────────────────────────────────────────────────────
@@ -115,108 +111,114 @@ async function run(name, fn) {
   catch (err) { console.error(`✗ ${name}\n   ${err.message}`); failed++; }
 }
 
-// (a) owner retires a LIVE microsite
-await run("owner retires a live microsite → 200, published=false + retired_at set, row returned", async () => {
+// (a) owner marks a LIVE microsite sold → sold_at set, published stays true.
+await run("owner marks live microsite sold → 200; sold_at set, published stays true, sold_price null", async () => {
   const supabase = makeSupabase({ authUser: { id: "agent-1" }, row: liveRow() });
   const res = makeRes();
   await handler(makeReq({ body: { micrositeId: "ms-1" } }), res, { supabase });
 
   assert.strictEqual(res.statusCode, 200, `expected 200, got ${res.statusCode}`);
-  assert.ok(res.jsonBody?.microsite, "response should include the updated microsite row");
-  assert.strictEqual(res.jsonBody.microsite.published, false, "published should be false");
-  assert.ok(res.jsonBody.microsite.retired_at, "retired_at should be set on returned row");
-  // The write itself:
+  assert.ok(res.jsonBody?.microsite, "response should include the updated row");
   assert.strictEqual(supabase._calls.updateCalled, true, "an update should have happened");
-  assert.strictEqual(supabase._calls.updatePatch.published, false, "patch.published should be false");
-  assert.ok(supabase._calls.updatePatch.retired_at, "patch.retired_at should be a timestamp");
-  assert.doesNotThrow(() => new Date(supabase._calls.updatePatch.retired_at).toISOString(),
-    "retired_at should be a valid date");
+  const patch = supabase._calls.updatePatch;
+  assert.ok(patch.sold_at, "patch.sold_at should be set");
+  assert.doesNotThrow(() => new Date(patch.sold_at).toISOString(), "sold_at should be a valid date");
+  assert.strictEqual(patch.sold_price, null, "sold_price should be null when not provided");
+  assert.strictEqual("published" in patch, false, "must NOT touch published (stays true)");
+  assert.strictEqual("retired_at" in patch, false, "must NOT touch retired_at");
+  assert.strictEqual(res.jsonBody.microsite.published, true, "returned row stays published");
 });
 
-// (b) non-owner → 404, no write
-await run("non-owner → 404 (not found), no write", async () => {
-  // Row is owned by agent-1; caller is agent-2. Owner-scoped query → null.
+// (b) sold_price provided → stored verbatim.
+await run("sold_price provided → stored verbatim (free-form text)", async () => {
+  const supabase = makeSupabase({ authUser: { id: "agent-1" }, row: liveRow() });
+  const res = makeRes();
+  await handler(makeReq({ body: { micrositeId: "ms-1", sold_price: "1,425,000" } }), res, { supabase });
+
+  assert.strictEqual(res.statusCode, 200, `expected 200, got ${res.statusCode}`);
+  assert.strictEqual(supabase._calls.updatePatch.sold_price, "1,425,000", "sold_price stored verbatim");
+});
+
+// (b2) blank/whitespace sold_price → normalized to null.
+await run("blank sold_price → null", async () => {
+  const supabase = makeSupabase({ authUser: { id: "agent-1" }, row: liveRow() });
+  const res = makeRes();
+  await handler(makeReq({ body: { micrositeId: "ms-1", sold_price: "   " } }), res, { supabase });
+  assert.strictEqual(res.statusCode, 200);
+  assert.strictEqual(supabase._calls.updatePatch.sold_price, null, "blank price → null");
+});
+
+// (c) non-owner → 404, no write.
+await run("non-owner → 404, no write", async () => {
   const supabase = makeSupabase({ authUser: { id: "agent-2" }, row: liveRow() });
   const res = makeRes();
   await handler(makeReq({ body: { micrositeId: "ms-1" } }), res, { supabase });
-
   assert.strictEqual(res.statusCode, 404, `expected 404, got ${res.statusCode}`);
-  assert.strictEqual(supabase._calls.updateCalled, false, "no update should happen for a non-owner");
+  assert.strictEqual(supabase._calls.updateCalled, false, "no update for a non-owner");
 });
 
-// (c1) already-retired → 409, no write
-await run("already-retired microsite → 409, no write", async () => {
+// (d1) already-sold → 409, no write.
+await run("already-sold → 409, no write", async () => {
+  const row = { ...liveRow(), sold_at: "2026-06-01T00:00:00.000Z" };
+  const supabase = makeSupabase({ authUser: { id: "agent-1" }, row });
+  const res = makeRes();
+  await handler(makeReq({ body: { micrositeId: "ms-1" } }), res, { supabase });
+  assert.strictEqual(res.statusCode, 409, `expected 409, got ${res.statusCode}`);
+  assert.strictEqual(supabase._calls.updateCalled, false, "no update for an already-sold site");
+});
+
+// (d2) retired → 409, no write.
+await run("retired → 409, no write", async () => {
   const row = { ...liveRow(), published: false, retired_at: "2026-01-01T00:00:00.000Z" };
   const supabase = makeSupabase({ authUser: { id: "agent-1" }, row });
   const res = makeRes();
   await handler(makeReq({ body: { micrositeId: "ms-1" } }), res, { supabase });
-
   assert.strictEqual(res.statusCode, 409, `expected 409, got ${res.statusCode}`);
-  assert.strictEqual(supabase._calls.updateCalled, false, "no update for an already-retired site");
+  assert.strictEqual(supabase._calls.updateCalled, false, "no update for a retired site");
 });
 
-// (c2) not-published (but never retired) → 409, no write
-await run("not-published microsite → 409, no write", async () => {
+// (d3) unpublished draft → 409, no write.
+await run("unpublished draft → 409, no write", async () => {
   const row = { ...liveRow(), published: false, retired_at: null };
   const supabase = makeSupabase({ authUser: { id: "agent-1" }, row });
   const res = makeRes();
   await handler(makeReq({ body: { micrositeId: "ms-1" } }), res, { supabase });
-
   assert.strictEqual(res.statusCode, 409, `expected 409, got ${res.statusCode}`);
-  assert.strictEqual(supabase._calls.updateCalled, false, "no update for an unpublished site");
+  assert.strictEqual(supabase._calls.updateCalled, false, "no update for a draft");
 });
 
-// (c3) a SOLD listing (published, not retired) CAN still be taken down → 200.
-//   Take-down intent is "publicly serving" (published=true AND retired_at IS
-//   NULL), NOT strict liveness — so a sold page is retirable.
-await run("sold listing (published, not retired) → take-down allowed, 200", async () => {
-  const row = { ...liveRow(), published: true, retired_at: null, sold_at: "2026-06-12T00:00:00.000Z", sold_price: "1,425,000" };
-  const supabase = makeSupabase({ authUser: { id: "agent-1" }, row });
-  const res = makeRes();
-  await handler(makeReq({ body: { micrositeId: "ms-1" } }), res, { supabase });
-
-  assert.strictEqual(res.statusCode, 200, `expected 200, got ${res.statusCode}`);
-  assert.strictEqual(supabase._calls.updateCalled, true, "a sold page should be retirable");
-  assert.strictEqual(supabase._calls.updatePatch.published, false, "patch.published should be false");
-  assert.ok(supabase._calls.updatePatch.retired_at, "patch.retired_at should be set");
-});
-
-// (d) missing id → 400
+// (e1) missing id → 400.
 await run("missing micrositeId/slug → 400", async () => {
   const supabase = makeSupabase({ authUser: { id: "agent-1" }, row: liveRow() });
   const res = makeRes();
   await handler(makeReq({ body: {} }), res, { supabase });
-
   assert.strictEqual(res.statusCode, 400, `expected 400, got ${res.statusCode}`);
-  assert.strictEqual(supabase._calls.updateCalled, false, "no update when id missing");
+  assert.strictEqual(supabase._calls.updateCalled, false);
 });
 
-// (+) retire by slug also works (owner, live)
-await run("owner retires by slug → 200", async () => {
+// (e2) by slug works.
+await run("owner marks sold by slug → 200", async () => {
   const supabase = makeSupabase({ authUser: { id: "agent-1" }, row: liveRow() });
   const res = makeRes();
   await handler(makeReq({ body: { slug: "5912-velasco" } }), res, { supabase });
-
   assert.strictEqual(res.statusCode, 200, `expected 200, got ${res.statusCode}`);
-  assert.strictEqual(res.jsonBody.microsite.published, false);
+  assert.ok(supabase._calls.updatePatch.sold_at, "sold_at set via slug path");
 });
 
-// (+) missing auth header → 401
+// (e3) missing auth → 401.
 await run("missing Authorization header → 401", async () => {
   const supabase = makeSupabase({ authUser: { id: "agent-1" }, row: liveRow() });
   const res = makeRes();
   await handler(makeReq({ body: { micrositeId: "ms-1" }, auth: null }), res, { supabase });
-
   assert.strictEqual(res.statusCode, 401, `expected 401, got ${res.statusCode}`);
   assert.strictEqual(supabase._calls.updateCalled, false);
 });
 
-// (+) non-POST → 405
+// (e4) non-POST → 405.
 await run("non-POST method → 405", async () => {
   const supabase = makeSupabase({ authUser: { id: "agent-1" }, row: liveRow() });
   const res = makeRes();
   await handler(makeReq({ method: "GET" }), res, { supabase });
-
   assert.strictEqual(res.statusCode, 405, `expected 405, got ${res.statusCode}`);
 });
 

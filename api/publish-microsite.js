@@ -378,10 +378,13 @@ export default async function handler(req, res, depsOverride) {
       slug,
       theme,
       published: true,
-      // Clear any prior retirement: (re)publishing restores LIVE. Keeps the
-      // canonical "published = true AND retired_at IS NULL" definition
-      // coherent so a re-published microsite counts against the live cap.
+      // Clear any prior retirement AND sale: (re)publishing restores LIVE and
+      // is the "relist" undo for a sold listing. Keeps the canonical
+      // "published = true AND retired_at IS NULL AND sold_at IS NULL"
+      // definition coherent so a re-published microsite counts against the
+      // live cap and serves as a normal (non-sold) page again.
       retired_at: null,
+      sold_at: null,
       property_data: finalPropertyData,
       agent_name: finalPropertyData.agent_name,
       agent_phone: finalPropertyData.agent_phone,

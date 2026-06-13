@@ -268,6 +268,11 @@ const BASE_PROPERTY_DATA = {
   const write = mockState.micrositeWrites[0];
   const pd = write?.row?.property_data;
   check("write captured",                       !!write);
+  // Relist coherence: (re)publish clears BOTH retired_at and sold_at, so a
+  // previously retired OR sold listing comes back fully LIVE (non-sold).
+  check("publish clears retired_at (null)",     write?.row?.retired_at === null);
+  check("publish clears sold_at (null)",        write?.row?.sold_at === null);
+  check("publish sets published = true",        write?.row?.published === true);
   check("hero_img is media-B's published URL",  pd?.hero_img === "https://example.test/published-media/5912-velasco-deadbeef/photo-dos.jpg");
   check("hero_media_id === 'media-B'",          pd?.hero_media_id === "media-B");
   check("gallery_photos has 3 URLs",            Array.isArray(pd?.gallery_photos) && pd.gallery_photos.length === 3);

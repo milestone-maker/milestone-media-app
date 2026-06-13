@@ -1,30 +1,31 @@
-// Vercel Serverless Function — Retire ("mark sold / take down") a microsite
-// POST /api/retire-microsite
-//   Body: { micrositeId }  (or { slug })
+// Vercel Serverless Function — Mark a microsite SOLD (sold-pages step 2a)
+// POST /api/mark-sold
+//   Body: { micrositeId }  (or { slug }), optional { sold_price }
 //   Headers: Authorization: Bearer <supabase access token>
 //
-// Retiring takes a live microsite down: it sets published = false (the
-// public /p/<slug> page stops serving) AND stamps retired_at = now(). A
-// retired microsite is no longer LIVE (see isMicrositeLive /
-// MICROSITE_LIVE_SQL in shared/micrositeAccess.js), which is what frees a
-// slot under the per-tier live-microsite cap (step 2).
+// Marking a listing SOLD is DISTINCT from retiring it. Unlike retire (which
+// unpublishes → 404 + noindex), mark-sold KEEPS published = true and stamps
+// sold_at, so api/render-microsite.js serves a public, INDEXABLE "Sold" page
+// (SOLD badge + SoldOut JSON-LD). A sold listing is no longer strictly LIVE
+// (published = true AND retired_at IS NULL AND sold_at IS NULL — see
+// isMicrositeLive / MICROSITE_LIVE_SQL), so it FREES the agent's live-cap slot,
+// just like retiring — but the page stays up.
 //
-// Retiring DELETES NOTHING — the row, slug, and property_data survive, so
-// the owner can re-publish/edit via /api/publish-microsite, which clears
-// retired_at and restores LIVE.
+// Marking sold DELETES NOTHING. The owner can relist via /api/publish-microsite,
+// which clears sold_at (and retired_at) and restores LIVE.
 //
-// Mirrors api/publish-microsite.js: same Supabase service-role singleton
-// (RLS-exempt; ownership enforced explicitly in code here), same CORS set,
-// same bearer extraction, same depsOverride third arg so the unit tests can
-// inject a mock without a live DB.
+// Mirrors api/retire-microsite.js: same service-role singleton (RLS-exempt;
+// ownership enforced explicitly here), same CORS, same bearer extraction, same
+// depsOverride third arg so unit tests can inject a mock without a live DB.
 //
 // Required Vercel environment variables:
 //   SUPABASE_URL
 //   SUPABASE_SERVICE_ROLE_KEY
 
 import { createClient } from "@supabase/supabase-js";
+import { isMicrositeLive } from "../shared/micrositeAccess.js";
 
-// ── CORS helper (matches publish-microsite.js) ───────────────────────
+// ── CORS helper (matches retire-microsite.js) ────────────────────────
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
@@ -33,8 +34,6 @@ function corsHeaders() {
   };
 }
 
-// Lazy singleton so unit tests can inject a mock via depsOverride without
-// forcing a new client per request in production.
 let _supabaseSingleton = null;
 function defaultSupabase() {
   if (!_supabaseSingleton) {
@@ -50,6 +49,14 @@ function bearerFrom(req) {
   const h = req.headers?.authorization || req.headers?.Authorization || "";
   const m = /^Bearer\s+(.+)$/i.exec(h);
   return m ? m[1].trim() : null;
+}
+
+// Normalize an optional sold_price: a non-empty trimmed string, or null.
+// Stored as free-form TEXT to match list price; null = undisclosed.
+function normalizeSoldPrice(raw) {
+  if (raw === null || raw === undefined) return null;
+  const s = String(raw).trim();
+  return s ? s : null;
 }
 
 // ── main handler ─────────────────────────────────────────────────────
@@ -80,15 +87,15 @@ export default async function handler(req, res, depsOverride) {
     const authUser = authData.user;
 
     // ── 2. Validate request body ──
-    const { micrositeId, slug } = req.body || {};
+    const { micrositeId, slug, sold_price } = req.body || {};
     if (!micrositeId && !slug) {
       return res.status(400).json({ error: "micrositeId (or slug) is required" });
     }
+    const soldPrice = normalizeSoldPrice(sold_price);
 
     // ── 3. Fetch the microsite, scoped to the calling agent ──
-    //   Owner-scoping the query means a missing row OR a row owned by
-    //   someone else both resolve to null → a single clean 404 that never
-    //   leaks whether another agent's microsite exists.
+    //   Owner-scoping means a missing row OR another agent's row both resolve
+    //   to null → one clean 404 that never leaks another agent's microsite.
     let query = supabase
       .from("microsites")
       .select("id, agent_id, slug, published, retired_at, sold_at")
@@ -97,42 +104,38 @@ export default async function handler(req, res, depsOverride) {
 
     const { data: microsite, error: fetchErr } = await query.maybeSingle();
     if (fetchErr) {
-      console.error("retire-microsite fetch error:", fetchErr);
+      console.error("mark-sold fetch error:", fetchErr);
       return res.status(500).json({ error: "failed to load microsite" });
     }
     if (!microsite) {
       return res.status(404).json({ error: "microsite not found" });
     }
 
-    // ── 4. Guard: a take-down is allowed for any PUBLICLY-SERVING listing ──
-    //   i.e. published = true AND retired_at IS NULL. This INTENTIONALLY does
-    //   NOT use isMicrositeLive (which also excludes sold): a SOLD page is
-    //   still publicly served, so it CAN be taken down. Only an already-retired
-    //   or unpublished row is rejected (409, no write).
-    const publiclyServing =
-      microsite.published === true &&
-      (microsite.retired_at === null || microsite.retired_at === undefined);
-    if (!publiclyServing) {
-      return res.status(409).json({ error: "microsite is not live — nothing to retire" });
+    // ── 4. Guard: must currently be LIVE ──
+    //   Already-sold, retired, or unpublished → clean 409, no write.
+    //   (isMicrositeLive checks published = true AND retired_at IS NULL AND
+    //    sold_at IS NULL — sold_at is selected above so the check is exact.)
+    if (!isMicrositeLive(microsite)) {
+      return res.status(409).json({ error: "microsite is not live — nothing to mark sold" });
     }
 
-    // ── 5. Retire: take the page down and stamp retirement ──
+    // ── 5. Mark sold: stamp sold_at, optionally sold_price; KEEP published ──
     const { data: updated, error: updateErr } = await supabase
       .from("microsites")
-      .update({ published: false, retired_at: new Date().toISOString() })
+      .update({ sold_at: new Date().toISOString(), sold_price: soldPrice })
       .eq("id", microsite.id)
       .eq("agent_id", authUser.id)
       .select()
       .single();
     if (updateErr) {
-      console.error("retire-microsite update error:", updateErr);
-      return res.status(500).json({ error: "failed to retire microsite: " + updateErr.message });
+      console.error("mark-sold update error:", updateErr);
+      return res.status(500).json({ error: "failed to mark microsite sold: " + updateErr.message });
     }
 
     // ── 6. Done ──
     return res.json({ microsite: updated });
   } catch (err) {
-    console.error("retire-microsite error:", err);
+    console.error("mark-sold error:", err);
     return res.status(500).json({ error: err.message || "internal error" });
   }
 }
