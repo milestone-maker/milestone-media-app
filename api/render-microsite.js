@@ -122,6 +122,20 @@ function soldDateISO(value) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
+// ── Brand name (Stage 6 white-label) ─────────────────────────────────────────
+// The SSR <head> brand name (og:site_name + the title's brand suffix) is sourced
+// from the agent's branding snapshot — the SAME property_data.agency_name field
+// publish-microsite.js writes and the visible body (MicrositeRenderer) reads, so
+// head and body stay consistent. Falls back to "Milestone Media & Photography"
+// ONLY when the agent has set no brand name, preserving the opt-in default.
+// Returns RAW text — callers escape at each injection point (esc()), matching how
+// the city/neighborhood are handled. NOT applied to the canonical/og:url/domain
+// (the URL host is the separate custom-domain gap, intentionally out of scope).
+export function brandName(pd) {
+  const n = pd && pd.agency_name != null ? String(pd.agency_name).trim() : "";
+  return n || "Milestone Media & Photography";
+}
+
 // ── Title + description ──────────────────────────────────────────────────────
 export function buildTitle(pd) {
   const address = (pd.address || "").trim();
@@ -144,7 +158,7 @@ export function buildTitle(pd) {
 
   // Neighborhood is the hyper-local term — place it before the (short) city.
   const titleFor = (place) =>
-    place && specs ? `${place} — ${specs}` : place || "Property Listing — Milestone Media & Photography";
+    place && specs ? `${place} — ${specs}` : place || `Property Listing — ${brandName(pd)}`;
 
   // Prefer address, neighborhood, short city. Overflow safety: if that still
   // exceeds ~65 chars, drop the CITY from the title only (keep the hyper-local
@@ -260,7 +274,7 @@ function buildHeadTags(pd, slug, title, description, canonical, ogImage, sold = 
     `<meta property="og:title" content="${t}" />`,
     `<meta property="og:description" content="${d}" />`,
     `<meta property="og:url" content="${c}" />`,
-    `<meta property="og:site_name" content="Milestone Media &amp; Photography" />`,
+    `<meta property="og:site_name" content="${esc(brandName(pd))}" />`,
   );
   if (img) tags.push(`<meta property="og:image" content="${img}" />`);
   tags.push(
