@@ -22,7 +22,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabaseClient";
-import { THEMES, THEME_LAYOUT, resolveEffectiveTheme } from "../lib/ui";
+import { THEMES, THEME_LAYOUT, resolveEffectiveTheme, isDarkBg } from "../lib/ui";
 import MicrositeChat from "./MicrositeChat";
 
 // ============================================================
@@ -269,7 +269,11 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
   // downstream styling reads off pubT, so this single point cascades everywhere.
   const baseTheme       = THEMES.find(th => th.name === themeName) || THEMES[0];
   const pubT            = resolveEffectiveTheme(baseTheme, data);
-  const isDarkTheme     = pubT.text === "#fff";
+  // Judge dark-vs-light from the EFFECTIVE background's luminance (so custom
+  // brand colors are classified correctly, not just the literal "#fff" text of
+  // the stock themes). Fall back to the base theme's own dark/light verdict if
+  // the background isn't a parseable hex.
+  const isDarkTheme     = isDarkBg(pubT.bg, baseTheme.text === "#fff");
   const layout          = THEME_LAYOUT[themeName] || "cinematic";
   const galleryPhotos   = photos.length > 0 ? photos : (data.hero_img ? [data.hero_img] : []);
   const agentName       = data.agent_name || "";
@@ -637,7 +641,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
             )}
             <LeadCapture
               mode={mode}
-              theme={{ bg: "rgba(255,255,255,0.04)", text: "#fff", sub: "rgba(255,255,255,0.5)", accent: "#C9A84C", border: "rgba(255,255,255,0.12)", card: "rgba(255,255,255,0.05)" }}
+              theme={pubT}
               micrositeId={micrositeId}
               listingId={listingId}
             />
