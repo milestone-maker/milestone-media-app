@@ -22,7 +22,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "../supabaseClient";
-import { THEMES, THEME_LAYOUT } from "../lib/ui";
+import { THEMES, THEME_LAYOUT, resolveEffectiveTheme } from "../lib/ui";
 import MicrositeChat from "./MicrositeChat";
 
 // ============================================================
@@ -263,7 +263,12 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
   const hasVideo        = !!videoUrl;
   const hasTour         = !!data.matterport_url;
   const isPrestige      = themeName === "Prestige";
-  const pubT            = THEMES.find(th => th.name === themeName) || THEMES[0];
+  // White-label Gap 2: start from the selected THEME, then overlay the agent's
+  // brand colors when they opted in (read from the property_data snapshot, the
+  // same source as agency_name). Toggle off / tokens missing → base theme. All
+  // downstream styling reads off pubT, so this single point cascades everywhere.
+  const baseTheme       = THEMES.find(th => th.name === themeName) || THEMES[0];
+  const pubT            = resolveEffectiveTheme(baseTheme, data);
   const isDarkTheme     = pubT.text === "#fff";
   const layout          = THEME_LAYOUT[themeName] || "cinematic";
   const galleryPhotos   = photos.length > 0 ? photos : (data.hero_img ? [data.hero_img] : []);
