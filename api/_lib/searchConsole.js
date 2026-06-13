@@ -5,97 +5,54 @@
 // "sc-domain:milestonemediaphotography.com" (stored in GSC_SITE_URL), and the
 // pages we care about are the public listing pages at {PUBLIC_APP_BASE}/p/{slug}.
 //
-// Auth is a HAND-ROLLED service-account JWT (no googleapis / google-auth-library
-// dependency), mirroring api/calendar.js's "mint the token yourself with fetch"
-// style. The service account JSON is stored base64-encoded in a single Vercel
-// env var (GSC_SERVICE_ACCOUNT_B64) since every other secret here is single-line
-// and a raw multi-line JSON blob is fragile to paste.
+// Auth uses an OAuth refresh token tied to the Google account that owns the
+// property — the same fetch-the-token-yourself pattern as api/calendar.js
+// (exchange a long-lived refresh_token for a short-lived access_token). No SDK.
 //
 // fetchGscRows() is the injectable seam the handler calls — tests inject a fake
 // so they never need real credentials or network. mapGscRowsToListings() is a
 // pure, exported function so the mapping/totals math is fully unit-testable.
 //
 // Required env vars (only when actually wired to a live property):
-//   GSC_SERVICE_ACCOUNT_B64  base64 of the service-account JSON key file
+//   GSC_OAUTH_CLIENT_ID      OAuth client id
+//   GSC_OAUTH_CLIENT_SECRET  OAuth client secret
+//   GSC_REFRESH_TOKEN        offline refresh token (scope webmasters.readonly)
 //   GSC_SITE_URL             e.g. "sc-domain:milestonemediaphotography.com"
 
-import crypto from "node:crypto";
 import { PUBLIC_APP_BASE } from "./microsite.js";
 
-const TOKEN_URL  = "https://oauth2.googleapis.com/token";
-const TOKEN_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly";
-const JWT_GRANT  = "urn:ietf:params:oauth:grant-type:jwt-bearer";
-
-// ── encoding helpers ─────────────────────────────────────────────────
-function base64url(input) {
-  const buf = Buffer.isBuffer(input) ? input : Buffer.from(String(input));
-  return buf
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
+const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
 function round2(n) { return Math.round(n * 100) / 100; }
 function round4(n) { return Math.round(n * 10000) / 10000; }
 
-// ── service account ──────────────────────────────────────────────────
-
-/**
- * Read + decode the service-account JSON from GSC_SERVICE_ACCOUNT_B64.
- * Returns null when the env var is absent (→ "not_configured" upstream).
- */
-export function loadServiceAccount() {
-  const raw = process.env.GSC_SERVICE_ACCOUNT_B64;
-  if (!raw) return null;
-  return JSON.parse(Buffer.from(raw, "base64").toString("utf8"));
-}
-
-/**
- * Build a signed RS256 service-account assertion JWT (no SDK).
- * Exported so a test can verify the signing path with an ephemeral keypair —
- * the riskiest hand-rolled bit, provable without touching Google.
- *
- * @param {{client_email:string, private_key:string}} sa
- * @param {number} nowSec  unix seconds (injectable for deterministic tests)
- */
-export function buildSignedJwt(sa, nowSec = Math.floor(Date.now() / 1000)) {
-  const header = { alg: "RS256", typ: "JWT" };
-  const claim = {
-    iss:   sa.client_email,
-    scope: TOKEN_SCOPE,
-    aud:   TOKEN_URL,
-    iat:   nowSec,
-    exp:   nowSec + 3600,
-  };
-  const signingInput = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(claim))}`;
-  const signature = crypto.sign("RSA-SHA256", Buffer.from(signingInput), sa.private_key);
-  return `${signingInput}.${base64url(signature)}`;
-}
-
-// Simple in-module token cache so we don't re-mint on every call. Refresh ~60s
-// before expiry. Module-scoped (one per warm function instance).
+// Simple in-module token cache so we don't re-exchange on every call. Refresh
+// ~60s before expiry. Module-scoped (one per warm function instance).
 let _tokenCache = null; // { token, exp }  exp = unix seconds
 
 /**
- * Mint (or reuse a cached) OAuth access token for the service account.
- * Throws on a failed token mint — callers turn that into a 500. The thrown
- * message comes from Google's response, never the service-account contents.
+ * Exchange the offline refresh token for a short-lived access token (calendar.js
+ * style). Throws on a failed exchange — callers turn that into a 500. The thrown
+ * message comes from Google's response, never the client secret / refresh token.
  */
-export async function getAccessToken(sa, deps = {}) {
+export async function getAccessToken(deps = {}) {
   const fetchFn = deps.fetch || fetch;
   const nowSec  = Math.floor(Date.now() / 1000);
   if (_tokenCache && _tokenCache.exp - 60 > nowSec) return _tokenCache.token;
 
-  const jwt = buildSignedJwt(sa, nowSec);
   const res = await fetchFn(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ grant_type: JWT_GRANT, assertion: jwt }),
+    body: new URLSearchParams({
+      client_id:     process.env.GSC_OAUTH_CLIENT_ID,
+      client_secret: process.env.GSC_OAUTH_CLIENT_SECRET,
+      refresh_token: process.env.GSC_REFRESH_TOKEN,
+      grant_type:    "refresh_token",
+    }),
   });
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
-    throw new Error(`GSC token mint failed (${res.status}): ${txt}`);
+    throw new Error(`GSC token refresh failed (${res.status}): ${txt}`);
   }
   const data = await res.json();
   _tokenCache = { token: data.access_token, exp: nowSec + (data.expires_in || 3600) };
@@ -141,20 +98,24 @@ export async function querySearchAnalytics(
 
 /**
  * The injectable seam the handler calls. Contract:
- *   • sa missing OR GSC_SITE_URL missing      → { status: "not_configured" }
- *   • GSC query responds 401/403 (SA not yet
- *     granted on the property)                → { status: "no_access" }
- *   • success                                 → { status: "ok", rows }
- *   • any other failure (token mint, 5xx,
- *     network)                                → throws (handler → 500)
+ *   • any OAuth env var OR GSC_SITE_URL missing  → { status: "not_configured" }
+ *   • GSC query responds 401/403 (token lacks
+ *     access to the property)                    → { status: "no_access" }
+ *   • success                                     → { status: "ok", rows }
+ *   • any other failure (token refresh, 5xx,
+ *     network)                                    → throws (handler → 500)
  */
 export async function fetchGscRows({ startDate, endDate }, deps = {}) {
-  const sa      = (deps.loadServiceAccount || loadServiceAccount)();
   const siteUrl = process.env.GSC_SITE_URL;
-  if (!sa || !siteUrl) return { status: "not_configured" };
+  const configured =
+    process.env.GSC_OAUTH_CLIENT_ID &&
+    process.env.GSC_OAUTH_CLIENT_SECRET &&
+    process.env.GSC_REFRESH_TOKEN &&
+    siteUrl;
+  if (!configured) return { status: "not_configured" };
 
-  // A token-mint failure here propagates (not caught) → handler 500.
-  const accessToken = await (deps.getAccessToken || getAccessToken)(sa, deps);
+  // A token-refresh failure here propagates (not caught) → handler 500.
+  const accessToken = await (deps.getAccessToken || getAccessToken)(deps);
 
   try {
     const rows = await (deps.querySearchAnalytics || querySearchAnalytics)(

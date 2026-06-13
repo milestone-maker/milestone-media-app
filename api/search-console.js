@@ -14,7 +14,8 @@
 //
 // Required env vars:
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY   (auth + microsite lookup)
-//   GSC_SERVICE_ACCOUNT_B64, GSC_SITE_URL     (read inside _lib/searchConsole.js)
+//   GSC_OAUTH_CLIENT_ID, GSC_OAUTH_CLIENT_SECRET, GSC_REFRESH_TOKEN, GSC_SITE_URL
+//                                             (read inside _lib/searchConsole.js)
 
 import { createClient } from "@supabase/supabase-js";
 import { fetchGscRows as realFetchGscRows, mapGscRowsToListings } from "./_lib/searchConsole.js";

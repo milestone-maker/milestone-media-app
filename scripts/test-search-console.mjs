@@ -7,14 +7,11 @@ process.on("uncaughtException",  (err) => { console.error("✗ Uncaught exceptio
 // Unit test for api/search-console.js + api/_lib/searchConsole.js.
 // No real credentials, no network, no live DB:
 //   • mapGscRowsToListings — pure mapping + totals math (test-sitemap style).
-//   • buildSignedJwt — hand-rolled RS256 JWT verified with an EPHEMERAL keypair
-//     minted in-process (proves the riskiest bit without touching Google).
 //   • handler — exercised via depsOverride with an injected fetchGscRows and a
-//     mocked Supabase (test-classify-photos style). Never hits Anthropic/GSC/DB.
+//     mocked Supabase (test-classify-photos style). Never hits Google/Supabase.
 //
 //   node scripts/test-search-console.mjs
 
-import crypto from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -22,7 +19,7 @@ const __dirname  = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT  = resolve(__dirname, "..");
 
 const handler = (await import(pathToFileURL(resolve(REPO_ROOT, "api", "search-console.js")).href)).default;
-const { mapGscRowsToListings, buildSignedJwt } =
+const { mapGscRowsToListings } =
   await import(pathToFileURL(resolve(REPO_ROOT, "api", "_lib", "searchConsole.js")).href);
 const { PUBLIC_APP_BASE } =
   await import(pathToFileURL(resolve(REPO_ROOT, "api", "_lib", "microsite.js")).href);
@@ -98,45 +95,6 @@ const url = (slug) => `${BASE}/p/${slug}`;
   const { listings } = mapGscRowsToListings(rows, slugMap, BASE);
   check("map: prefix-strip yields exact slug", listings[0]?.slug === "1954-toronto-57402083", listings[0]?.slug);
   check("map: ctr 0 when no clicks", listings[0]?.ctr === 0, listings[0]?.ctr);
-}
-
-// ── 5. Hand-rolled JWT proof (ephemeral keypair, NO Google) ──────────────────
-{
-  const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
-  const sa = {
-    client_email: "svc@proj.iam.gserviceaccount.com",
-    private_key:  privateKey.export({ type: "pkcs8", format: "pem" }),
-  };
-  const nowSec = 1700000000;
-  const jwt = buildSignedJwt(sa, nowSec);
-
-  const parts = jwt.split(".");
-  check("jwt: has three parts", parts.length === 3, `got ${parts.length}`);
-
-  const [h64, c64, s64] = parts;
-  const fromB64url = (s) => Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
-  const header = JSON.parse(fromB64url(h64).toString("utf8"));
-  const claim  = JSON.parse(fromB64url(c64).toString("utf8"));
-
-  // Signature verifies against the public key over header.claim
-  const signingInput = `${h64}.${c64}`;
-  const sigOk = crypto.verify("RSA-SHA256", Buffer.from(signingInput), publicKey, fromB64url(s64));
-  check("jwt: signature verifies with public key", sigOk === true);
-
-  check("jwt: header alg RS256", header.alg === "RS256", header.alg);
-  check("jwt: header typ JWT", header.typ === "JWT", header.typ);
-  check("jwt: claim iss is client_email", claim.iss === sa.client_email, claim.iss);
-  check("jwt: claim scope webmasters.readonly", claim.scope === "https://www.googleapis.com/auth/webmasters.readonly", claim.scope);
-  check("jwt: claim aud token endpoint", claim.aud === "https://oauth2.googleapis.com/token", claim.aud);
-  check("jwt: claim iat = now", claim.iat === nowSec, claim.iat);
-  check("jwt: claim exp = now + 3600", claim.exp === nowSec + 3600, claim.exp);
-
-  // A tampered payload must fail verification (proves the signature is real).
-  const tampered = JSON.parse(fromB64url(c64).toString("utf8"));
-  tampered.scope = "https://www.googleapis.com/auth/webmasters"; // read-write
-  const tamperedC64 = Buffer.from(JSON.stringify(tampered)).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  const tamperedOk = crypto.verify("RSA-SHA256", Buffer.from(`${h64}.${tamperedC64}`), publicKey, fromB64url(s64));
-  check("jwt: tampered claim FAILS verification", tamperedOk === false);
 }
 
 // ── Handler harness (mocked Supabase + injected fetchGscRows) ────────────────
