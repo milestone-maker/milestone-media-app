@@ -213,6 +213,65 @@ check("render: dup hero rendered as exactly one <img>", (fullHtml.match(/<img sr
 check("render: feature list rendered, blanks dropped", fullHtml.includes("<li>Open Floor PLan</li>") && fullHtml.includes("<li>Chef&#39;s Kitchen</li>"));
 check("render: schools section", fullHtml.includes("<h2>Schools</h2>") && fullHtml.includes("Whitney M Young Jr El"));
 
+// ── Neighborhood (optional hyper-local term) ─────────────────────────────────
+// Present → appears before the city in title, description, body, and JSON-LD;
+// addressLocality stays the CITY. Absent → clean city-only fallback. XSS-escaped.
+const NBHD = { ...FULL, neighborhood: "Lakewood" };
+{
+  const t = buildTitle(NBHD);
+  check("nbhd: title has neighborhood before city", /Lakewood, Dallas/.test(t), t);
+  check("nbhd: title ≤65", t.length <= 65, `len=${t.length}`);
+  const d = buildDescription(NBHD);
+  check("nbhd: description has neighborhood before city", d.includes("Lakewood, Dallas"), d);
+  const ld = JSON.parse(buildJsonLd(NBHD, "s", `${PUBLIC_APP_BASE}/p/s`, []));
+  check("nbhd: JSON-LD name folds in neighborhood", ld.name.includes("Lakewood"), ld.name);
+  check("nbhd: JSON-LD containedInPlace is the neighborhood", ld.containedInPlace?.["@type"] === "Place" && ld.containedInPlace?.name === "Lakewood", JSON.stringify(ld.containedInPlace));
+  check("nbhd: JSON-LD addressLocality stays the CITY (not neighborhood)", ld.address?.addressLocality === "Dallas", JSON.stringify(ld.address));
+  const html = renderFound(TEMPLATE, NBHD, "2410-luxury");
+  check("nbhd: <title> contains neighborhood", /<title>[^<]*Lakewood[^<]*<\/title>/.test(html));
+  check("nbhd: meta description contains neighborhood", /<meta name="description" content="[^"]*Lakewood[^"]*"/.test(html));
+  check("nbhd: body spec line has neighborhood before city", /<p>Lakewood &middot; Dallas/.test(html), "body spec line");
+}
+
+// Title overflow: a long address+neighborhood+city → city dropped from TITLE
+// (neighborhood kept), but city still present in body + JSON-LD.
+{
+  // address+neighborhood fits (~48 with specs); adding the long city overflows 65.
+  const LONG = { ...FULL, address: "1954 Toronto St", neighborhood: "Preston Hollow", city: "Dallas, Texas, 75212" };
+  const full = `${LONG.address}, ${LONG.neighborhood}, ${LONG.city} — 5 Bed / 4 Bath`;
+  check("nbhd(overflow): the full form really overflows 65", full.length > 65, `len=${full.length}`);
+  const t = buildTitle(LONG);
+  check("nbhd(overflow): title ≤65", t.length <= 65, `len=${t.length}`);
+  check("nbhd(overflow): keeps neighborhood in title", t.includes("Preston Hollow"), t);
+  check("nbhd(overflow): drops city from title", !t.includes("Dallas, Texas, 75212"), t);
+  const html = renderFound(TEMPLATE, LONG, "s");
+  check("nbhd(overflow): city still in body", html.includes("Dallas, Texas, 75212"));
+  const ld = JSON.parse(buildJsonLd(LONG, "s", `${PUBLIC_APP_BASE}/p/s`, []));
+  check("nbhd(overflow): city still in JSON-LD addressLocality", ld.address?.addressLocality === "Dallas, Texas, 75212");
+}
+
+// Absent neighborhood → clean city-only fallback, no stray separators.
+{
+  const noNbhdHtml = renderFound(TEMPLATE, FULL, "2410-luxury"); // FULL has no neighborhood key
+  check("nbhd(absent): title city-only, no ', ,'", /<title>2410 Luxury Lane, Dallas /.test(noNbhdHtml) && !noNbhdHtml.includes(", , "));
+  check("nbhd(absent): body spec line starts at city, no leading separator", /<p>Dallas &middot;/.test(noNbhdHtml));
+  const ld = JSON.parse(buildJsonLd(FULL, "s", `${PUBLIC_APP_BASE}/p/s`, []));
+  check("nbhd(absent): JSON-LD has no containedInPlace", ld.containedInPlace === undefined);
+}
+
+// XSS: neighborhood with markup must be escaped in head + body; raw value survives
+// only inside the JSON-LD (decoded by JSON.parse), never as live markup.
+{
+  const XSS_NBHD = { ...FULL, neighborhood: `<b>Oak"&'Cliff</b>` };
+  const html = renderFound(TEMPLATE, XSS_NBHD, "s");
+  check("nbhd(xss): no raw <b> in body/head", !html.includes("<b>Oak"), "raw markup leaked");
+  check("nbhd(xss): escaped form present in body", html.includes("&lt;b&gt;Oak"), "expected escaped neighborhood");
+  const m = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  check("nbhd(xss): ld+json has no literal '<'", m && !m[1].includes("<"));
+  const ld = JSON.parse(m[1]);
+  check("nbhd(xss): JSON-LD containedInPlace decodes to raw value", ld.containedInPlace?.name === `<b>Oak"&'Cliff</b>`, JSON.stringify(ld.containedInPlace));
+}
+
 // ── Escaping (security) ──────────────────────────────────────────────────────
 const xssHtml = renderFound(TEMPLATE, XSS, "evil-slug");
 check("xss: no raw <script>alert in output body", !xssHtml.includes("<script>alert(1)</script>"));

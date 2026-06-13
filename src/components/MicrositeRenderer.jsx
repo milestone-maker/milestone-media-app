@@ -232,6 +232,12 @@ function LeadCapture({ mode, theme, micrositeId, listingId }) {
 
 export default function MicrositeRenderer({ microsite, theme, agentBranding, mode = "live", micrositeId, listingId, micrositeSlug, brokerageName, sold = null }) {
   const data = microsite || {};
+  // Visible location line: optional neighborhood before the city, so the
+  // React-booted view matches the SSR body. Empty when both are absent.
+  const locationLine = [data.neighborhood, data.city]
+    .map((v) => (v || "").toString().trim())
+    .filter(Boolean)
+    .join(", ");
   const themeName = theme || "Obsidian";
 
   // Local UI state (no fetches — pure render)
@@ -442,7 +448,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-end", padding: "0 48px 52px" }}>
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: "#C9A84C", marginBottom: 12 }}>
-                {data.city || "Dallas, TX"}
+                {locationLine || "Dallas, TX"}
               </div>
               <div style={{ fontSize: 60, fontWeight: 700, color: "#fff", lineHeight: 1.05, marginBottom: 14, maxWidth: 680 }}>
                 {data.address || "Luxury Property"}
@@ -722,7 +728,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
               {data.address || "Luxury Property"}
             </div>
             <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 15, color: pubT.sub }}>
-              {data.city || ""}
+              {locationLine}
             </div>
             <div style={{ fontSize: 38, fontWeight: 700, color: pubT.accent }}>
               {data.price || ""}
@@ -750,7 +756,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
           <div style={{ position: "absolute", inset: 0, background: isDarkTheme ? "rgba(0,0,0,0.45)" : "rgba(255,255,255,0.35)" }} />
           <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", gap: 16, padding: "0 40px" }}>
             <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: pubT.accent }}>
-              {data.city || ""}
+              {locationLine}
             </div>
             <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 64, fontWeight: 400, lineHeight: 1.05, color: "#fff", textShadow: "0 2px 20px rgba(0,0,0,0.5)", maxWidth: 800 }}>
               {data.address || "Luxury Property"}
@@ -782,7 +788,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
                 {data.address || "Luxury Property"}
               </div>
               <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "rgba(255,255,255,0.7)" }}>
-                {data.city || ""}
+                {locationLine}
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
@@ -808,7 +814,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
           <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 55%)" }} />
           <div style={{ position: "absolute", bottom: 48, left: 48 }}>
             <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: pubT.accent, marginBottom: 12 }}>
-              {data.city || ""}
+              {locationLine}
             </div>
             <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 64, fontWeight: 700, color: "#fff", lineHeight: 1.05, marginBottom: 12, maxWidth: 700 }}>
               {data.address || "Luxury Property"}
