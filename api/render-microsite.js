@@ -113,6 +113,15 @@ function clamp(str, max) {
   return s.length <= max ? s : s.slice(0, max - 1).trimEnd() + "…";
 }
 
+// A timestamptz (string or Date) → YYYY-MM-DD, or null if unusable. Used for the
+// sold date in the title/description/body. ISO form keeps it deterministic
+// regardless of server timezone (UTC), and unambiguous for crawlers.
+function soldDateISO(value) {
+  if (!value) return null;
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
 // ── Title + description ──────────────────────────────────────────────────────
 export function buildTitle(pd) {
   const address = (pd.address || "").trim();
@@ -152,7 +161,7 @@ export function buildDescription(pd) {
 // ── JSON-LD (schema.org RealEstateListing) ───────────────────────────────────
 // Every optional field is omitted cleanly when absent (coordinates/schools/postalCode
 // are present on only 50–75% of rows).
-export function buildJsonLd(pd, slug, canonical, images) {
+export function buildJsonLd(pd, slug, canonical, images, sold = null) {
   const ld = {
     "@context": "https://schema.org",
     "@type": "RealEstateListing",
@@ -164,9 +173,22 @@ export function buildJsonLd(pd, slug, canonical, images) {
   const desc = (pd.description || "").replace(/\s+/g, " ").trim();
   if (desc) ld.description = desc;
 
-  const price = toNumber(pd.price);
-  if (price !== null) {
-    ld.offers = { "@type": "Offer", price, priceCurrency: "USD" };
+  if (sold) {
+    // SOLD: mark the offer SoldOut. Use the SALE price only — never the list
+    // price (that would imply the list was the sale). sold_price is free-form
+    // text like list price; omit price entirely when it's absent (undisclosed).
+    const offer = { "@type": "Offer", availability: "https://schema.org/SoldOut" };
+    const soldPrice = toNumber(sold.soldPrice);
+    if (soldPrice !== null) {
+      offer.price = soldPrice;
+      offer.priceCurrency = "USD";
+    }
+    ld.offers = offer;
+  } else {
+    const price = toNumber(pd.price);
+    if (price !== null) {
+      ld.offers = { "@type": "Offer", price, priceCurrency: "USD" };
+    }
   }
 
   const postalAddress = { "@type": "PostalAddress" };
@@ -197,12 +219,12 @@ export function buildJsonLd(pd, slug, canonical, images) {
 }
 
 // ── Head injection ───────────────────────────────────────────────────────────
-function buildHeadTags(pd, slug, title, description, canonical, ogImage) {
+function buildHeadTags(pd, slug, title, description, canonical, ogImage, sold = null) {
   const t = esc(title);
   const d = esc(description);
   const c = esc(canonical);
   const img = ogImage ? esc(ogImage) : "";
-  const jsonLd = buildJsonLd(pd, slug, canonical, ogImage ? [ogImage] : []);
+  const jsonLd = buildJsonLd(pd, slug, canonical, ogImage ? [ogImage] : [], sold);
 
   const tags = [
     `<link rel="canonical" href="${c}" />`,
@@ -224,12 +246,25 @@ function buildHeadTags(pd, slug, title, description, canonical, ogImage) {
 }
 
 // ── Crawlable body ───────────────────────────────────────────────────────────
-function buildBody(pd, title) {
+function buildBody(pd, title, sold = null) {
   const parts = [];
   const address = (pd.address || "").trim();
   const city = (pd.city || "").trim();
 
   parts.push(`<h1>${esc(address || "Property Listing")}</h1>`);
+
+  // SOLD badge directly under the address: a clear "SOLD" marker, the sold date,
+  // and the sale price only when disclosed (never the list price).
+  if (sold) {
+    const soldIso = soldDateISO(sold.soldAt);
+    const soldPrice = (sold.soldPrice || "").toString().trim();
+    const badgeBits = [
+      "<strong>SOLD</strong>",
+      soldIso ? `Sold ${esc(soldIso)}` : "",
+      soldPrice ? `Sold for $${esc(soldPrice.replace(/^\$/, ""))}` : "",
+    ].filter(Boolean);
+    parts.push(`<p class="sold-badge">${badgeBits.join(" &middot; ")}</p>`);
+  }
 
   const specLine = [
     esc(city),
@@ -291,14 +326,23 @@ function buildBody(pd, title) {
 }
 
 // ── Template assembly ────────────────────────────────────────────────────────
-export function renderFound(template, pd, slug) {
-  const title = buildTitle(pd);
-  const description = buildDescription(pd);
+// `sold` is null for a LIVE page (output byte-identical to before this change),
+// or { soldAt, soldPrice } for a SOLD page — which decorates the title/description
+// with a SOLD marker + date, adds a body badge, and flips the JSON-LD offer to
+// SoldOut. A SOLD page stays fully indexable (renderFound never adds noindex).
+export function renderFound(template, pd, slug, sold = null) {
+  let title = buildTitle(pd);
+  let description = buildDescription(pd);
+  if (sold) {
+    const soldIso = soldDateISO(sold.soldAt);
+    title = clamp(`SOLD — ${title}`, 65);
+    description = clamp(`SOLD${soldIso ? ` (${soldIso})` : ""} — ${description}`, 160);
+  }
   const canonical = `${PUBLIC_APP_BASE}/p/${slug}`;
   const ogImage = typeof pd.hero_img === "string" && pd.hero_img ? pd.hero_img : "";
 
-  const headTags = buildHeadTags(pd, slug, title, description, canonical, ogImage);
-  const body = buildBody(pd, title);
+  const headTags = buildHeadTags(pd, slug, title, description, canonical, ogImage, sold);
+  const body = buildBody(pd, title, sold);
 
   let html = template;
   // Replace the generic <title>.
@@ -359,13 +403,13 @@ export default async function handler(req, res, deps = {}) {
       return res.end(renderNotFound(template));
     }
 
+    // Fetch the row by slug REGARDLESS of state, then branch on the state model
+    // below. (Selecting * brings in published / retired_at / sold_at / sold_price.)
     const supabase = deps.supabase || defaultSupabase();
     const { data, error } = await supabase
       .from("microsites")
       .select("*")
       .eq("slug", slug)
-      .eq("published", true)
-      .is("retired_at", null)
       .maybeSingle();
 
     // A returned query error is an UNEXPECTED failure (e.g. a transient outage),
@@ -373,14 +417,21 @@ export default async function handler(req, res, deps = {}) {
     // indexable shell rather than wrongly noindex-ing a real listing.
     if (error) throw error;
 
-    // Intentional not-found / retired: a clean null result → 404 + noindex.
-    if (!data) {
+    // ── State model (precedence: withdrawn > sold > live > draft) ──
+    const withdrawn = !!(data && data.retired_at);
+    const sold = !!(data && data.sold_at) && !withdrawn;
+    const live = !!(data && data.published === true) && !withdrawn && !sold;
+
+    // No row, WITHDRAWN (retired), or unpublished DRAFT → 404 + noindex.
+    if (!data || withdrawn || (!sold && !live)) {
       res.status(404).setHeader("Content-Type", "text/html; charset=utf-8");
       return res.end(renderNotFound(template));
     }
 
     const pd = data.property_data && typeof data.property_data === "object" ? data.property_data : {};
-    const html = renderFound(template, pd, slug);
+    // SOLD → indexable sold page (badge + SoldOut); LIVE → unchanged normal page.
+    const soldInfo = sold ? { soldAt: data.sold_at, soldPrice: data.sold_price } : null;
+    const html = renderFound(template, pd, slug, soldInfo);
 
     res.status(200);
     res.setHeader("Content-Type", "text/html; charset=utf-8");

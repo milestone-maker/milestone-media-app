@@ -230,7 +230,7 @@ function LeadCapture({ mode, theme, micrositeId, listingId }) {
 // MICROSITE RENDERER
 // ============================================================
 
-export default function MicrositeRenderer({ microsite, theme, agentBranding, mode = "live", micrositeId, listingId, micrositeSlug, brokerageName }) {
+export default function MicrositeRenderer({ microsite, theme, agentBranding, mode = "live", micrositeId, listingId, micrositeSlug, brokerageName, sold = null }) {
   const data = microsite || {};
   const themeName = theme || "Obsidian";
 
@@ -661,8 +661,28 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
   // ─────────────────────────────────────────────────────────────────
   // SHARED LAYOUT — split / minimal / editorial / cinematic
   // ─────────────────────────────────────────────────────────────────
+  // SOLD treatment: when the microsite row carries sold_at, show a clear fixed
+  // SOLD banner so the human-facing page matches the server-rendered sold page
+  // (api/render-microsite.js) and a sold listing never reads as "live". Sale
+  // price shown only when disclosed (sold.soldPrice), never the list price.
+  const soldDateDisplay = sold?.soldAt ? String(sold.soldAt).slice(0, 10) : "";
+  const soldPriceDisplay = sold?.soldPrice ? String(sold.soldPrice).trim().replace(/^\$/, "") : "";
+
   return (
     <div style={{ fontFamily: "'Cormorant Garamond', serif", overflow: "hidden" }}>
+      {sold && (
+        <div style={{
+          position: "fixed", top: 60, left: 0, right: 0, zIndex: 999,
+          background: "#7a1f1f", color: "#F5ECD7",
+          fontFamily: "'Jost', sans-serif", fontSize: 13, letterSpacing: "0.12em",
+          textTransform: "uppercase", textAlign: "center", padding: "10px 16px",
+          borderBottom: "1px solid #C9A84C",
+        }}>
+          <strong style={{ letterSpacing: "0.2em" }}>SOLD</strong>
+          {soldDateDisplay ? ` · Sold ${soldDateDisplay}` : ""}
+          {soldPriceDisplay ? ` · Sold for $${soldPriceDisplay}` : ""}
+        </div>
+      )}
       {/* Fixed Top Nav Bar */}
       <div style={{
         position: "fixed", top: 0, left: 0, right: 0, zIndex: 1000,

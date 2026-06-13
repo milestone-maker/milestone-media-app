@@ -46,15 +46,17 @@ function isoDate(value) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
-// Build a valid urlset from rows of { slug, created_at?, updated_at? }. Rows
-// without a slug are skipped; <lastmod> is omitted when no usable date exists.
-// An empty (or all-skipped) input yields a valid empty <urlset></urlset>.
+// Build a valid urlset from rows of { slug, sold_at?, created_at?, updated_at? }.
+// Rows without a slug are skipped; <lastmod> is omitted when no usable date
+// exists. A freshly-SOLD page uses sold_at so the change signals freshness;
+// otherwise updated_at (if ever added) then created_at. An empty (or
+// all-skipped) input yields a valid empty <urlset></urlset>.
 export function buildSitemapXml(rows, base = PUBLIC_APP_BASE) {
   const urls = (Array.isArray(rows) ? rows : [])
     .filter((r) => r && r.slug)
     .map((r) => {
       const loc = escapeXml(`${base}/p/${r.slug}`);
-      const lastmod = isoDate(r.updated_at || r.created_at);
+      const lastmod = isoDate(r.sold_at || r.updated_at || r.created_at);
       return lastmod
         ? `  <url><loc>${loc}</loc><lastmod>${lastmod}</lastmod></url>`
         : `  <url><loc>${loc}</loc></url>`;
@@ -67,9 +69,11 @@ export function buildSitemapXml(rows, base = PUBLIC_APP_BASE) {
 export default async function handler(req, res, deps = {}) {
   try {
     const supabase = deps.supabase || defaultSupabase();
+    // published = true AND retired_at IS NULL deliberately INCLUDES sold pages
+    // (a sold listing keeps published=true; only retiring takes it down).
     const { data, error } = await supabase
       .from("microsites")
-      .select("slug, created_at")
+      .select("slug, sold_at, created_at")
       .eq("published", true)
       .is("retired_at", null);
     if (error) throw error;
