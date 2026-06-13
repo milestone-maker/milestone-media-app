@@ -559,6 +559,44 @@ const LIVE_ROW = { published: true, retired_at: null, sold_at: null, property_da
   check("state(draft): noindex present", /name="robots" content="noindex"/.test(res.body || ""));
 }
 
+// ── White-label head metadata (Stage 6) ─────────────────────────────────────
+// og:site_name and the title's brand suffix come from the agent's branding
+// snapshot (property_data.agency_name) — the SAME field the visible body reads —
+// with the Milestone fallback preserved for unbranded agents, and the agency name
+// escaped at every head injection point (it's agent-entered, same XSS class).
+{
+  // (a) WITH a brand name → og:site_name uses it (escaped), never "Milestone".
+  const BRANDED = { ...FULL, agency_name: "Premier Realty Group" };
+  const html = renderFound(TEMPLATE, BRANDED, "2410-luxury");
+  check("wl: og:site_name uses agency_name", html.includes(`<meta property="og:site_name" content="Premier Realty Group" />`), "agency name missing from og:site_name");
+  check("wl: og:site_name is NOT Milestone when branded", !html.includes(`<meta property="og:site_name" content="Milestone Media &amp; Photography" />`));
+
+  // (b) Brand name in the TITLE fallback path (no address/city/specs → the
+  //     "Property Listing — {brand}" suffix is what's exercised).
+  const BARE_BRANDED = { agency_name: "Premier Realty Group" };
+  check("wl: buildTitle brand suffix uses agency_name", buildTitle(BARE_BRANDED) === "Property Listing — Premier Realty Group", buildTitle(BARE_BRANDED));
+  const bareHtml = renderFound(TEMPLATE, BARE_BRANDED, "s");
+  check("wl: title tag uses agency_name (no Milestone)", /<title>Property Listing — Premier Realty Group<\/title>/.test(bareHtml) && !bareHtml.includes("<title>Property Listing — Milestone"), "title brand suffix not white-labeled");
+
+  // (c) WITHOUT a brand name → Milestone fallback preserved (no regression). Both
+  //     og:site_name (escaped & → &amp;) and the bare-title brand suffix.
+  const PLAIN = { ...FULL }; // FULL has no agency_name
+  const plainHtml = renderFound(TEMPLATE, PLAIN, "2410-luxury");
+  check("wl(fallback): og:site_name is Milestone (escaped)", plainHtml.includes(`<meta property="og:site_name" content="Milestone Media &amp; Photography" />`), "Milestone fallback lost");
+  check("wl(fallback): brandName() default", mod.brandName({}) === "Milestone Media & Photography");
+  check("wl(fallback): brandName() empty/whitespace → Milestone", mod.brandName({ agency_name: "   " }) === "Milestone Media & Photography");
+  check("wl(fallback): bare title falls back to Milestone", buildTitle({}) === "Property Listing — Milestone Media & Photography", buildTitle({}));
+
+  // (d) XSS: agency name with markup/quotes must be escaped in the head, never raw.
+  const XSS_BRAND = { ...FULL, agency_name: `<script>alert(1)</script>&"'X` };
+  const xssBrandHtml = renderFound(TEMPLATE, XSS_BRAND, "s");
+  check("wl(xss): og:site_name escaped", xssBrandHtml.includes(`content="&lt;script&gt;alert(1)&lt;/script&gt;&amp;&quot;&#39;X"`), "agency name not escaped in og:site_name");
+  check("wl(xss): no raw <script> from agency name in head", !xssBrandHtml.includes(`<script>alert(1)</script></`) && !/og:site_name" content="[^"]*<script/.test(xssBrandHtml));
+  // XSS brand name in the bare-title path → escaped in the <title> too.
+  const xssBareHtml = renderFound(TEMPLATE, { agency_name: `<b>"&'</b>` }, "s");
+  check("wl(xss): title brand suffix escaped", /<title>Property Listing — &lt;b&gt;&quot;&amp;&#39;&lt;\/b&gt;<\/title>/.test(xssBareHtml), "agency name not escaped in title");
+}
+
 // ── Report ───────────────────────────────────────────────────────────────────
 if (fails.length) {
   console.error(`\n✗ ${fails.length} check(s) FAILED:`);
