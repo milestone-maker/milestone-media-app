@@ -43,7 +43,7 @@ export const THEMES = [
 // White-label Gap 2: agent brand colors over the THEME catalog. The pure helpers
 // live in ./theme.js (no JSX → unit-testable under plain node) and are re-exported
 // here so component code keeps importing everything from "../lib/ui".
-export { hexToRgba, resolveEffectiveTheme } from "./theme.js";
+export { hexToRgba, resolveEffectiveTheme, luminance, isDarkBg } from "./theme.js";
 
 export function StatusBadge({ status }) {
   const colors = {

@@ -17,7 +17,7 @@ import { dirname, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MOD_PATH  = resolve(__dirname, "..", "src", "lib", "theme.js");
-const { hexToRgba, resolveEffectiveTheme } = await import(pathToFileURL(MOD_PATH).href);
+const { hexToRgba, resolveEffectiveTheme, luminance, isDarkBg } = await import(pathToFileURL(MOD_PATH).href);
 
 let passed = 0;
 const fails = [];
@@ -26,8 +26,15 @@ function check(name, cond, detail) {
   else { fails.push(`${name}${detail ? ` — ${detail}` : ""}`); }
 }
 
-// Base theme mirrors a THEMES catalog entry (Prestige: dark bg, gold accent).
+// Base theme mirrors a NON-locked THEMES catalog entry (Obsidian: dark bg, teal
+// accent). Used for the override cases — a non-Prestige theme is overridable.
 const BASE = {
+  name: "Obsidian", accent: "#6EC6C6", bg: "#050508", text: "#fff",
+  sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",
+};
+
+// The Milestone signature theme — LOCKED: never overridden by brand colors.
+const PRESTIGE = {
   name: "Prestige", accent: "#C9A84C", bg: "#0f0f1a", text: "#fff",
   sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",
 };
@@ -62,8 +69,20 @@ check("hexToRgba: null → null", hexToRgba(null, 0.1) === null);
   check("on: card derived from text @4%", t.card === "rgba(26,26,26,0.04)", t.card);
   check("on: border derived from text @10%", t.border === "rgba(26,26,26,0.1)", t.border);
   check("on: card/border are valid rgba()", /^rgba\(\d+,\d+,\d+,0\.\d+\)$/.test(t.card) && /^rgba\(\d+,\d+,\d+,0\.\d+\)$/.test(t.border));
-  check("on: name preserved from base", t.name === "Prestige", t.name);
-  check("on: returns a NEW object (base untouched)", t !== BASE && BASE.bg === "#0f0f1a");
+  check("on: name preserved from base", t.name === "Obsidian", t.name);
+  check("on: returns a NEW object (base untouched)", t !== BASE && BASE.bg === "#050508");
+}
+
+// ── (a2) PRESTIGE LOCK: Milestone signature is NEVER overridden ──────────────
+{
+  const t = resolveEffectiveTheme(PRESTIGE, BRAND); // toggle on + all tokens
+  check("lock: Prestige returns base reference (unchanged)", t === PRESTIGE);
+  check("lock: Prestige bg stays Milestone", t.bg === "#0f0f1a", t.bg);
+  check("lock: Prestige accent stays gold", t.accent === "#C9A84C", t.accent);
+  // Only Prestige is locked — Classic (gold accent too) is still overridable.
+  const classic = { name: "Classic", accent: "#C9A84C", bg: "#1B2A4A", text: "#fff", sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)" };
+  const ct = resolveEffectiveTheme(classic, BRAND);
+  check("lock: Classic is NOT locked (overridden)", ct.bg === "#FBF7EE" && ct.accent === "#2A4A5E", `${ct.bg}/${ct.accent}`);
 }
 
 // ── (b) toggle off → base theme returned unchanged (same reference) ──────────
@@ -95,6 +114,24 @@ check("hexToRgba: null → null", hexToRgba(null, 0.1) === null);
   check("unparseable text: sub overridden", t.sub === "#6B6256", t.sub);
   check("unparseable text: card falls back to base", t.card === BASE.card, t.card);
   check("unparseable text: border falls back to base", t.border === BASE.border, t.border);
+}
+
+// ── luminance + isDarkBg ─────────────────────────────────────────────────────
+{
+  check("luminance: black = 0", luminance("#000000") === 0, String(luminance("#000000")));
+  check("luminance: white ≈ 1", Math.abs(luminance("#ffffff") - 1) < 1e-9, String(luminance("#ffffff")));
+  check("luminance: dark theme bg < 0.5", luminance("#0f0f1a") < 0.5, String(luminance("#0f0f1a")));
+  check("luminance: cream bg > 0.5", luminance("#FBF7EE") > 0.5, String(luminance("#FBF7EE")));
+  check("luminance: green channel weighted highest", luminance("#00ff00") > luminance("#ff0000") && luminance("#ff0000") > luminance("#0000ff"));
+  check("luminance: unparseable → null", luminance("rebeccapurple") === null);
+
+  check("isDarkBg: dark hex → true", isDarkBg("#0f0f1a") === true);
+  check("isDarkBg: light hex → false", isDarkBg("#FBF7EE") === false);
+  check("isDarkBg: midpoint-ish dark → true", isDarkBg("#333333") === true);
+  // Unparseable → use the caller-supplied fallback (verbatim both ways).
+  check("isDarkBg: unparseable → fallback true", isDarkBg("nope", true) === true);
+  check("isDarkBg: unparseable → fallback false", isDarkBg("nope", false) === false);
+  check("isDarkBg: default fallback is true", isDarkBg("nope") === true);
 }
 
 // ── Report ───────────────────────────────────────────────────────────────────
