@@ -11,11 +11,13 @@
 
 import nodemailer from "nodemailer";
 import Stripe from "stripe";
+// Single source of truth for the app base (see api/_lib/microsite.js). Aliased to
+// the existing local name so the email-body usage below stays unchanged.
+import { PUBLIC_APP_BASE as APP_URL } from "./_lib/microsite.js";
 
 const FROM_EMAIL     = "info@milestonemediaphoto.com";
 const BUSINESS_EMAIL = "smiles@milestonemediaphoto.com";
 const BUSINESS_NAME  = "Milestone Media & Photography";
-const APP_URL        = "https://app.milestonemediaphotography.com";
 
 // ── OAuth2 token refresh (shared pattern with send-email.js) ──
 async function refreshAccessToken() {

@@ -15,8 +15,7 @@
 
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
-
-const PUBLIC_APP_BASE = "https://app.milestonemediaphotography.com";
+import { PUBLIC_APP_BASE } from "./_lib/microsite.js";
 
 function corsHeaders() {
   return {

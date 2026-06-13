@@ -33,6 +33,7 @@ import { checkMicrositeEntitlement } from "./_lib/entitlement.js";
 import { listingPayloadFromMicrosite } from "./_lib/listingFromMicrosite.js";
 import { geocodeAddress, getNearbySchoolsFromGeo } from "./_lib/schools.js";
 import { withinMicrositeCap, micrositeCapForTier } from "../shared/micrositeAccess.js";
+import { PUBLIC_APP_BASE } from "./_lib/microsite.js";
 
 // Best-effort, strictly non-blocking bake of schools + coordinates. Geocodes
 // ONCE, then derives both from that geo. Races the whole thing against a
@@ -61,8 +62,6 @@ async function bakeSchoolsAndCoordinates(fullAddress) {
     return EMPTY;
   }
 }
-
-const PUBLIC_APP_BASE = "https://app.milestonemediaphotography.com";
 
 // ── CORS helper (matches calendar.js / send-email.js style) ──────────
 function corsHeaders() {

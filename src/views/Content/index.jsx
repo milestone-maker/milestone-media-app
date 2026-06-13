@@ -18,6 +18,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
 import { useAuth } from "../../lib/auth";
 import { isSubscribed } from "../../lib/subscription";
+import { PUBLIC_APP_BASE as MICROSITE_PUBLIC_BASE } from "../../lib/siteConfig";
 import VoiceProfileModal from "../../components/VoiceProfileModal";
 import SubscriptionsView from "../Subscriptions";
 import PhotosPanel from "./PhotosPanel";
@@ -64,7 +65,6 @@ const platformLabel = (key) => PLATFORMS.find((p) => p.key === key)?.label || ke
 // microsite URL, or drop the token's line when the listing has no published
 // microsite. NEVER show the raw token. Mirrors the server's substituteMicrositeToken.
 const MICROSITE_TOKEN = "[[MILESTONE_MICROSITE_URL]]";
-const MICROSITE_PUBLIC_BASE = "https://app.milestonemediaphotography.com";
 function resolveCaptionForDisplay(caption, micrositeUrl) {
   if (typeof caption !== "string" || !caption.includes(MICROSITE_TOKEN)) return caption;
   if (micrositeUrl) return caption.split(MICROSITE_TOKEN).join(micrositeUrl);

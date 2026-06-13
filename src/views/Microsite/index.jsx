@@ -3,6 +3,7 @@ import { supabase } from "../../supabaseClient";
 import { useAuth } from "../../lib/auth";
 import { MEDIA_ICONS, THEMES, THEME_LAYOUT } from "../../lib/ui";
 import { ADDONS } from "../../lib/pricing";
+import { PUBLIC_APP_BASE } from "../../lib/siteConfig";
 import MicrositeRenderer from "../../components/MicrositeRenderer";
 import ChatAssistantSection from "./ChatAssistantSection.jsx";
 import ComparableSalesSection from "./ComparableSalesSection.jsx";
@@ -595,7 +596,7 @@ function MicrositeView() {
   const baseSlug = (data.address || "your-listing").split(" ").slice(0, 2).join("-").toLowerCase().replace(/[^a-z0-9-]/g, "");
   const agentSuffix = (user?.id || "").slice(-8);
   const slug = publishedSlug || (agentSuffix ? `${baseSlug}-${agentSuffix}` : baseSlug);
-  const liveUrl = `https://app.milestonemediaphotography.com/p/${slug}`;
+  const liveUrl = `${PUBLIC_APP_BASE}/p/${slug}`;
 
   const setField = (key, val) => setData(d => ({ ...d, [key]: val }));
   const setFeature = (i, val) => setData(d => { const f = [...d.features]; f[i] = val; return { ...d, features: f }; });

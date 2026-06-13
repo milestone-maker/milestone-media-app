@@ -25,11 +25,10 @@ import { createClient } from "@supabase/supabase-js";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { PUBLIC_APP_BASE } from "./_lib/microsite.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PRICING_PATH = resolve(__dirname, "..", "public", "pricing.json");
-
-const PUBLIC_APP_BASE = "https://app.milestonemediaphotography.com";
 
 function corsHeaders() {
   return {
