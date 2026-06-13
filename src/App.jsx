@@ -479,6 +479,8 @@ function EditProfileModal({ onClose }) {
   const [brandAccentColor, setBrandAccentColor] = useState(profile?.brand_accent_color ?? CAROUSEL_BRAND_DEFAULTS.accentColor);
   const [brandFontHeadline, setBrandFontHeadline] = useState(profile?.brand_font_headline ?? CAROUSEL_BRAND_DEFAULTS.fontHeadline);
   const [brandFontBody, setBrandFontBody]     = useState(profile?.brand_font_body     ?? CAROUSEL_BRAND_DEFAULTS.fontBody);
+  // ── White-label Gap 2: opt-in to apply the brand colors to listing pages
+  const [useBrandColors, setUseBrandColors]   = useState(profile?.use_brand_colors === true);
 
   // ── Brokerage info (consumed by the microsite chat assistant)
   const [brokerageAbout, setBrokerageAbout] = useState(profile?.brokerage_about || "");
@@ -526,6 +528,7 @@ function EditProfileModal({ onClose }) {
       brand_accent_color: brandAccentColor || null,
       brand_font_headline: brandFontHeadline || null,
       brand_font_body: brandFontBody || null,
+      use_brand_colors: useBrandColors,
       brokerage_about: brokerageAbout.trim() || null,
       brokerage_url: brokerageUrl.trim() || null,
     };
@@ -779,6 +782,33 @@ function EditProfileModal({ onClose }) {
                 </select>
               </div>
             </div>
+
+            {/* White-label Gap 2: opt-in to apply the brand colors above to the
+                public listing pages. Off keeps the selected Milestone template. */}
+            <label
+              htmlFor="use-brand-colors"
+              style={{
+                display: "flex", alignItems: "center", gap: 12, marginTop: 14, cursor: "pointer",
+                padding: "12px 14px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.1)",
+                background: "rgba(255,255,255,0.03)",
+              }}
+            >
+              <input
+                id="use-brand-colors"
+                type="checkbox"
+                checked={useBrandColors}
+                onChange={e => setUseBrandColors(e.target.checked)}
+                style={{ width: 16, height: 16, accentColor: "#C9A84C", cursor: "pointer", flexShrink: 0 }}
+              />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.85)" }}>
+                  Use my brand colors on listing pages
+                </div>
+                <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>
+                  Off keeps the Milestone template colors. Applies to listings you publish after saving.
+                </div>
+              </div>
+            </label>
           </div>
 
           {divider}
