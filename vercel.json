@@ -2,6 +2,8 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/p/:slug", "destination": "/api/render-microsite?slug=:slug" },
+    { "source": "/sitemap.xml", "destination": "/api/sitemap" },
+    { "source": "/robots.txt", "destination": "/api/robots" },
     { "source": "/(.*)", "destination": "/" }
   ],
   "functions": {
