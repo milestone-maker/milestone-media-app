@@ -226,6 +226,7 @@ function MicrositePreview({ data, theme, listingPhotos, listingVideo, listingFlo
     matterport_url: data.matterportUrl || "",
     address:        data.address || "",
     city:           data.city || "",
+    neighborhood:   (data.neighborhood || "").trim() || null,
     price:          data.price || "",
     beds:           data.beds || "",
     baths:          data.baths || "",
@@ -307,7 +308,7 @@ function MicrositeView() {
   const [bookings, setBookings] = useState([]);
   const [selectedBookingId, setSelectedBookingId] = useState(null);
   const [data, setData] = useState({
-    address: "", city: "", price: "",
+    address: "", city: "", neighborhood: "", price: "",
     beds: "", baths: "", sqft: "",
     description: "", agentName: "", agentPhone: "",
     heroImg: "",
@@ -579,7 +580,7 @@ function MicrositeView() {
     setPublished(false);
     setData(d => ({
       ...d,
-      address: "", city: "", price: "",
+      address: "", city: "", neighborhood: "", price: "",
       beds: "", baths: "", sqft: "",
       description: "", agentName: "", agentPhone: "",
       heroImg: "",
@@ -768,6 +769,7 @@ function MicrositeView() {
     setData({
       address: pd.address || "",
       city: pd.city || "",
+      neighborhood: pd.neighborhood || "",
       price: pd.price || "",
       beds: pd.beds || "",
       baths: pd.baths || "",
@@ -886,6 +888,9 @@ function MicrositeView() {
         propertyData: {
           address: data.address,
           city: data.city,
+          // Optional hyper-local term. Normalize blank → null so the server +
+          // the "neighborhood || city" fallback never see an empty string.
+          neighborhood: (data.neighborhood || "").trim() || null,
           price: data.price,
           beds: data.beds,
           baths: data.baths,
@@ -1420,7 +1425,7 @@ function MicrositeView() {
             padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
             letterSpacing: "0.06em", textTransform: "uppercase", cursor: "pointer", fontWeight: 600,
           }}>✏️ Edit</button>
-          <button onClick={() => { skipAutofillRef.current = false; setSelectedBookingId(null); setSelectedListingId(null); setStep("build"); setPublished(false); setPublishedSlug(null); setLeads([]); setData({ address: "", city: "", price: "", beds: "", baths: "", sqft: "", description: "", agentName: "", agentPhone: "", heroImg: "", features: ["","","",""], mediaTypes: ["Photos","Drone","3D Tour"] }); }} style={{
+          <button onClick={() => { skipAutofillRef.current = false; setSelectedBookingId(null); setSelectedListingId(null); setStep("build"); setPublished(false); setPublishedSlug(null); setLeads([]); setData({ address: "", city: "", neighborhood: "", price: "", beds: "", baths: "", sqft: "", description: "", agentName: "", agentPhone: "", heroImg: "", features: ["","","",""], mediaTypes: ["Photos","Drone","3D Tour"] }); }} style={{
             background: "transparent", border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.35)",
             padding: "7px 12px", borderRadius: 7, fontFamily: "'Jost', sans-serif", fontSize: 11,
             letterSpacing: "0.06em", textTransform: "uppercase", cursor: "pointer",
@@ -2021,6 +2026,10 @@ function MicrositeView() {
         <div>
           <label style={labelStyle}>City, State & ZIP</label>
           <input style={inputStyle} placeholder={sourceType === "booking" ? "Fort Worth, TX 76109" : "Dallas, TX 75206"} value={data.city} onChange={e => setField("city", e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Neighborhood <span style={{ color: "rgba(255,255,255,0.35)", textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>(optional)</span></label>
+          <input style={inputStyle} placeholder="e.g. Lakewood, Bishop Arts" value={data.neighborhood} onChange={e => setField("neighborhood", e.target.value)} />
         </div>
         <div>
           <label style={labelStyle}>List Price</label>

@@ -339,6 +339,12 @@ export default async function handler(req, res, depsOverride) {
     const finalPropertyData = {
       address: propertyData.address || "",
       city: propertyData.city || "",
+      // Optional hyper-local term. Additive: bake it into property_data when
+      // present, normalized blank → null so the "neighborhood || city" fallback
+      // (listingFromMicrosite + content-gen + render-microsite) stays coherent.
+      // From here it flows untouched: listingPayloadFromMicrosite reads
+      // pd.neighborhood → listings.neighborhood (step 9b mirror, no change there).
+      neighborhood: (propertyData.neighborhood || "").toString().trim() || null,
       price: propertyData.price || "",
       beds: propertyData.beds || "",
       baths: propertyData.baths || "",

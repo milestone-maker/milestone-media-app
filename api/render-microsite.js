@@ -126,20 +126,35 @@ function soldDateISO(value) {
 export function buildTitle(pd) {
   const address = (pd.address || "").trim();
   const city = (pd.city || "").trim();
+  const neighborhood = (pd.neighborhood || "").trim();
   const beds = (pd.beds || "").toString().trim();
   const baths = (pd.baths || "").toString().trim();
 
-  const place = [address, city].filter(Boolean).join(", ");
+  // TITLE-ONLY short city: the segment before the first comma (e.g.
+  // "Dallas, Texas, 75212" → "Dallas"), so neighborhood + city both fit and the
+  // title isn't bloated by state/ZIP. Empty segment (e.g. ", Texas") or no comma
+  // → fall back to the full city. The full city string is unchanged in the meta
+  // description, body location line, and JSON-LD (addressLocality).
+  const shortCity = city.split(",")[0].trim() || city;
+
   const specBits = [];
   if (beds) specBits.push(`${beds} Bed`);
   if (baths) specBits.push(`${baths} Bath`);
   const specs = specBits.join(" / ");
 
-  let title;
-  if (place && specs) title = `${place} — ${specs}`;
-  else if (place) title = place;
-  else title = "Property Listing — Milestone Media & Photography";
-  return clamp(title, 65);
+  // Neighborhood is the hyper-local term — place it before the (short) city.
+  const titleFor = (place) =>
+    place && specs ? `${place} — ${specs}` : place || "Property Listing — Milestone Media & Photography";
+
+  // Prefer address, neighborhood, short city. Overflow safety: if that still
+  // exceeds ~65 chars, drop the CITY from the title only (keep the hyper-local
+  // neighborhood) — rare now that the city is shortened. The escaping of the
+  // assembled title (incl. the derived short city) happens downstream via
+  // esc(title) in renderFound, the same escaper used for the full city.
+  const full = titleFor([address, neighborhood, shortCity].filter(Boolean).join(", "));
+  if (full.length <= 65) return full;
+  const noCity = titleFor([address, neighborhood].filter(Boolean).join(", "));
+  return clamp(noCity, 65);
 }
 
 export function buildDescription(pd) {
@@ -149,7 +164,7 @@ export function buildDescription(pd) {
   if (pd.sqft) specBits.push(`${String(pd.sqft).trim()} sqft`);
   const specs = specBits.join(", ");
 
-  const place = [pd.address, pd.city].map((v) => (v || "").trim()).filter(Boolean).join(", ");
+  const place = [pd.address, pd.neighborhood, pd.city].map((v) => (v || "").trim()).filter(Boolean).join(", ");
   const desc = (pd.description || "").replace(/\s+/g, " ").trim();
 
   const lead = [place, specs].filter(Boolean).join(" · ");
@@ -167,11 +182,17 @@ export function buildJsonLd(pd, slug, canonical, images, sold = null) {
     "@type": "RealEstateListing",
     url: canonical,
   };
-  const name = [pd.address, pd.city].map((v) => (v || "").trim()).filter(Boolean).join(", ");
+  const neighborhood = (pd.neighborhood || "").trim();
+  // Fold the neighborhood into the listing name (hyper-local signal). Keep
+  // addressLocality = the CITY below — never misuse it for the neighborhood.
+  const name = [pd.address, neighborhood, pd.city].map((v) => (v || "").trim()).filter(Boolean).join(", ");
   if (name) ld.name = name;
   if (images.length) ld.image = images;
   const desc = (pd.description || "").replace(/\s+/g, " ").trim();
   if (desc) ld.description = desc;
+  // Schema-valid neighborhood as a containing Place (value lives inside the
+  // object that gets JSON.stringify'd — no string concatenation into the script).
+  if (neighborhood) ld.containedInPlace = { "@type": "Place", name: neighborhood };
 
   if (sold) {
     // SOLD: mark the offer SoldOut. Use the SALE price only — never the list
@@ -273,7 +294,9 @@ function buildBody(pd, title, sold = null) {
     parts.push(`<p class="sold-badge">${badgeBits.join(" &middot; ")}</p>`);
   }
 
+  const neighborhood = (pd.neighborhood || "").trim();
   const specLine = [
+    neighborhood ? esc(neighborhood) : "",
     esc(city),
     (pd.price || "").toString().trim() ? `$${esc(String(pd.price).trim().replace(/^\$/, ""))}` : "",
     pd.beds ? `${esc(String(pd.beds).trim())} bed` : "",

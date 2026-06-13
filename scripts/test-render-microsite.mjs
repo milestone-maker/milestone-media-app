@@ -213,6 +213,95 @@ check("render: dup hero rendered as exactly one <img>", (fullHtml.match(/<img sr
 check("render: feature list rendered, blanks dropped", fullHtml.includes("<li>Open Floor PLan</li>") && fullHtml.includes("<li>Chef&#39;s Kitchen</li>"));
 check("render: schools section", fullHtml.includes("<h2>Schools</h2>") && fullHtml.includes("Whitney M Young Jr El"));
 
+// ── Neighborhood (optional hyper-local term) ─────────────────────────────────
+// Present → appears before the city in title, description, body, and JSON-LD;
+// addressLocality stays the CITY. Absent → clean city-only fallback. XSS-escaped.
+// TITLE uses a SHORT city (segment before the first comma); description, body,
+// and JSON-LD keep the FULL city string.
+const NBHD = { ...FULL, neighborhood: "Lakewood" };
+{
+  const t = buildTitle(NBHD);
+  check("nbhd: title has neighborhood before city", /Lakewood, Dallas/.test(t), t);
+  check("nbhd: title ≤65", t.length <= 65, `len=${t.length}`);
+  const d = buildDescription(NBHD);
+  check("nbhd: description has neighborhood before city", d.includes("Lakewood, Dallas"), d);
+  const ld = JSON.parse(buildJsonLd(NBHD, "s", `${PUBLIC_APP_BASE}/p/s`, []));
+  check("nbhd: JSON-LD name folds in neighborhood", ld.name.includes("Lakewood"), ld.name);
+  check("nbhd: JSON-LD containedInPlace is the neighborhood", ld.containedInPlace?.["@type"] === "Place" && ld.containedInPlace?.name === "Lakewood", JSON.stringify(ld.containedInPlace));
+  check("nbhd: JSON-LD addressLocality stays the CITY (not neighborhood)", ld.address?.addressLocality === "Dallas", JSON.stringify(ld.address));
+  const html = renderFound(TEMPLATE, NBHD, "2410-luxury");
+  check("nbhd: <title> contains neighborhood", /<title>[^<]*Lakewood[^<]*<\/title>/.test(html));
+  check("nbhd: meta description contains neighborhood", /<meta name="description" content="[^"]*Lakewood[^"]*"/.test(html));
+  check("nbhd: body spec line has neighborhood before city", /<p>Lakewood &middot; Dallas/.test(html), "body spec line");
+}
+
+// ── Short-city derivation in the TITLE (full city kept everywhere else) ───────
+{
+  // City WITH commas → only the segment before the first comma appears in the title.
+  const COMMA = { ...FULL, neighborhood: "Lakewood", city: "Dallas, Texas, 75212" };
+  const t = buildTitle(COMMA);
+  check("shortcity: title uses 'Dallas' (pre-comma segment)", t.includes("Lakewood, Dallas —") , t);
+  check("shortcity: title omits state/ZIP", !t.includes("Texas") && !t.includes("75212"), t);
+  check("shortcity: title ≤65 with neighborhood + short city", t.length <= 65, `len=${t.length}`);
+  // Full city preserved in description, body, and JSON-LD addressLocality.
+  check("shortcity: description keeps FULL city", buildDescription(COMMA).includes("Dallas, Texas, 75212"));
+  const html = renderFound(TEMPLATE, COMMA, "s");
+  check("shortcity: body keeps FULL city", html.includes("Dallas, Texas, 75212"));
+  check("shortcity: JSON-LD addressLocality keeps FULL city", JSON.parse(buildJsonLd(COMMA, "s", `${PUBLIC_APP_BASE}/p/s`, [])).address?.addressLocality === "Dallas, Texas, 75212");
+
+  // City with NO comma → unchanged.
+  check("shortcity: no-comma city unchanged", buildTitle({ address: "10 Main St", city: "Dallas", beds: "3", baths: "2" }).includes("10 Main St, Dallas —"));
+  // Empty leading segment (", Texas") → graceful fallback to the full value.
+  check("shortcity: empty pre-comma segment falls back to full city", buildTitle({ address: "10 Main St", city: ", Texas", beds: "3", baths: "2" }).includes(", Texas"));
+  // Empty city → no trailing separator, no crash.
+  check("shortcity: empty city → address-only place", buildTitle({ address: "10 Main St", city: "", beds: "3", baths: "2" }) === "10 Main St — 3 Bed / 2 Bath");
+}
+
+// Title overflow SAFETY (rare now with the short city): a pathologically long
+// address + neighborhood still overflows even with a short city → drop the city
+// from the TITLE, keep the neighborhood. City still present in body + JSON-LD.
+{
+  // address+neighborhood (~43) fits the no-city title (~60); +", Dallas" overflows 65.
+  const LONG = { ...FULL, address: "1954 Toronto Boulevard", neighborhood: "Preston Hollow West", city: "Dallas, Texas, 75212" };
+  const full = `${LONG.address}, ${LONG.neighborhood}, Dallas — 5 Bed / 4 Bath`;
+  check("nbhd(overflow): the short-city form still overflows 65", full.length > 65, `len=${full.length}`);
+  const t = buildTitle(LONG);
+  check("nbhd(overflow): title ≤65", t.length <= 65, `len=${t.length}`);
+  check("nbhd(overflow): keeps neighborhood in title", t.includes("Preston Hollow West"), t);
+  check("nbhd(overflow): drops city from title (even short city)", !t.includes("Dallas"), t);
+  const html = renderFound(TEMPLATE, LONG, "s");
+  check("nbhd(overflow): city still in body", html.includes("Dallas, Texas, 75212"));
+  const ld = JSON.parse(buildJsonLd(LONG, "s", `${PUBLIC_APP_BASE}/p/s`, []));
+  check("nbhd(overflow): city still in JSON-LD addressLocality", ld.address?.addressLocality === "Dallas, Texas, 75212");
+}
+
+// Absent neighborhood → clean city-only fallback (short city in title), no stray separators.
+{
+  const noNbhdHtml = renderFound(TEMPLATE, FULL, "2410-luxury"); // FULL has no neighborhood key (city "Dallas")
+  check("nbhd(absent): title city-only, no ', ,'", /<title>2410 Luxury Lane, Dallas /.test(noNbhdHtml) && !noNbhdHtml.includes(", , "));
+  check("nbhd(absent): body spec line starts at city, no leading separator", /<p>Dallas &middot;/.test(noNbhdHtml));
+  const ld = JSON.parse(buildJsonLd(FULL, "s", `${PUBLIC_APP_BASE}/p/s`, []));
+  check("nbhd(absent): JSON-LD has no containedInPlace", ld.containedInPlace === undefined);
+  // Absent neighborhood + comma'd city → title shows short city, full city elsewhere.
+  const commaNoNbhd = { ...FULL, city: "Dallas, Texas, 75212" };
+  const t2 = buildTitle(commaNoNbhd);
+  check("nbhd(absent)+comma: title short city only", t2.includes("Luxury Lane, Dallas —") && !t2.includes("Texas"), t2);
+  check("nbhd(absent)+comma: description keeps full city", buildDescription(commaNoNbhd).includes("Dallas, Texas, 75212"));
+}
+
+// XSS: neighborhood with markup must be escaped in head + body; raw value survives
+// only inside the JSON-LD (decoded by JSON.parse), never as live markup.
+{
+  const XSS_NBHD = { ...FULL, neighborhood: `<b>Oak"&'Cliff</b>` };
+  const html = renderFound(TEMPLATE, XSS_NBHD, "s");
+  check("nbhd(xss): no raw <b> in body/head", !html.includes("<b>Oak"), "raw markup leaked");
+  check("nbhd(xss): escaped form present in body", html.includes("&lt;b&gt;Oak"), "expected escaped neighborhood");
+  const m = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+  check("nbhd(xss): ld+json has no literal '<'", m && !m[1].includes("<"));
+  const ld = JSON.parse(m[1]);
+  check("nbhd(xss): JSON-LD containedInPlace decodes to raw value", ld.containedInPlace?.name === `<b>Oak"&'Cliff</b>`, JSON.stringify(ld.containedInPlace));
+}
+
 // ── Escaping (security) ──────────────────────────────────────────────────────
 const xssHtml = renderFound(TEMPLATE, XSS, "evil-slug");
 check("xss: no raw <script>alert in output body", !xssHtml.includes("<script>alert(1)</script>"));
