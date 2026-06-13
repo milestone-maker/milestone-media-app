@@ -21,8 +21,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
 const MOD_PATH  = resolve(REPO_ROOT, "api", "render-microsite.js");
 
-const { buildTitle, buildDescription, buildJsonLd, renderFound, renderNotFound } =
-  await import(pathToFileURL(MOD_PATH).href);
+const mod = await import(pathToFileURL(MOD_PATH).href);
+const { buildTitle, buildDescription, buildJsonLd, renderFound, renderNotFound } = mod;
+const handler = mod.default;
 
 const { PUBLIC_APP_BASE } = await import(
   pathToFileURL(resolve(REPO_ROOT, "api", "_lib", "microsite.js")).href
@@ -202,6 +203,159 @@ check("notfound: adds noindex", nf.includes(`<meta name="robots" content="noinde
 check("notfound: keeps generic title", nf.includes("<title>Milestone Media & Photography</title>"));
 check("notfound: root stays empty (React boots)", /<div id="root">\s*<\/div>/.test(nf));
 check("notfound: module script intact", nf.includes("/assets/index-BSyA2rAb.js"));
+
+// ── Resilience: hostile / malformed property_data into the pure builders ─────
+// The handler wraps these in a try/catch, so a builder MAY throw on garbage —
+// what must never happen is broken or unescaped HTML reaching the page. For each
+// hostile input we assert the builder either (a) produces safe, escaped output, or
+// (b) throws cleanly (contained by the handler). Never: silently emit raw markup.
+const HOSTILE = [
+  { name: "null-ish core fields", pd: { address: null, city: null, price: null, beds: null, baths: null, sqft: null, description: null, features: null, hero_img: null, gallery_photos: null, schools: null, coordinates: null } },
+  { name: "wrong types", pd: { address: 12345, city: { nested: "obj" }, price: 99, beds: 4, baths: 3.5, sqft: 3000, description: ["array", "desc"], features: "not-an-array", hero_img: 42, gallery_photos: { 0: "x" }, schools: "nope", coordinates: "12,34" } },
+  { name: "empty arrays + empty strings", pd: { address: "", city: "", price: "", beds: "", baths: "", sqft: "", description: "", features: [], hero_img: "", gallery_photos: [], schools: [], coordinates: {} } },
+  { name: "absurd price string", pd: { address: "1 A St", city: "Dallas", price: "call for price!!! $$$ ~~~ NaN", beds: "3", baths: "2", sqft: "1k" } },
+  { name: "script tags in every text field", pd: { address: `<script>x()</script>`, city: `"><img src=x onerror=y>`, price: "<b>500</b>", beds: "</title>", baths: "<svg/onload=z>", sqft: "<", description: `</script><script>evil()</script>`, features: [`<iframe>`, `</li><script>`], hero_img: `javascript:alert(1)`, schools: [{ name: `<script>s()</script>`, level: `<x>`, distance_mi: `<y>` }] } },
+];
+
+// Detect agent text that BROKE OUT of escaping into real markup. Agent fields go
+// through esc() (all of < > " ' & escaped), so a genuine breakout shows as an
+// UNescaped tag. First strip the page's own trusted markup — the template's module
+// script, its inline sw script, and the JSON-LD <script> we inject (built via
+// JSON.stringify with '<' escaped) — then look for any remaining real tag/handler
+// that could only have come from un-escaped agent input. (Inert escaped text like
+// "&lt;img src=x onerror=y&gt;" is fine — the '<' is already neutralized.)
+// esc() escapes < > " ' & — so agent text can never open a real tag or break out
+// of a quoted attribute. A breakout therefore shows as a literal tag-opener that the
+// trusted page markup doesn't legitimately contain (after stripping the page's own
+// <script> blocks). We do NOT scan for bare on*= handlers: with quotes escaped, an
+// "onerror=" can only ever appear as inert text inside a quoted value, never as a
+// real attribute — matching it would be a false positive.
+function emitsUnescapedMarkup(html) {
+  const scrubbed = html.replace(/<script\b[\s\S]*?<\/script>/gi, "");
+  return /<script\b/i.test(scrubbed)
+    || /<iframe\b/i.test(scrubbed)
+    || /<svg[\s/>]/i.test(scrubbed)
+    || /<img\s+src=x/i.test(scrubbed);
+}
+
+// Per the spec contract: on hostile garbage a builder MAY throw (the handler net
+// contains it) OR return — but it must NEVER emit broken/unescaped HTML. So each
+// check passes if the builder threw cleanly, else asserts the output is safe.
+for (const { name, pd } of HOSTILE) {
+  // buildTitle returns RAW text (escaped downstream at injection) — assert only the
+  // length bound, or a clean throw (handler net contains it).
+  let t, tThrew = false;
+  try { t = buildTitle(pd); } catch (e) { tThrew = true; }
+  check(`hostile(${name}): buildTitle bounded-or-throws`, tThrew || String(t).length <= 65, `len=${String(t).length}`);
+
+  // buildDescription likewise returns RAW text — assert only the length bound.
+  let d, dThrew = false;
+  try { d = buildDescription(pd); } catch (e) { dThrew = true; }
+  check(`hostile(${name}): buildDescription bounded-or-throws`, dThrew || String(d).length <= 160, `len=${String(d).length}`);
+
+  // buildJsonLd — if it returns, it must be valid JSON with no literal '<'.
+  let ldThrew = false, ldStr = "";
+  try { ldStr = buildJsonLd(pd, "slug", `${PUBLIC_APP_BASE}/p/slug`, []); } catch (e) { ldThrew = true; }
+  if (!ldThrew) {
+    let ok = false;
+    try { JSON.parse(ldStr); ok = true; } catch (e) { ok = false; }
+    check(`hostile(${name}): JSON-LD parses`, ok, ldStr.slice(0, 80));
+    check(`hostile(${name}): JSON-LD has no literal '<'`, !ldStr.includes("<"));
+  }
+
+  // renderFound — either safe escaped HTML, or a clean throw (handler-contained).
+  let html = "", threw = false;
+  try { html = renderFound(TEMPLATE, pd, "slug"); } catch (e) { threw = true; }
+  check(`hostile(${name}): renderFound safe-or-throws`, threw || !emitsUnescapedMarkup(html), "markup leaked");
+}
+
+// ── Handler-level safety net ─────────────────────────────────────────────────
+// Minimal req/res doubles. The handler reads the REAL built dist/index.html
+// (present after `npm run build`); the Supabase client is injected so we can force
+// the failure paths with no DB or network.
+function makeRes() {
+  const res = {
+    statusCode: 200,
+    headers: {},
+    body: undefined,
+    status(c) { this.statusCode = c; return this; },
+    setHeader(k, v) { this.headers[k.toLowerCase()] = v; return this; },
+    end(b) { this.body = b; return this; },
+  };
+  return res;
+}
+// A supabase double whose terminal maybeSingle() resolves to {data, error} or throws.
+function fakeSupabase(outcome) {
+  const chain = {
+    select() { return chain; },
+    eq() { return chain; },
+    is() { return chain; },
+    async maybeSingle() {
+      if (outcome.throw) throw new Error("forced fetch failure");
+      return { data: outcome.data ?? null, error: outcome.error ?? null };
+    },
+  };
+  return { from() { return chain; } };
+}
+
+// (1) Forced THROW in the data fetch → 200 plain shell, no per-listing head, no noindex.
+{
+  const res = makeRes();
+  await handler({ query: { slug: "boom" } }, res, { supabase: fakeSupabase({ throw: true }) });
+  check("handler(throw): HTTP 200", res.statusCode === 200, `got ${res.statusCode}`);
+  check("handler(throw): text/html", (res.headers["content-type"] || "").includes("text/html"));
+  check("handler(throw): plain shell — generic title retained", /<title>Milestone Media & Photography<\/title>/.test(res.body || ""));
+  check("handler(throw): plain shell — NO per-listing canonical", !/<link rel="canonical"/.test(res.body || ""));
+  check("handler(throw): plain shell — NO noindex", !/name="robots" content="noindex"/.test(res.body || ""));
+  check("handler(throw): root left empty for React", /<div id="root">\s*<\/div>/.test(res.body || ""));
+}
+
+// (2) Returned query ERROR → treated as unexpected → 200 plain shell, no noindex.
+{
+  const res = makeRes();
+  await handler({ query: { slug: "x" } }, res, { supabase: fakeSupabase({ error: { message: "db down" } }) });
+  check("handler(query-error): HTTP 200 (not 404/noindex)", res.statusCode === 200, `got ${res.statusCode}`);
+  check("handler(query-error): NO noindex", !/name="robots" content="noindex"/.test(res.body || ""));
+}
+
+// (3) Builder forced to throw via a poison row → 200 plain shell (renderFound throws on a
+//     property_data getter that explodes; handler net catches it).
+{
+  const res = makeRes();
+  const poison = {};
+  Object.defineProperty(poison, "address", { get() { throw new Error("boom getter"); }, enumerable: true });
+  await handler({ query: { slug: "p" } }, res, { supabase: fakeSupabase({ data: { property_data: poison } }) });
+  check("handler(builder-throw): HTTP 200", res.statusCode === 200, `got ${res.statusCode}`);
+  check("handler(builder-throw): plain shell, no canonical", !/<link rel="canonical"/.test(res.body || ""));
+  check("handler(builder-throw): no noindex", !/name="robots" content="noindex"/.test(res.body || ""));
+}
+
+// (4) Intentional NOT-FOUND (clean null, no error) → still 404 + noindex (net must NOT swallow).
+{
+  const res = makeRes();
+  await handler({ query: { slug: "missing" } }, res, { supabase: fakeSupabase({ data: null }) });
+  check("handler(not-found): HTTP 404 preserved", res.statusCode === 404, `got ${res.statusCode}`);
+  check("handler(not-found): noindex present", /name="robots" content="noindex"/.test(res.body || ""));
+}
+
+// (5) Intentional empty slug → 404 + noindex (normal return, unaffected by the net).
+{
+  const res = makeRes();
+  await handler({ query: {} }, res, { supabase: fakeSupabase({ data: { property_data: {} } }) });
+  check("handler(empty-slug): HTTP 404", res.statusCode === 404, `got ${res.statusCode}`);
+  check("handler(empty-slug): noindex present", /name="robots" content="noindex"/.test(res.body || ""));
+}
+
+// (6) Happy path through the handler → 200 with injected per-listing head.
+{
+  const res = makeRes();
+  await handler({ query: { slug: "2410-luxury" } }, res, { supabase: fakeSupabase({ data: { property_data: FULL } }) });
+  check("handler(happy): HTTP 200", res.statusCode === 200, `got ${res.statusCode}`);
+  check("handler(happy): per-listing canonical injected", /<link rel="canonical" href="[^"]+\/p\/2410-luxury"/.test(res.body || ""));
+  check("handler(happy): ld+json injected", /application\/ld\+json/.test(res.body || ""));
+  check("handler(happy): no noindex on a real listing", !/name="robots" content="noindex"/.test(res.body || ""));
+  check("handler(happy): cache-control set", /s-maxage=600/.test(res.headers["cache-control"] || ""));
+}
 
 // ── Report ───────────────────────────────────────────────────────────────────
 if (fails.length) {

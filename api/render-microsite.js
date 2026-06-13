@@ -221,7 +221,7 @@ function buildBody(pd, title) {
   parts.push(`<h1>${esc(address || "Property Listing")}</h1>`);
 
   const specLine = [
-    city,
+    esc(city),
     (pd.price || "").toString().trim() ? `$${esc(String(pd.price).trim().replace(/^\$/, ""))}` : "",
     pd.beds ? `${esc(String(pd.beds).trim())} bed` : "",
     pd.baths ? `${esc(String(pd.baths).trim())} bath` : "",
@@ -316,26 +316,39 @@ export function renderNotFound(template) {
 }
 
 // ── Handler ──────────────────────────────────────────────────────────────────
-export default async function handler(req, res) {
+// Failure model: reading the built dist/index.html is the ONE hard dependency —
+// if that genuinely can't be read, it's a clear 500. EVERYTHING else (slug parse,
+// Supabase fetch, row processing, head/body injection) runs inside one try/catch:
+// any UNEXPECTED throw degrades to exactly today's behavior — the plain built shell
+// at HTTP 200, indexable, rendered client-side by React — never a 500, never a
+// broken page. The INTENTIONAL not-found / retired path is a normal `return` of the
+// 404 + noindex shell (data === null with no error), so the catch never swallows it.
+export default async function handler(req, res, deps = {}) {
   let template;
   try {
     template = await loadTemplate();
   } catch (err) {
+    // The one hard dependency. Cannot serve anything without the built shell.
     res.status(500).setHeader("Content-Type", "text/plain; charset=utf-8");
     return res.end("Microsite renderer is temporarily unavailable.");
   }
 
-  const rawSlug = req.query?.slug;
-  const slug = typeof rawSlug === "string" ? rawSlug.trim() : Array.isArray(rawSlug) ? String(rawSlug[0] || "").trim() : "";
-
-  if (!slug) {
-    res.status(404).setHeader("Content-Type", "text/html; charset=utf-8");
-    return res.end(renderNotFound(template));
-  }
-
-  let row = null;
+  let slug = "";
   try {
-    const supabase = defaultSupabase();
+    const rawSlug = req.query?.slug;
+    slug = typeof rawSlug === "string"
+      ? rawSlug.trim()
+      : Array.isArray(rawSlug)
+        ? String(rawSlug[0] || "").trim()
+        : "";
+
+    // Intentional not-found: empty/missing slug → 404 + noindex (normal return).
+    if (!slug) {
+      res.status(404).setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.end(renderNotFound(template));
+    }
+
+    const supabase = deps.supabase || defaultSupabase();
     const { data, error } = await supabase
       .from("microsites")
       .select("*")
@@ -343,34 +356,31 @@ export default async function handler(req, res) {
       .eq("published", true)
       .is("retired_at", null)
       .maybeSingle();
-    if (error) {
-      console.error("[render-microsite] supabase error:", error);
-    } else {
-      row = data;
+
+    // A returned query error is an UNEXPECTED failure (e.g. a transient outage),
+    // not a genuine "no such listing" — throw so the safety net serves the plain
+    // indexable shell rather than wrongly noindex-ing a real listing.
+    if (error) throw error;
+
+    // Intentional not-found / retired: a clean null result → 404 + noindex.
+    if (!data) {
+      res.status(404).setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.end(renderNotFound(template));
     }
+
+    const pd = data.property_data && typeof data.property_data === "object" ? data.property_data : {};
+    const html = renderFound(template, pd, slug);
+
+    res.status(200);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "public, s-maxage=600, stale-while-revalidate=86400");
+    return res.end(html);
   } catch (err) {
-    console.error("[render-microsite] lookup threw:", err);
-  }
-
-  if (!row) {
-    res.status(404).setHeader("Content-Type", "text/html; charset=utf-8");
-    return res.end(renderNotFound(template));
-  }
-
-  const pd = row.property_data && typeof row.property_data === "object" ? row.property_data : {};
-
-  let html;
-  try {
-    html = renderFound(template, pd, slug);
-  } catch (err) {
-    // Never crash the page on a bad field — fall back to the bootable shell.
-    console.error("[render-microsite] render threw, serving shell:", err);
+    // Safety net: any unforeseen failure degrades to today's behavior — the plain
+    // built shell at 200, indexable, rendered client-side. No noindex: the listing
+    // is real, we just couldn't server-render it this once.
+    console.error(`[render-microsite] unexpected failure for slug="${slug}", serving plain shell:`, err);
     res.status(200).setHeader("Content-Type", "text/html; charset=utf-8");
     return res.end(template);
   }
-
-  res.status(200);
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.setHeader("Cache-Control", "public, s-maxage=600, stale-while-revalidate=86400");
-  return res.end(html);
 }
