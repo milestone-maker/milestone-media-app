@@ -37,6 +37,9 @@ function SearchConsoleView() {
   const [data, setData] = useState(null);
   const [sort, setSort] = useState({ key: "impressions", dir: "desc" });
 
+  // Per-listing AI suggestions panel (advisory only — no apply).
+  const [sug, setSug] = useState({ slug: null, label: null, status: "idle", data: null, errCode: null }); // idle|loading|done|error
+
   const load = useCallback(async () => {
     setStatus("loading");
     setErrCode(null);
@@ -74,6 +77,27 @@ function SearchConsoleView() {
         ? { key, dir: prev.dir === "desc" ? "asc" : "desc" }
         : { key, dir: key === "label" ? "asc" : "desc" },
     );
+  }
+
+  const loadSuggestions = useCallback(async (slug, label) => {
+    setSug({ slug, label, status: "loading", data: null, errCode: null });
+    try {
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token;
+      const res = await fetch(
+        `/api/search-console-suggestions?slug=${encodeURIComponent(slug)}&startDate=${encodeURIComponent(range.startDate)}&endDate=${encodeURIComponent(range.endDate)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!res.ok) { setSug({ slug, label, status: "error", data: null, errCode: res.status }); return; }
+      const json = await res.json();
+      setSug({ slug, label, status: "done", data: json, errCode: null });
+    } catch (e) {
+      setSug({ slug, label, status: "error", data: null, errCode: 0 });
+    }
+  }, [range.startDate, range.endDate]);
+
+  function closeSuggestions() {
+    setSug({ slug: null, label: null, status: "idle", data: null, errCode: null });
   }
 
   // ── body by state ──────────────────────────────────────────────────
@@ -174,6 +198,7 @@ function SearchConsoleView() {
                     {col.label}{sort.key === col.key ? (sort.dir === "desc" ? " ↓" : " ↑") : ""}
                   </th>
                 ))}
+                <th style={{ textAlign: "right", padding: "14px 20px", fontFamily: bodyFont, fontSize: 10, color: "rgba(255,255,255,0.5)", letterSpacing: "0.1em", textTransform: "uppercase", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>SEO</th>
               </tr>
             </thead>
             <tbody>
@@ -192,11 +217,26 @@ function SearchConsoleView() {
                   <td style={cellStyle(rows, i)}>{formatInt(r.clicks)}</td>
                   <td style={cellStyle(rows, i)}>{formatPct(r.ctr)}</td>
                   <td style={cellStyle(rows, i)}>{formatPosition(r.position)}</td>
+                  <td style={{ ...cellStyle(rows, i), textAlign: "right" }}>
+                    <button
+                      onClick={() => loadSuggestions(r.slug, r.label || r.slug)}
+                      disabled={sug.status === "loading" && sug.slug === r.slug}
+                      style={{
+                        padding: "5px 12px", borderRadius: 7, cursor: "pointer", fontFamily: bodyFont, fontSize: 11,
+                        background: sug.slug === r.slug ? "rgba(201,168,76,0.2)" : "rgba(255,255,255,0.04)",
+                        border: "1px solid rgba(201,168,76,0.35)", color: "#e5c97e", whiteSpace: "nowrap",
+                      }}
+                    >
+                      {sug.status === "loading" && sug.slug === r.slug ? "Analyzing…" : "Get suggestions"}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+
+        {sug.status !== "idle" && <SuggestionsPanel sug={sug} onClose={closeSuggestions} onRetry={() => loadSuggestions(sug.slug, sug.label)} />}
       </>
     );
   } else {
@@ -241,6 +281,120 @@ function cellStyle(rows, i) {
     borderBottom: i < rows.length - 1 ? "1px solid rgba(255,255,255,0.05)" : "none",
   };
 }
+
+function SuggestionsPanel({ sug, onClose, onRetry }) {
+  const labelLine = (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+      <div style={{ fontFamily: headingFont, fontSize: 22, color: "#fff" }}>
+        SEO suggestions — <span style={{ color: "#e5c97e" }}>{sug.label}</span>
+      </div>
+      <button onClick={onClose} style={{ background: "transparent", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontFamily: bodyFont, fontSize: 12 }}>✕ Close</button>
+    </div>
+  );
+
+  let inner;
+  if (sug.status === "loading") {
+    inner = <div style={{ fontFamily: bodyFont, fontSize: 13, color: "rgba(255,255,255,0.55)" }}>Analyzing this page's queries and generating suggestions…</div>;
+  } else if (sug.status === "error") {
+    inner = (
+      <div>
+        <div style={{ fontFamily: bodyFont, fontSize: 13, color: "rgba(255,255,255,0.6)" }}>
+          {sug.errCode ? `The request failed (status ${sug.errCode}).` : "A network error occurred."} This is usually temporary.
+        </div>
+        <RetryButton onClick={onRetry} />
+      </div>
+    );
+  } else {
+    const d = sug.data || {};
+    if (d.connected === false && d.reason === "not_configured") {
+      inner = <div style={{ fontFamily: bodyFont, fontSize: 13, color: "rgba(255,255,255,0.6)" }}>Search Console isn't connected yet.</div>;
+    } else if (d.connected === false && d.reason === "no_access") {
+      inner = <div style={{ fontFamily: bodyFont, fontSize: 13, color: "rgba(255,255,255,0.6)" }}>The connected Google account doesn't have access to this property — re-authorize with the account that owns it.</div>;
+    } else if (d.connected === true && d.hasData === false) {
+      inner = <div style={{ fontFamily: bodyFont, fontSize: 13, color: "rgba(255,255,255,0.6)" }}>Not enough data yet for this page — Google hasn't gathered queries for it. Check back in a few days.</div>;
+    } else if (d.suggestions) {
+      const s = d.suggestions;
+      const recs = Array.isArray(s.recommendations) ? s.recommendations : [];
+      const queries = Array.isArray(d.topQueries) ? d.topQueries : [];
+      inner = (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          {/* Current vs suggested */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <BeforeAfter heading="Current title" value={d.currentTitle} muted />
+            <BeforeAfter heading="Suggested title" value={s.suggestedTitle} />
+            <BeforeAfter heading="Current meta description" value={d.currentDescription} muted />
+            <BeforeAfter heading="Suggested meta description" value={s.suggestedDescription} />
+          </div>
+
+          {/* Recommendations */}
+          {recs.length > 0 && (
+            <div>
+              <div style={{ fontFamily: bodyFont, fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>Recommendations</div>
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {recs.map((r, i) => (
+                  <li key={i} style={{ fontFamily: bodyFont, fontSize: 13, color: "rgba(255,255,255,0.8)", lineHeight: 1.6 }}>{r}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Why — top queries */}
+          {queries.length > 0 && (
+            <div>
+              <div style={{ fontFamily: bodyFont, fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>Top queries driving this page</div>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr>
+                    {["Query", "Impr.", "Clicks", "CTR", "Pos."].map((h, i) => (
+                      <th key={h} style={{ textAlign: i === 0 ? "left" : "right", padding: "6px 10px", fontFamily: bodyFont, fontSize: 10, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.08em", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {queries.map((qq, i) => (
+                    <tr key={i}>
+                      <td style={{ textAlign: "left", padding: "6px 10px", fontFamily: bodyFont, fontSize: 12, color: "#fff" }}>{qq.query}</td>
+                      <td style={qCell}>{formatInt(qq.impressions)}</td>
+                      <td style={qCell}>{formatInt(qq.clicks)}</td>
+                      <td style={qCell}>{formatPct(qq.ctr)}</td>
+                      <td style={qCell}>{formatPosition(qq.position)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div style={{ fontFamily: bodyFont, fontSize: 11, color: "rgba(255,255,255,0.35)", fontStyle: "italic" }}>
+            Advisory only — these are AI suggestions to review, not applied automatically.
+          </div>
+        </div>
+      );
+    } else {
+      inner = <div style={{ fontFamily: bodyFont, fontSize: 13, color: "rgba(255,255,255,0.6)" }}>No suggestions available.</div>;
+    }
+  }
+
+  return (
+    <div style={{ ...cardStyle }}>
+      {labelLine}
+      {inner}
+    </div>
+  );
+}
+
+function BeforeAfter({ heading, value, muted }) {
+  return (
+    <div>
+      <div style={{ fontFamily: bodyFont, fontSize: 10, color: "rgba(255,255,255,0.4)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 6 }}>{heading}</div>
+      <div style={{ fontFamily: bodyFont, fontSize: 13, lineHeight: 1.5, color: muted ? "rgba(255,255,255,0.55)" : "#e5c97e", background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "10px 12px", minHeight: 38 }}>
+        {value || "—"}
+      </div>
+    </div>
+  );
+}
+
+const qCell = { textAlign: "right", padding: "6px 10px", fontFamily: bodyFont, fontSize: 12, color: "rgba(255,255,255,0.8)" };
 
 function RetryButton({ onClick }) {
   return (

@@ -185,3 +185,87 @@ export function mapGscRowsToListings(rows, slugMap, base) {
 
   return { listings, totals };
 }
+
+// ── Per-page query data (Stage 3: optimization suggestions) ──────────────────
+
+// searchAnalytics filtered to ONE page (operator "equals"). Two calls: an
+// aggregate row (no dimensions → the page's own totals) and the top queries
+// (dimensions:["query"]). Throws on non-OK with err.status, like the others.
+export async function queryPageMetrics(
+  { accessToken, siteUrl, pageUrl, startDate, endDate, rowLimit = 25 },
+  deps = {},
+) {
+  const fetchFn = deps.fetch || fetch;
+  const url =
+    `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(siteUrl)}/searchAnalytics/query`;
+  const pageFilter = [{ filters: [{ dimension: "page", operator: "equals", expression: pageUrl }] }];
+
+  const post = async (extra) => {
+    const res = await fetchFn(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ startDate, endDate, dimensionFilterGroups: pageFilter, ...extra }),
+    });
+    if (!res.ok) {
+      const err = new Error(`GSC query failed: ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    const data = await res.json();
+    return Array.isArray(data.rows) ? data.rows : [];
+  };
+
+  const totalsRows = await post({ rowLimit: 1 });               // one aggregate row
+  const queryRows  = await post({ dimensions: ["query"], rowLimit }); // top queries
+  return { totalsRows, queryRows };
+}
+
+/**
+ * Injectable seam for the suggestions endpoint. Same configured/access contract
+ * as fetchGscRows:
+ *   • any OAuth env var / GSC_SITE_URL missing → { status: "not_configured" }
+ *   • 401/403                                  → { status: "no_access" }
+ *   • success → { status:"ok", pageUrl, totals|null, queries:[...] }
+ *   • other failure → throws
+ */
+export async function fetchPageQueryData({ slug, startDate, endDate }, deps = {}) {
+  const siteUrl = process.env.GSC_SITE_URL;
+  const configured =
+    process.env.GSC_OAUTH_CLIENT_ID &&
+    process.env.GSC_OAUTH_CLIENT_SECRET &&
+    process.env.GSC_REFRESH_TOKEN &&
+    siteUrl;
+  if (!configured) return { status: "not_configured" };
+
+  const accessToken = await (deps.getAccessToken || getAccessToken)(deps);
+  const pageUrl = `${PUBLIC_APP_BASE}/p/${slug}`;
+
+  try {
+    const { totalsRows, queryRows } = await (deps.queryPageMetrics || queryPageMetrics)(
+      { accessToken, siteUrl, pageUrl, startDate, endDate },
+      deps,
+    );
+    const t = Array.isArray(totalsRows) ? totalsRows[0] : null;
+    const totals = t
+      ? {
+          impressions: t.impressions || 0,
+          clicks:      t.clicks || 0,
+          ctr:         round4(t.ctr || 0),
+          position:    round2(t.position || 0),
+        }
+      : null;
+    const queries = (Array.isArray(queryRows) ? queryRows : [])
+      .map((r) => ({
+        query:       (r && Array.isArray(r.keys) ? r.keys[0] : "") || "",
+        impressions: (r && r.impressions) || 0,
+        clicks:      (r && r.clicks) || 0,
+        ctr:         round4((r && r.ctr) || 0),
+        position:    round2((r && r.position) || 0),
+      }))
+      .filter((q) => q.query);
+    return { status: "ok", pageUrl, totals, queries };
+  } catch (err) {
+    if (err && (err.status === 401 || err.status === 403)) return { status: "no_access" };
+    throw err;
+  }
+}
