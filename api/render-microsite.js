@@ -97,6 +97,17 @@ function toNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Sign-safe parse for latitude/longitude. Coordinates are clean numeric values
+// (number or numeric string) and MUST keep their sign — the price-oriented
+// toNumber() above strips '-', which would flip every US longitude (and any
+// southern-hemisphere latitude) to the wrong hemisphere. Returns null for
+// non-finite input so the caller omits geo cleanly, like the no-coordinates path.
+function toCoordinate(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = typeof value === "number" ? value : Number.parseFloat(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 function clamp(str, max) {
   const s = String(str);
   return s.length <= max ? s : s.slice(0, max - 1).trimEnd() + "…";
@@ -175,8 +186,8 @@ export function buildJsonLd(pd, slug, canonical, images) {
 
   const coords = pd.coordinates;
   if (coords && typeof coords === "object") {
-    const lat = toNumber(coords.lat);
-    const lng = toNumber(coords.lng);
+    const lat = toCoordinate(coords.lat);
+    const lng = toCoordinate(coords.lng);
     if (lat !== null && lng !== null) {
       ld.geo = { "@type": "GeoCoordinates", latitude: lat, longitude: lng };
     }

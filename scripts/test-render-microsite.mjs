@@ -137,6 +137,7 @@ if (fullLd) {
   check("jsonld: numberOfBedrooms numeric", fullLd.numberOfBedrooms === 5);
   check("jsonld: floorSize numeric", fullLd.floorSize?.value === 3800);
   check("jsonld: geo present when coords present", fullLd.geo?.latitude === 32.701495386903, JSON.stringify(fullLd.geo));
+  check("jsonld: geo longitude keeps NEGATIVE sign (Dallas is west)", fullLd.geo?.longitude === -96.784203772965, JSON.stringify(fullLd.geo));
   check("jsonld: image array hero-first", Array.isArray(fullLd.image) && fullLd.image[0] === FULL.hero_img);
   check("jsonld: address PostalAddress", fullLd.address?.["@type"] === "PostalAddress" && fullLd.address.addressLocality === "Dallas");
 }
@@ -150,6 +151,40 @@ if (sparseLd) {
   check("jsonld(sparse): image omitted when empty", sparseLd.image === undefined);
   check("jsonld(sparse): rental price → 3000 number", sparseLd.offers?.price === 3000, JSON.stringify(sparseLd.offers));
   check("jsonld(sparse): no postalCode when absent", sparseLd.address?.postalCode === undefined);
+}
+
+// ── Geo coordinate sign safety (regression: toNumber stripped the '-') ────────
+function geoOf(pd) {
+  const raw = buildJsonLd(pd, "s", `${PUBLIC_APP_BASE}/p/s`, []);
+  try { return JSON.parse(raw).geo; } catch (e) { return undefined; }
+}
+// Dallas-style: lat positive, lng negative — both signs + exact values preserved.
+{
+  const geo = geoOf({ coordinates: { lat: 32.701495386903, lng: -96.784203772965 } });
+  check("geo(Dallas): longitude stays negative", geo?.longitude === -96.784203772965, JSON.stringify(geo));
+  check("geo(Dallas): latitude stays positive", geo?.latitude === 32.701495386903, JSON.stringify(geo));
+}
+// Southern-hemisphere / eastern: lat negative, lng positive — both signs preserved.
+{
+  const geo = geoOf({ coordinates: { lat: -33.8688, lng: 151.2093 } });
+  check("geo(Sydney): latitude stays negative", geo?.latitude === -33.8688, JSON.stringify(geo));
+  check("geo(Sydney): longitude stays positive", geo?.longitude === 151.2093, JSON.stringify(geo));
+}
+// Numeric-string coordinates (defensive): sign still preserved.
+{
+  const geo = geoOf({ coordinates: { lat: "32.7", lng: "-96.8" } });
+  check("geo(string coords): negative lng preserved", geo?.longitude === -96.8, JSON.stringify(geo));
+}
+// Non-finite coordinate → geo omitted cleanly (same as no-coordinates path).
+{
+  const geo = geoOf({ coordinates: { lat: "not-a-number", lng: -96.8 } });
+  check("geo(bad coord): omitted when not finite", geo === undefined, JSON.stringify(geo));
+}
+// Regression guard: price parsing is UNCHANGED (messy string still strips to a positive number).
+{
+  const raw = buildJsonLd({ price: "$1,500,450" }, "s", `${PUBLIC_APP_BASE}/p/s`, []);
+  let p; try { p = JSON.parse(raw).offers?.price; } catch (e) {}
+  check("price still parses '$1,500,450' → 1500450", p === 1500450, String(p));
 }
 
 // ── renderFound full assembly ────────────────────────────────────────────────
