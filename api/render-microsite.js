@@ -226,14 +226,21 @@ function buildHeadTags(pd, slug, title, description, canonical, ogImage, sold = 
   const img = ogImage ? esc(ogImage) : "";
   const jsonLd = buildJsonLd(pd, slug, canonical, ogImage ? [ogImage] : [], sold);
 
-  const tags = [
+  const tags = [];
+  // Hero preload FIRST so the browser's preload scanner fetches the LCP image
+  // immediately — critical for the Prestige theme, whose hero is a CSS
+  // background-image discovered only after the app mounts. Same URL as og:image.
+  if (img) {
+    tags.push(`<link rel="preload" as="image" href="${img}" fetchpriority="high" />`);
+  }
+  tags.push(
     `<link rel="canonical" href="${c}" />`,
     `<meta property="og:type" content="website" />`,
     `<meta property="og:title" content="${t}" />`,
     `<meta property="og:description" content="${d}" />`,
     `<meta property="og:url" content="${c}" />`,
     `<meta property="og:site_name" content="Milestone Media &amp; Photography" />`,
-  ];
+  );
   if (img) tags.push(`<meta property="og:image" content="${img}" />`);
   tags.push(
     `<meta name="twitter:card" content="summary_large_image" />`,

@@ -194,6 +194,12 @@ check("render: per-listing title present", /<title>2410 Luxury Lane[^<]*<\/title
 check("render: generic meta description replaced", !fullHtml.includes("Premium real estate media for Dallas-Fort Worth agents.") , "still generic desc");
 check("render: canonical uses PUBLIC_APP_BASE (no hardcode)", fullHtml.includes(`<link rel="canonical" href="${PUBLIC_APP_BASE}/p/2410-luxury" />`));
 check("render: og:image = hero_img", fullHtml.includes(`<meta property="og:image" content="${FULL.hero_img}" />`));
+// Hero preload (LCP) — exactly one, with the hero URL + as="image", in the head.
+check("render: hero preload link present (as=image + hero URL)", fullHtml.includes(`<link rel="preload" as="image" href="${FULL.hero_img}" fetchpriority="high" />`));
+check("render: exactly one hero preload link", (fullHtml.match(/<link rel="preload" as="image"/g) || []).length === 1, `count=${(fullHtml.match(/<link rel="preload" as="image"/g) || []).length}`);
+check("render: hero preload is inside the <head>", fullHtml.indexOf(`rel="preload" as="image"`) < fullHtml.indexOf("</head>"));
+// No-hero listing → no preload (clean skip).
+check("render: NO hero preload when hero_img absent", !renderFound(TEMPLATE, SPARSE, "4941-shores").includes(`rel="preload" as="image"`));
 check("render: og:type website", fullHtml.includes(`<meta property="og:type" content="website" />`));
 check("render: twitter summary_large_image", fullHtml.includes(`content="summary_large_image"`));
 check("render: ld+json script injected", fullHtml.includes(`<script type="application/ld+json">`));
@@ -370,6 +376,7 @@ function fakeSupabase(outcome) {
   const res = makeRes();
   await handler({ query: { slug: "missing" } }, res, { supabase: fakeSupabase({ data: null }) });
   check("handler(not-found): HTTP 404 preserved", res.statusCode === 404, `got ${res.statusCode}`);
+  check("handler(not-found): NO hero preload", !/rel="preload" as="image"/.test(res.body || ""));
   check("handler(not-found): noindex present", /name="robots" content="noindex"/.test(res.body || ""));
 }
 
@@ -417,6 +424,7 @@ const LIVE_ROW = { published: true, retired_at: null, sold_at: null, property_da
   check("state(sold): sold date present in body", body.includes("Sold 2026-06-12"));
   check("state(sold): SOLD in <title>", /<title>\s*SOLD —/.test(body));
   check("state(sold): SOLD + date in meta description", /<meta name="description" content="SOLD \(2026-06-12\)/.test(body));
+  check("state(sold): hero preload present (sold path also prioritizes LCP)", body.includes(`<link rel="preload" as="image" href="${FULL.hero_img}" fetchpriority="high" />`));
   check("state(sold): JSON-LD offer availability SoldOut", body.includes("https://schema.org/SoldOut"));
   check("state(sold): NO price in sold offer (price undisclosed)", (() => {
     const m = body.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
@@ -450,6 +458,7 @@ const LIVE_ROW = { published: true, retired_at: null, sold_at: null, property_da
   check("state(withdrawn): HTTP 404", res.statusCode === 404, `got ${res.statusCode}`);
   check("state(withdrawn): noindex present", /name="robots" content="noindex"/.test(res.body || ""));
   check("state(withdrawn): no sold badge (withdrawn beats sold)", !/sold-badge/.test(res.body || ""));
+  check("state(withdrawn): NO hero preload", !/rel="preload" as="image"/.test(res.body || ""));
 }
 
 // DRAFT (published false, not sold/retired) → 404 + noindex.
