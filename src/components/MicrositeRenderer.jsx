@@ -406,8 +406,8 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
       fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.08em",
       textTransform: "uppercase", whiteSpace: "nowrap", cursor: "pointer",
       paddingBottom: 10, paddingTop: 10, transition: "color 0.2s",
-      color: activeSection === id ? "#C9A84C" : "rgba(255,255,255,0.5)",
-      borderBottom: activeSection === id ? "2px solid #C9A84C" : "2px solid transparent",
+      color: activeSection === id ? pubT.accent : "rgba(255,255,255,0.5)",
+      borderBottom: activeSection === id ? `2px solid ${pubT.accent}` : "2px solid transparent",
     });
 
     return (
@@ -437,7 +437,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
           padding: "16px 32px", display: "flex", justifyContent: "space-between", alignItems: "center",
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {brandMark("#C9A84C", "rgba(255,255,255,0.35)")}
+            {brandMark(pubT.accent, "rgba(255,255,255,0.35)")}
           </div>
           <div style={{ display: "flex", gap: 32 }}>
             {sections.map(s => (
@@ -456,13 +456,13 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
           }} />
           <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-end", padding: "0 48px 52px" }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: "#C9A84C", marginBottom: 12 }}>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.18em", textTransform: "uppercase", color: pubT.accent, marginBottom: 12 }}>
                 {locationLine || "Dallas, TX"}
               </div>
               <div style={{ fontSize: 60, fontWeight: 700, color: "#fff", lineHeight: 1.05, marginBottom: 14, maxWidth: 680 }}>
                 {data.address || "Luxury Property"}
               </div>
-              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 42, fontWeight: 400, color: "#C9A84C" }}>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 42, fontWeight: 400, color: pubT.accent }}>
                 {data.price || ""}
               </div>
             </div>
@@ -497,10 +497,10 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
         {mediaTabs.length > 0 && (
           <div ref={mediaRef} style={{ background: "rgba(15,15,26,0.72)", backdropFilter: "blur(4px)", padding: "72px 48px 80px", borderTop: "1px solid rgba(201,168,76,0.1)" }}>
             <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#C9A84C", marginBottom: 8 }}>Media Showcase</div>
+              <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>Media Showcase</div>
               <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 28 }}>
                 <h2 style={{ fontSize: 40, margin: 0, color: "#fff", fontWeight: 600 }}>Property Media</h2>
-                <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+                <div style={{ width: 60, height: 1, background: pubT.accent }} />
               </div>
               {mediaTabs.length > 1 && (
                 <div style={{ display: "flex", marginBottom: 32, border: "1px solid rgba(201,168,76,0.25)", borderRadius: 8, overflow: "hidden", width: "fit-content" }}>
@@ -508,7 +508,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
                     <div key={tab.id} onClick={() => setPrestigeMediaTab(tab.id)} style={{
                       padding: "10px 28px", cursor: "pointer",
                       fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase",
-                      background: activeTab === tab.id ? "#C9A84C" : "transparent",
+                      background: activeTab === tab.id ? pubT.accent : "transparent",
                       color: activeTab === tab.id ? "#0f0f1a" : "rgba(255,255,255,0.55)",
                       fontWeight: activeTab === tab.id ? 700 : 400,
                       borderRight: i < mediaTabs.length - 1 ? "1px solid rgba(201,168,76,0.25)" : "none",
@@ -543,10 +543,10 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
         {/* Photo Gallery — solid dark background, dual-row auto-scroll */}
         <div ref={photoRef} style={{ background: "#0f0f1a", padding: "80px 0", borderTop: "1px solid rgba(201,168,76,0.12)" }}>
           <div style={{ padding: "0 48px 40px", maxWidth: 1200, margin: "0 auto" }}>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#C9A84C", marginBottom: 8 }}>Photography</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>Photography</div>
             <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
               <h2 style={{ fontSize: 42, margin: 0, color: "#fff", fontWeight: 600 }}>Photo Gallery</h2>
-              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+              <div style={{ width: 60, height: 1, background: pubT.accent }} />
             </div>
           </div>
           {presGallery.length > 0 && (
@@ -573,7 +573,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
               </div>
               <div style={{ padding: "20px 48px 0", display: "flex", justifyContent: "flex-end", maxWidth: 1200, margin: "0 auto" }}>
                 <button onClick={() => { setLightboxIndex(0); setLightboxOpen(true); }} style={{
-                  background: "transparent", border: "1px solid rgba(201,168,76,0.4)", color: "#C9A84C",
+                  background: "transparent", border: "1px solid rgba(201,168,76,0.4)", color: pubT.accent,
                   padding: "8px 20px", borderRadius: 6, fontFamily: "'Jost', sans-serif",
                   fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", cursor: "pointer",
                 }}>View All {presGallery.length} Photos ↗</button>
@@ -585,21 +585,21 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
         {/* Property Details — semi-transparent */}
         <div ref={detailsRef} style={{ background: "rgba(15,15,26,0.88)", backdropFilter: "blur(4px)", padding: "80px 40px", borderTop: "1px solid rgba(201,168,76,0.1)" }}>
           <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#C9A84C", marginBottom: 8 }}>Property Info</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>Property Info</div>
             <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
               <h2 style={{ fontSize: 42, margin: 0, color: "#fff", fontWeight: 600 }}>Property Details</h2>
-              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+              <div style={{ width: 60, height: 1, background: pubT.accent }} />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 24, marginBottom: 60 }}>
               {[{ val: data.beds, label: "Bedrooms" }, { val: data.baths, label: "Bathrooms" }, { val: data.sqft, label: "Sq. Ft." }, { val: data.price, label: "Price" }].map(s => (
                 <div key={s.label} style={{ background: "rgba(255,255,255,0.06)", padding: 32, borderRadius: 8, textAlign: "center", border: "1px solid rgba(201,168,76,0.15)" }}>
-                  <div style={{ fontSize: s.label === "Price" ? 34 : 48, fontWeight: 700, color: "#C9A84C", marginBottom: 8 }}>{s.val || "—"}</div>
+                  <div style={{ fontSize: s.label === "Price" ? 34 : 48, fontWeight: 700, color: pubT.accent, marginBottom: 8 }}>{s.val || "—"}</div>
                   <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, textTransform: "uppercase", color: "rgba(255,255,255,0.45)", letterSpacing: "0.08em" }}>{s.label}</div>
                 </div>
               ))}
             </div>
             {data.description && (
-              <div style={{ background: "rgba(255,255,255,0.04)", padding: 32, borderRadius: 8, marginBottom: 40, borderLeft: "4px solid #C9A84C" }}>
+              <div style={{ background: "rgba(255,255,255,0.04)", padding: 32, borderRadius: 8, marginBottom: 40, borderLeft: `4px solid ${pubT.accent}` }}>
                 <p style={{ fontFamily: "'Jost', sans-serif", fontSize: 15, lineHeight: 1.8, color: "rgba(255,255,255,0.75)", margin: 0 }}>{data.description}</p>
               </div>
             )}
@@ -609,7 +609,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16 }}>
                   {data.features.filter(f => f).map((feature, idx) => (
                     <div key={idx} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                      <div style={{ color: "#C9A84C", fontSize: 18, flexShrink: 0 }}>•</div>
+                      <div style={{ color: pubT.accent, fontSize: 18, flexShrink: 0 }}>•</div>
                       <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "rgba(255,255,255,0.7)" }}>{feature}</div>
                     </div>
                   ))}
@@ -622,20 +622,20 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
         {/* Contact — semi-transparent */}
         <div ref={contactRef} style={{ background: "rgba(15,15,26,0.88)", backdropFilter: "blur(4px)", padding: "80px 40px", borderTop: "1px solid rgba(201,168,76,0.1)" }}>
           <div style={{ maxWidth: 800, margin: "0 auto" }}>
-            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: "#C9A84C", marginBottom: 8 }}>Schedule a Visit</div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: pubT.accent, marginBottom: 8 }}>Schedule a Visit</div>
             <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 40 }}>
               <h2 style={{ fontSize: 42, margin: 0, color: "#fff", fontWeight: 600 }}>Request a Showing</h2>
-              <div style={{ width: 60, height: 1, background: "#C9A84C" }} />
+              <div style={{ width: 60, height: 1, background: pubT.accent }} />
             </div>
             {agentName && (
               <div style={{ background: "rgba(255,255,255,0.05)", padding: 32, borderRadius: 8, border: "1px solid rgba(201,168,76,0.15)", display: "flex", alignItems: "center", gap: 20, marginBottom: 40 }}>
-                {agentAvatar(80, "#C9A84C", "#0f0f1a")}
+                {agentAvatar(80, pubT.accent, "#0f0f1a")}
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 24, color: "#fff", marginBottom: 4, fontWeight: 600 }}>{agentName}</div>
                   {agentPhone && <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 14, color: "rgba(255,255,255,0.5)" }}>{agentPhone}</div>}
                 </div>
                 {agentPhone && (
-                  <a href={`tel:${agentPhone}`} style={{ background: "#C9A84C", color: "#0f0f1a", border: "none", padding: "12px 28px", borderRadius: 6, fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", cursor: "pointer", textDecoration: "none" }}>Call</a>
+                  <a href={`tel:${agentPhone}`} style={{ background: pubT.accent, color: "#0f0f1a", border: "none", padding: "12px 28px", borderRadius: 6, fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", cursor: "pointer", textDecoration: "none" }}>Call</a>
                 )}
               </div>
             )}
@@ -649,9 +649,9 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
         </div>
 
         {/* Footer */}
-        <div style={{ background: "#0f0f1a", borderTop: "1px solid #C9A84C", padding: "40px 48px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ background: "#0f0f1a", borderTop: `1px solid ${pubT.accent}`, padding: "40px 48px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {brandMark("#C9A84C", "rgba(255,255,255,0.35)")}
+            {brandMark(pubT.accent, "rgba(255,255,255,0.35)")}
           </div>
           <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
             © {new Date().getFullYear()} {agentBranding?.agency_name || "Milestone Media"}. All rights reserved.
@@ -691,7 +691,7 @@ export default function MicrositeRenderer({ microsite, theme, agentBranding, mod
           background: "#7a1f1f", color: "#F5ECD7",
           fontFamily: "'Jost', sans-serif", fontSize: 13, letterSpacing: "0.12em",
           textTransform: "uppercase", textAlign: "center", padding: "10px 16px",
-          borderBottom: "1px solid #C9A84C",
+          borderBottom: `1px solid ${pubT.accent}`,
         }}>
           <strong style={{ letterSpacing: "0.2em" }}>SOLD</strong>
           {soldDateDisplay ? ` · Sold ${soldDateDisplay}` : ""}
