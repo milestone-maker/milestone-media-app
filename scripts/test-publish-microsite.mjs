@@ -40,7 +40,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = "placeholder";
 // Mutable per-test mock state — each test resets via resetMock().
 let mockState = {
   authUser:        { id: "agent-1" },
-  agent:           { id: "agent-1", role: "agent", subscription_tier: "elite", subscription_status: "active", agency_name: "Bluebonnet Realty", agency_logo_url: "https://example.test/logo.png", profile_photo_url: "https://example.test/photo.png", full_name: "Dana Agent" },
+  agent:           { id: "agent-1", role: "agent", subscription_tier: "elite", subscription_status: "active", agency_name: "Bluebonnet Realty", agency_logo_url: "https://example.test/logo.png", profile_photo_url: "https://example.test/photo.png", full_name: "Dana Agent", use_brand_colors: true, brand_bg_color: "#FBF7EE", brand_text_color: "#1A1A1A", brand_muted_color: "#6B6256", brand_accent_color: "#2A4A5E" },
   voiceProfile:    { brokerage_name: "Bluebonnet Brokerage" },
   booking:         { id: "booking-1", agent_id: "agent-1", invoice_paid: true, selected_package: "luxury", selected_addons: [], address: "5912 Velasco" },
   mediaRows:       [],
@@ -54,7 +54,7 @@ let mockState = {
 function resetMock(overrides = {}) {
   mockState = {
     authUser:        { id: "agent-1" },
-    agent:           { id: "agent-1", role: "agent", subscription_tier: "elite", subscription_status: "active", agency_name: "Bluebonnet Realty", agency_logo_url: "https://example.test/logo.png", profile_photo_url: "https://example.test/photo.png", full_name: "Dana Agent" },
+    agent:           { id: "agent-1", role: "agent", subscription_tier: "elite", subscription_status: "active", agency_name: "Bluebonnet Realty", agency_logo_url: "https://example.test/logo.png", profile_photo_url: "https://example.test/photo.png", full_name: "Dana Agent", use_brand_colors: true, brand_bg_color: "#FBF7EE", brand_text_color: "#1A1A1A", brand_muted_color: "#6B6256", brand_accent_color: "#2A4A5E" },
     voiceProfile:    { brokerage_name: "Bluebonnet Brokerage" },
     booking:         { id: "booking-1", agent_id: "agent-1", invoice_paid: true, selected_package: "luxury", selected_addons: [], address: "5912 Velasco" },
     mediaRows:       [],
@@ -429,6 +429,15 @@ const BASE_PROPERTY_DATA = {
   check("agency_logo_url snapshotted",   pd?.agency_logo_url === "https://example.test/logo.png");
   check("profile_photo_url snapshotted", pd?.profile_photo_url === "https://example.test/photo.png");
   check("brokerage_name snapshotted",    pd?.brokerage_name === "Bluebonnet Brokerage");
+  // White-label Gap 2: brand color tokens + opt-in toggle snapshotted too.
+  check("use_brand_colors snapshotted",   pd?.use_brand_colors === true);
+  check("brand_bg_color snapshotted",     pd?.brand_bg_color === "#FBF7EE");
+  check("brand_text_color snapshotted",   pd?.brand_text_color === "#1A1A1A");
+  check("brand_muted_color snapshotted",  pd?.brand_muted_color === "#6B6256");
+  check("brand_accent_color snapshotted", pd?.brand_accent_color === "#2A4A5E");
+  // Existing fields intact alongside the new ones (no restructure regression).
+  check("hero_img still snapshotted",     typeof pd?.hero_img === "string");
+  check("source_type still 'booking'",    pd?.source_type === "booking");
 
   // Empty-branding agent → keys present but "" (fallback path, never undefined)
   resetMock({
@@ -445,6 +454,10 @@ const BASE_PROPERTY_DATA = {
   check("status 200 (empty branding)",   res2.statusCode === 200, `got ${res2.statusCode}`);
   check("agency_name === '' when absent", pd2?.agency_name === "");
   check("brokerage_name === '' when absent", pd2?.brokerage_name === "");
+  // Gap 2 fallback: toggle defaults to false, color tokens to "" (never undefined).
+  check("use_brand_colors === false when absent", pd2?.use_brand_colors === false);
+  check("brand_bg_color === '' when absent",    pd2?.brand_bg_color === "");
+  check("brand_accent_color === '' when absent", pd2?.brand_accent_color === "");
 }
 
 // ── Scenario 5 — Entitlement gate: beta / existing / ownership ──────

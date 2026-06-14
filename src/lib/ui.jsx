@@ -40,6 +40,11 @@ export const THEMES = [
   { name: "Sage",      label: "Organic & Fresh",     slug: "sage",      bg: "#2D3D30", accent: "#5B7B6A", text: "#fff",    sub: "rgba(255,255,255,0.55)", card: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.1)",  swatches: ["#F4F6F4","#2D3D30","#5B7B6A","#A8B8A8"] },
 ];
 
+// White-label Gap 2: agent brand colors over the THEME catalog. The pure helpers
+// live in ./theme.js (no JSX → unit-testable under plain node) and are re-exported
+// here so component code keeps importing everything from "../lib/ui".
+export { hexToRgba, resolveEffectiveTheme, luminance, isDarkBg } from "./theme.js";
+
 export function StatusBadge({ status }) {
   const colors = {
     Live: { bg: "rgba(74,222,128,0.15)", color: "#4ade80", dot: "#4ade80" },

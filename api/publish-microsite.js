@@ -122,7 +122,7 @@ export default async function handler(req, res, depsOverride) {
     // ── 2. Resolve agent profile (for role + subscription state) ──
     const { data: profile, error: profileErr } = await supabase
       .from("agents")
-      .select("id, role, is_beta, subscription_tier, subscription_status, agency_name, agency_logo_url, profile_photo_url, full_name")
+      .select("id, role, is_beta, subscription_tier, subscription_status, agency_name, agency_logo_url, profile_photo_url, full_name, use_brand_colors, brand_bg_color, brand_text_color, brand_muted_color, brand_accent_color")
       .eq("id", authUser.id)
       .single();
     if (profileErr || !profile) {
@@ -362,6 +362,16 @@ export default async function handler(req, res, depsOverride) {
       agency_logo_url: profile.agency_logo_url || "",
       profile_photo_url: profile.profile_photo_url || "",
       brokerage_name: voiceProfile?.brokerage_name || "",
+      // White-label Gap 2: snapshot the opt-in toggle + the 4 brand COLOR tokens
+      // so the anonymous listing page can override the THEME colors without a
+      // (non-anon-readable) live agents read. Colors only this stage — font
+      // tokens deferred. Default-off toggle keeps the Milestone template until an
+      // agent turns it on AND republishes.
+      use_brand_colors: profile.use_brand_colors === true,
+      brand_bg_color: profile.brand_bg_color || "",
+      brand_text_color: profile.brand_text_color || "",
+      brand_muted_color: profile.brand_muted_color || "",
+      brand_accent_color: profile.brand_accent_color || "",
       hero_img: heroImg,
       hero_media_id: heroMediaId,
       listing_id: propertyData.listingId || null,
