@@ -10,6 +10,7 @@ import AnalyticsView from "./views/Analytics";
 import SubscriptionsView from "./views/Subscriptions";
 import InstagramView from "./views/Instagram";
 import SearchConsoleView from "./views/SearchConsole";
+import BetaAccept from "./views/BetaAccept";
 // Shared modules — see src/lib/ for the why. These extractions broke
 // a circular import that App.jsx had with every view (App imported
 // the views; the views imported pricing/auth/UI symbols back from App).
@@ -1356,6 +1357,11 @@ export default function App() {
   // Check for public microsite route (/p/slug)
   if (window.location.pathname.startsWith("/p/")) {
     return <PublicMicrosite />;
+  }
+
+  // Beta invite accept landing — public, handles its own auth card.
+  if (window.location.pathname.startsWith("/beta/accept")) {
+    return <BetaAccept />;
   }
 
   if (loading) {

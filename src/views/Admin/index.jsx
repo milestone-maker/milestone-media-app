@@ -352,6 +352,260 @@ function AdminView() {
     </div>
   );
 
+  // ── Beta Invites section ───────────────────────────────────────────
+  // Self-contained admin block: create invite, list invites with their
+  // shareable links, and show currently active beta agents (computed
+  // off agents.is_beta + beta_expires_at via the GET endpoint).
+  const BetaInvitesSection = () => {
+    const [betaInvites, setBetaInvites] = useState([]);
+    const [activeBetas, setActiveBetas] = useState([]);
+    const [betaLoading, setBetaLoading] = useState(false);
+    const [betaErr, setBetaErr] = useState("");
+    const [formDuration, setFormDuration] = useState(90);
+    const [formEmail, setFormEmail] = useState("");
+    const [creating, setCreating] = useState(false);
+    const [lastCreated, setLastCreated] = useState(null); // { link, ... }
+    const [copied, setCopied] = useState(false);
+
+    const fetchBeta = async () => {
+      setBetaLoading(true); setBetaErr("");
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) { setBetaErr("not signed in"); return; }
+        const resp = await fetch("/api/beta-invites", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok) { setBetaErr(body?.error || `error ${resp.status}`); return; }
+        setBetaInvites(body.invites || []);
+        setActiveBetas(body.activeBetas || []);
+      } catch (err) {
+        setBetaErr(err?.message || "network error");
+      } finally { setBetaLoading(false); }
+    };
+
+    useEffect(() => { fetchBeta(); }, []);
+
+    const createInvite = async (e) => {
+      e.preventDefault();
+      setCreating(true); setBetaErr(""); setLastCreated(null); setCopied(false);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) { setBetaErr("not signed in"); return; }
+        const resp = await fetch("/api/beta-invites", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            betaDurationDays: parseInt(formDuration, 10) || 90,
+            email: formEmail.trim() || null,
+          }),
+        });
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok) { setBetaErr(body?.error || `error ${resp.status}`); return; }
+        setLastCreated({ link: body.link, ...body.invite });
+        setFormEmail("");
+        await fetchBeta();
+      } finally { setCreating(false); }
+    };
+
+    const copyLink = async () => {
+      if (!lastCreated?.link) return;
+      try {
+        await navigator.clipboard.writeText(lastCreated.link);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      } catch { /* ignore */ }
+    };
+
+    const statusPill = (s) => {
+      const map = {
+        pending:  { bg: "rgba(201,168,76,0.15)", fg: "#c9a84c" },
+        accepted: { bg: "rgba(74,222,128,0.15)", fg: "#4ade80" },
+        revoked:  { bg: "rgba(239,68,68,0.15)", fg: "#f87171" },
+        expired:  { bg: "rgba(148,163,184,0.15)", fg: "#94a3b8" },
+      };
+      const c = map[s] || map.expired;
+      return (
+        <span style={{
+          padding: "3px 10px", borderRadius: 10, fontSize: 10, fontWeight: 600,
+          fontFamily: "'Jost', sans-serif", letterSpacing: "0.06em",
+          textTransform: "uppercase", background: c.bg, color: c.fg,
+        }}>{s}</span>
+      );
+    };
+
+    return (
+      <div style={{ marginBottom: 32 }}>
+        <div style={{
+          fontFamily: "'Cormorant Garamond', serif", fontSize: 24,
+          color: "#c9a84c", marginBottom: 16,
+        }}>
+          Beta Invites
+          {activeBetas.length > 0 && (
+            <span style={{
+              display: "inline-block", marginLeft: 10, padding: "2px 10px",
+              borderRadius: 12, fontSize: 11, fontFamily: "'Jost', sans-serif",
+              fontWeight: 600, background: "rgba(74,222,128,0.15)", color: "#4ade80",
+              verticalAlign: "middle",
+            }}>{activeBetas.length} active</span>
+          )}
+        </div>
+
+        {/* Create form */}
+        <div style={cardStyle}>
+          <form
+            onSubmit={createInvite}
+            style={{ display: "grid", gridTemplateColumns: "120px 1fr auto", gap: 12, alignItems: "end" }}
+          >
+            <div style={formFieldContainer}>
+              <label style={labelStyle}>Duration (days)</label>
+              <input
+                type="number" min={1} max={3650}
+                value={formDuration}
+                onChange={(e) => setFormDuration(e.target.value)}
+                style={formInputStyle}
+              />
+            </div>
+            <div style={formFieldContainer}>
+              <label style={labelStyle}>Recipient label (optional)</label>
+              <input
+                type="text" placeholder="email or name"
+                value={formEmail}
+                onChange={(e) => setFormEmail(e.target.value)}
+                style={formInputStyle}
+              />
+            </div>
+            <button
+              type="submit" disabled={creating}
+              style={{
+                padding: "12px 20px", borderRadius: 8, border: 0,
+                background: "#c9a84c", color: "#080c16",
+                fontFamily: "'Jost', sans-serif", fontSize: 13, fontWeight: 600,
+                cursor: creating ? "default" : "pointer", opacity: creating ? 0.7 : 1,
+              }}
+            >{creating ? "…" : "Create invite"}</button>
+          </form>
+
+          {lastCreated && (
+            <div style={{
+              marginTop: 16, padding: 12,
+              background: "rgba(74,222,128,0.08)",
+              border: "1px solid rgba(74,222,128,0.25)",
+              borderRadius: 8,
+              display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+            }}>
+              <div style={{
+                flex: 1, minWidth: 280, fontFamily: "monospace", fontSize: 12,
+                color: "#F0EDE8", wordBreak: "break-all",
+              }}>{lastCreated.link}</div>
+              <button
+                onClick={copyLink}
+                style={{
+                  padding: "8px 14px", borderRadius: 6, border: 0,
+                  background: copied ? "#4ade80" : "rgba(255,255,255,0.08)",
+                  color: copied ? "#080c16" : "#F0EDE8",
+                  fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 600,
+                  cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase",
+                }}
+              >{copied ? "Copied" : "Copy link"}</button>
+            </div>
+          )}
+
+          {betaErr && (
+            <div style={{ marginTop: 12, color: "#f87171", fontSize: 12 }}>{betaErr}</div>
+          )}
+        </div>
+
+        {/* Invites table */}
+        <div style={cardStyle}>
+          <div style={{
+            fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#F0EDE8",
+            letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12,
+          }}>Invites</div>
+          {betaLoading ? (
+            <div style={{ color: "#8A8680", fontSize: 13, padding: "16px 0" }}>Loading…</div>
+          ) : betaInvites.length === 0 ? (
+            <div style={{ color: "#8A8680", fontSize: 13, padding: "16px 0" }}>No invites yet.</div>
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
+              {betaInvites.map((inv) => (
+                <div key={inv.id} style={{
+                  display: "grid", gridTemplateColumns: "1.4fr 90px 1fr 1fr",
+                  gap: 12, alignItems: "center",
+                  padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.06)",
+                  fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#F0EDE8",
+                }}>
+                  <div>
+                    <div style={{ color: "#F0EDE8" }}>{inv.email || <span style={{ color: "#8A8680" }}>(no label)</span>}</div>
+                    <div style={{ color: "#8A8680", fontSize: 10, fontFamily: "monospace", marginTop: 2 }}>
+                      {inv.token.slice(0, 10)}…
+                    </div>
+                  </div>
+                  <div>{statusPill(inv.status)}</div>
+                  <div style={{ color: "#8A8680" }}>
+                    Link expires<br/>
+                    <span style={{ color: "#F0EDE8" }}>{new Date(inv.invite_expires_at).toLocaleDateString()}</span>
+                  </div>
+                  <div style={{ color: "#8A8680" }}>
+                    {inv.accepted_at ? (
+                      <>Accepted<br/><span style={{ color: "#F0EDE8" }}>{new Date(inv.accepted_at).toLocaleDateString()}</span></>
+                    ) : (
+                      <>Duration<br/><span style={{ color: "#F0EDE8" }}>{inv.beta_duration_days} days</span></>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Active betas table */}
+        <div style={cardStyle}>
+          <div style={{
+            fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#F0EDE8",
+            letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 12,
+          }}>Active betas</div>
+          {activeBetas.length === 0 ? (
+            <div style={{ color: "#8A8680", fontSize: 13, padding: "16px 0" }}>No beta agents active.</div>
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
+              {activeBetas.map((a) => (
+                <div key={a.id} style={{
+                  display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr",
+                  gap: 12, padding: "10px 0",
+                  borderBottom: "1px solid rgba(255,255,255,0.06)",
+                  fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#F0EDE8",
+                }}>
+                  <div>
+                    <div>{a.full_name || a.email || a.id.slice(0, 8)}</div>
+                    {a.full_name && a.email && (
+                      <div style={{ color: "#8A8680", fontSize: 11, marginTop: 2 }}>{a.email}</div>
+                    )}
+                  </div>
+                  <div style={{ color: "#8A8680" }}>
+                    Expires<br/>
+                    <span style={{ color: "#F0EDE8" }}>
+                      {a.beta_expires_at ? new Date(a.beta_expires_at).toLocaleDateString() : "never"}
+                    </span>
+                  </div>
+                  <div style={{ color: "#8A8680" }}>
+                    Remaining<br/>
+                    <span style={{ color: a.days_remaining === 0 ? "#f87171" : "#F0EDE8" }}>
+                      {a.days_remaining === null ? "—" : `${a.days_remaining} days`}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // Desktop layout: two columns
   if (isDesktop) {
     return (
@@ -359,6 +613,7 @@ function AdminView() {
         {/* LEFT: Requests + Listings */}
         <div>
           <MicrositeRequestsSection />
+          <BetaInvitesSection />
 
           <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: "#c9a84c", marginBottom: 24 }}>
             Existing Listings
@@ -884,6 +1139,7 @@ function AdminView() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
       <MicrositeRequestsSection />
+      <BetaInvitesSection />
 
       {/* Form */}
       <div>
