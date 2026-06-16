@@ -34,10 +34,14 @@ import { canWriteMicrosite } from "../../shared/micrositeAccess.js";
  *        an active/trialing/past_due status includes microsites on every
  *        booking (no invoice required).
  * @param {{ isBeta?: boolean,
+ *           betaExpiresAt?: string|Date|null,
  *           existingMicrosite?: { agent_id?: string } | null }} [opts]
- *        isBeta: the agents.is_beta flag. existingMicrosite: a microsite
- *        row already saved for this booking (or null) — only honored when
- *        it is owned by `user`.
+ *        isBeta: the agents.is_beta flag. betaExpiresAt: agents.beta_expires_at
+ *        — null/undefined = never expires; a past instant means the beta grant
+ *        no longer applies (the caller falls through to other access paths in
+ *        canWriteMicrosite — it is NOT an outright deny). existingMicrosite: a
+ *        microsite row already saved for this booking (or null) — only honored
+ *        when it is owned by `user`.
  * @returns {{ entitled: boolean, reason?: string }}
  */
 export function checkMicrositeEntitlement(user, booking, subscription = null, opts = {}) {
@@ -46,7 +50,13 @@ export function checkMicrositeEntitlement(user, booking, subscription = null, op
   }
 
   const isBeta = opts.isBeta === true;
-  const trusted = user.role === "admin" || isBeta;
+  const betaExpiresAt = opts.betaExpiresAt ?? null;
+  const betaActive =
+    isBeta &&
+    (betaExpiresAt === null || new Date(betaExpiresAt).getTime() > Date.now());
+  // Only an ACTIVE beta (not an expired one) is trusted to bypass the
+  // ownership gate, mirroring the JS rule. Admin is always trusted.
+  const trusted = user.role === "admin" || betaActive;
 
   // Ownership preconditions apply to everyone EXCEPT trusted roles
   // (admin/beta), which may act on any booking — preserving the
@@ -68,6 +78,7 @@ export function checkMicrositeEntitlement(user, booking, subscription = null, op
   const { allowed, reason } = canWriteMicrosite({
     role: user.role || null,
     isBeta,
+    betaExpiresAt,
     hasExistingMicrosite,
     subscriptionTier: subscription?.tier ?? null,
     subscriptionStatus: subscription?.status ?? null,

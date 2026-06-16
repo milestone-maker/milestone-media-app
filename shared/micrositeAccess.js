@@ -149,6 +149,9 @@ export function hasMicrositeAddon(addons) {
  * @param {Object} input
  * @param {string|null} [input.role]              agent role ('admin' | 'agent')
  * @param {boolean}     [input.isBeta]            agents.is_beta
+ * @param {string|Date|null} [input.betaExpiresAt] agents.beta_expires_at —
+ *        when set, beta access ends at this instant. null/undefined =
+ *        never expires (the demo-account convention).
  * @param {boolean}     [input.hasExistingMicrosite] true when a microsite row
  *        for THIS booking already exists AND is owned by the calling agent
  * @param {string|null} [input.subscriptionTier]   agents.subscription_tier
@@ -161,6 +164,7 @@ export function hasMicrositeAddon(addons) {
 export function canWriteMicrosite({
   role = null,
   isBeta = false,
+  betaExpiresAt = null,
   hasExistingMicrosite = false,
   subscriptionTier = null,
   subscriptionStatus = null,
@@ -171,8 +175,19 @@ export function canWriteMicrosite({
   // (1) admin — global bypass.
   if (role === "admin") return { allowed: true };
 
-  // (2) beta — first-class full microsite access, treated like admin.
-  if (isBeta === true) return { allowed: true };
+  // (2) beta — full microsite access, treated like admin, with an optional
+  // expiry. Rule: is_beta = true AND (beta_expires_at IS NULL OR
+  // beta_expires_at > now()). When beta is set but expired, the branch
+  // intentionally falls through to (3)/(4)/(5) below — an expired beta
+  // does NOT deny outright; the agent can still qualify via existing
+  // microsite, Stripe subscription, or paid booking add-on.
+  if (isBeta === true) {
+    const notExpired =
+      betaExpiresAt === null ||
+      betaExpiresAt === undefined ||
+      new Date(betaExpiresAt).getTime() > Date.now();
+    if (notExpired) return { allowed: true };
+  }
 
   // (3) existing microsite owned by the agent — always editable/re-publishable.
   if (hasExistingMicrosite === true) return { allowed: true };

@@ -686,7 +686,10 @@ function MicrositeView() {
 
   // is_beta grants full microsite access (treated like admin) — see the
   // canonical rule. profile is useAuth().profile (the agents row, select *).
+  // beta_expires_at is the optional cutoff; null = never expires (demo-account
+  // convention). The shared rule applies the expiry check; we just forward.
   const isBeta = profile?.is_beta === true;
+  const betaExpiresAt = profile?.beta_expires_at ?? null;
 
   // Existing-microsite exemption (path 3): the agent already owns a microsite
   // for this booking, so it stays editable/re-publishable regardless of the
@@ -706,6 +709,7 @@ function MicrositeView() {
   micrositeAccessible = canWriteMicrosite({
     role: profile?.role || null,
     isBeta,
+    betaExpiresAt,
     hasExistingMicrosite,
     subscriptionTier: profile?.subscription_tier ?? null,
     subscriptionStatus: profile?.subscription_status ?? null,
