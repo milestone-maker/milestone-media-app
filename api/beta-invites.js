@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import { PUBLIC_APP_BASE } from "./_lib/microsite.js";
 import { createTransporter, defaultFrom, BUSINESS_EMAIL, BUSINESS_NAME, FROM_EMAIL } from "./_lib/mailer.js";
 
-// The founding-member one-pager bundled with this function (see
+// The beta one-pager bundled with this function (see
 // vercel.json includeFiles). At runtime the file is alongside the
 // compiled handler, so resolve relative to import.meta.url. Locally
 // (dev/test) the same path resolves to api/_assets/.

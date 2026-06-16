@@ -529,7 +529,7 @@ function AdminView() {
                 onChange={(e) => setFormSendEmail(e.target.checked)}
                 style={{ accentColor: "#c9a84c" }}
               />
-              Send invite email with the founding-member one-pager attached
+              Send invite email with the beta one-pager attached
             </label>
           </form>
 

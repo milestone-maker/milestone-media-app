@@ -2,7 +2,7 @@
 -- 048: Beta invites — email send status columns
 -- ============================================================
 -- The admin "Create invite" flow optionally sends the recipient an email
--- with the accept link and the founding-member one-pager attached. The
+-- with the accept link and the beta one-pager attached. The
 -- send is deliberately non-blocking on the invite create: a failed send
 -- does NOT roll back the invite row — the admin sees a "failed" pill and
 -- still has the copy-link fallback.
