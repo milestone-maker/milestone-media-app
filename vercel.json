@@ -16,6 +16,7 @@
     "api/beta-invites.js": { "includeFiles": "api/_assets/**" }
   },
   "crons": [
-    { "path": "/api/refresh-mortgage-rates", "schedule": "0 20 * * *" }
+    { "path": "/api/refresh-mortgage-rates", "schedule": "0 20 * * *" },
+    { "path": "/api/beta-reminders",         "schedule": "0 14 * * *" }
   ]
 }
