@@ -122,7 +122,7 @@ export default async function handler(req, res, depsOverride) {
     // ── 2. Resolve agent profile (for role + subscription state) ──
     const { data: profile, error: profileErr } = await supabase
       .from("agents")
-      .select("id, role, is_beta, subscription_tier, subscription_status, agency_name, agency_logo_url, profile_photo_url, full_name, use_brand_colors, brand_bg_color, brand_text_color, brand_muted_color, brand_accent_color")
+      .select("id, role, is_beta, beta_expires_at, subscription_tier, subscription_status, agency_name, agency_logo_url, profile_photo_url, full_name, use_brand_colors, brand_bg_color, brand_text_color, brand_muted_color, brand_accent_color")
       .eq("id", authUser.id)
       .single();
     if (profileErr || !profile) {
@@ -181,6 +181,7 @@ export default async function handler(req, res, depsOverride) {
     // ── 5. Entitlement check ──
     const { entitled, reason } = checkMicrositeEntitlement(user, booking, subscription, {
       isBeta: profile.is_beta === true,
+      betaExpiresAt: profile.beta_expires_at ?? null,
       existingMicrosite: existingMicrosite || null,
     });
     if (!entitled) {
