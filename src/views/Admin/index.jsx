@@ -363,8 +363,9 @@ function AdminView() {
     const [betaErr, setBetaErr] = useState("");
     const [formDuration, setFormDuration] = useState(90);
     const [formEmail, setFormEmail] = useState("");
+    const [formSendEmail, setFormSendEmail] = useState(true);
     const [creating, setCreating] = useState(false);
-    const [lastCreated, setLastCreated] = useState(null); // { link, ... }
+    const [lastCreated, setLastCreated] = useState(null); // { link, emailResult, ... }
     const [copied, setCopied] = useState(false);
 
     const fetchBeta = async () => {
@@ -388,6 +389,12 @@ function AdminView() {
 
     const createInvite = async (e) => {
       e.preventDefault();
+      // Email is required when sending; allow blank-email invites only as
+      // an explicit copy-link-only path (checkbox off).
+      if (formSendEmail && !formEmail.trim()) {
+        setBetaErr("recipient email is required when 'Send email' is checked");
+        return;
+      }
       setCreating(true); setBetaErr(""); setLastCreated(null); setCopied(false);
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -401,11 +408,12 @@ function AdminView() {
           body: JSON.stringify({
             betaDurationDays: parseInt(formDuration, 10) || 90,
             email: formEmail.trim() || null,
+            sendEmail: formSendEmail,
           }),
         });
         const body = await resp.json().catch(() => ({}));
         if (!resp.ok) { setBetaErr(body?.error || `error ${resp.status}`); return; }
-        setLastCreated({ link: body.link, ...body.invite });
+        setLastCreated({ link: body.link, emailResult: body.email, ...body.invite });
         setFormEmail("");
         await fetchBeta();
       } finally { setCreating(false); }
@@ -437,6 +445,26 @@ function AdminView() {
       );
     };
 
+    const emailPill = (status, error) => {
+      const map = {
+        sent:     { bg: "rgba(74,222,128,0.15)",  fg: "#4ade80", label: "Sent" },
+        failed:   { bg: "rgba(239,68,68,0.15)",   fg: "#f87171", label: "Failed" },
+        not_sent: { bg: "rgba(148,163,184,0.12)", fg: "#94a3b8", label: "Not sent" },
+      };
+      const c = map[status] || map.not_sent;
+      return (
+        <span
+          title={status === "failed" && error ? error : undefined}
+          style={{
+            padding: "3px 10px", borderRadius: 10, fontSize: 10, fontWeight: 600,
+            fontFamily: "'Jost', sans-serif", letterSpacing: "0.06em",
+            textTransform: "uppercase", background: c.bg, color: c.fg,
+            cursor: status === "failed" && error ? "help" : "default",
+          }}
+        >{c.label}</span>
+      );
+    };
+
     return (
       <div style={{ marginBottom: 32 }}>
         <div style={{
@@ -456,63 +484,97 @@ function AdminView() {
 
         {/* Create form */}
         <div style={cardStyle}>
-          <form
-            onSubmit={createInvite}
-            style={{ display: "grid", gridTemplateColumns: "120px 1fr auto", gap: 12, alignItems: "end" }}
-          >
-            <div style={formFieldContainer}>
-              <label style={labelStyle}>Duration (days)</label>
-              <input
-                type="number" min={1} max={3650}
-                value={formDuration}
-                onChange={(e) => setFormDuration(e.target.value)}
-                style={formInputStyle}
-              />
+          <form onSubmit={createInvite} style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "120px 1fr auto", gap: 12, alignItems: "end" }}>
+              <div style={formFieldContainer}>
+                <label style={labelStyle}>Duration (days)</label>
+                <input
+                  type="number" min={1} max={3650}
+                  value={formDuration}
+                  onChange={(e) => setFormDuration(e.target.value)}
+                  style={formInputStyle}
+                />
+              </div>
+              <div style={formFieldContainer}>
+                <label style={labelStyle}>
+                  Recipient email {formSendEmail ? <span style={{ color: "#c9a84c" }}>*</span> : <span style={{ color: "#8A8680" }}>(optional)</span>}
+                </label>
+                <input
+                  type={formSendEmail ? "email" : "text"}
+                  placeholder={formSendEmail ? "agent@example.com" : "email or label (optional)"}
+                  value={formEmail}
+                  onChange={(e) => setFormEmail(e.target.value)}
+                  required={formSendEmail}
+                  style={formInputStyle}
+                />
+              </div>
+              <button
+                type="submit" disabled={creating}
+                style={{
+                  padding: "12px 20px", borderRadius: 8, border: 0,
+                  background: "#c9a84c", color: "#080c16",
+                  fontFamily: "'Jost', sans-serif", fontSize: 13, fontWeight: 600,
+                  cursor: creating ? "default" : "pointer", opacity: creating ? 0.7 : 1,
+                }}
+              >{creating ? "…" : (formSendEmail ? "Create & send" : "Create invite")}</button>
             </div>
-            <div style={formFieldContainer}>
-              <label style={labelStyle}>Recipient label (optional)</label>
+            <label style={{
+              display: "flex", alignItems: "center", gap: 8,
+              fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#F0EDE8",
+              cursor: "pointer",
+            }}>
               <input
-                type="text" placeholder="email or name"
-                value={formEmail}
-                onChange={(e) => setFormEmail(e.target.value)}
-                style={formInputStyle}
+                type="checkbox"
+                checked={formSendEmail}
+                onChange={(e) => setFormSendEmail(e.target.checked)}
+                style={{ accentColor: "#c9a84c" }}
               />
-            </div>
-            <button
-              type="submit" disabled={creating}
-              style={{
-                padding: "12px 20px", borderRadius: 8, border: 0,
-                background: "#c9a84c", color: "#080c16",
-                fontFamily: "'Jost', sans-serif", fontSize: 13, fontWeight: 600,
-                cursor: creating ? "default" : "pointer", opacity: creating ? 0.7 : 1,
-              }}
-            >{creating ? "…" : "Create invite"}</button>
+              Send invite email with the beta one-pager attached
+            </label>
           </form>
 
-          {lastCreated && (
-            <div style={{
-              marginTop: 16, padding: 12,
-              background: "rgba(74,222,128,0.08)",
-              border: "1px solid rgba(74,222,128,0.25)",
-              borderRadius: 8,
-              display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
-            }}>
+          {lastCreated && (() => {
+            const er = lastCreated.emailResult || {};
+            const emailFailed = er.attempted && !er.ok;
+            const bannerBg = emailFailed ? "rgba(239,68,68,0.08)"   : "rgba(74,222,128,0.08)";
+            const bannerBd = emailFailed ? "rgba(239,68,68,0.25)"   : "rgba(74,222,128,0.25)";
+            return (
               <div style={{
-                flex: 1, minWidth: 280, fontFamily: "monospace", fontSize: 12,
-                color: "#F0EDE8", wordBreak: "break-all",
-              }}>{lastCreated.link}</div>
-              <button
-                onClick={copyLink}
-                style={{
-                  padding: "8px 14px", borderRadius: 6, border: 0,
-                  background: copied ? "#4ade80" : "rgba(255,255,255,0.08)",
-                  color: copied ? "#080c16" : "#F0EDE8",
-                  fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 600,
-                  cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase",
-                }}
-              >{copied ? "Copied" : "Copy link"}</button>
-            </div>
-          )}
+                marginTop: 16, padding: 12,
+                background: bannerBg, border: `1px solid ${bannerBd}`,
+                borderRadius: 8, display: "grid", gap: 8,
+              }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{
+                    flex: 1, minWidth: 280, fontFamily: "monospace", fontSize: 12,
+                    color: "#F0EDE8", wordBreak: "break-all",
+                  }}>{lastCreated.link}</div>
+                  <button
+                    onClick={copyLink}
+                    style={{
+                      padding: "8px 14px", borderRadius: 6, border: 0,
+                      background: copied ? "#4ade80" : "rgba(255,255,255,0.08)",
+                      color: copied ? "#080c16" : "#F0EDE8",
+                      fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 600,
+                      cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase",
+                    }}
+                  >{copied ? "Copied" : "Copy link"}</button>
+                </div>
+                {er.attempted && (
+                  <div style={{ fontSize: 12, color: emailFailed ? "#f87171" : "#4ade80" }}>
+                    {er.ok
+                      ? `Email sent to ${lastCreated.email}.`
+                      : `Invite created, but email send failed: ${er.error || "unknown error"}. Use the copy-link button to share manually.`}
+                  </div>
+                )}
+                {!er.attempted && (
+                  <div style={{ fontSize: 12, color: "#8A8680" }}>
+                    Email not requested — share the link manually.
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {betaErr && (
             <div style={{ marginTop: 12, color: "#f87171", fontSize: 12 }}>{betaErr}</div>
@@ -531,33 +593,48 @@ function AdminView() {
             <div style={{ color: "#8A8680", fontSize: 13, padding: "16px 0" }}>No invites yet.</div>
           ) : (
             <div style={{ display: "grid", gap: 8 }}>
-              {betaInvites.map((inv) => (
-                <div key={inv.id} style={{
-                  display: "grid", gridTemplateColumns: "1.4fr 90px 1fr 1fr",
-                  gap: 12, alignItems: "center",
-                  padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.06)",
-                  fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#F0EDE8",
-                }}>
-                  <div>
-                    <div style={{ color: "#F0EDE8" }}>{inv.email || <span style={{ color: "#8A8680" }}>(no label)</span>}</div>
-                    <div style={{ color: "#8A8680", fontSize: 10, fontFamily: "monospace", marginTop: 2 }}>
-                      {inv.token.slice(0, 10)}…
+              {betaInvites.map((inv) => {
+                const fullLink = `${window.location.origin}/beta/accept?token=${inv.token}`;
+                const onCopy = () => navigator.clipboard?.writeText?.(inv.link || fullLink).catch(() => {});
+                return (
+                  <div key={inv.id} style={{
+                    display: "grid", gridTemplateColumns: "1.4fr 90px 90px 1fr 1fr auto",
+                    gap: 12, alignItems: "center",
+                    padding: "10px 0", borderBottom: "1px solid rgba(255,255,255,0.06)",
+                    fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#F0EDE8",
+                  }}>
+                    <div>
+                      <div style={{ color: "#F0EDE8" }}>{inv.email || <span style={{ color: "#8A8680" }}>(no label)</span>}</div>
+                      <div style={{ color: "#8A8680", fontSize: 10, fontFamily: "monospace", marginTop: 2 }}>
+                        {inv.token.slice(0, 10)}…
+                      </div>
                     </div>
+                    <div>{statusPill(inv.status)}</div>
+                    <div>{emailPill(inv.email_status, inv.email_error)}</div>
+                    <div style={{ color: "#8A8680" }}>
+                      Link expires<br/>
+                      <span style={{ color: "#F0EDE8" }}>{new Date(inv.invite_expires_at).toLocaleDateString()}</span>
+                    </div>
+                    <div style={{ color: "#8A8680" }}>
+                      {inv.accepted_at ? (
+                        <>Accepted<br/><span style={{ color: "#F0EDE8" }}>{new Date(inv.accepted_at).toLocaleDateString()}</span></>
+                      ) : (
+                        <>Duration<br/><span style={{ color: "#F0EDE8" }}>{inv.beta_duration_days} days</span></>
+                      )}
+                    </div>
+                    <button
+                      onClick={onCopy}
+                      title="Copy invite link"
+                      style={{
+                        padding: "6px 10px", borderRadius: 6, border: 0,
+                        background: "rgba(255,255,255,0.08)", color: "#F0EDE8",
+                        fontFamily: "'Jost', sans-serif", fontSize: 10, fontWeight: 600,
+                        cursor: "pointer", letterSpacing: "0.06em", textTransform: "uppercase",
+                      }}
+                    >Copy link</button>
                   </div>
-                  <div>{statusPill(inv.status)}</div>
-                  <div style={{ color: "#8A8680" }}>
-                    Link expires<br/>
-                    <span style={{ color: "#F0EDE8" }}>{new Date(inv.invite_expires_at).toLocaleDateString()}</span>
-                  </div>
-                  <div style={{ color: "#8A8680" }}>
-                    {inv.accepted_at ? (
-                      <>Accepted<br/><span style={{ color: "#F0EDE8" }}>{new Date(inv.accepted_at).toLocaleDateString()}</span></>
-                    ) : (
-                      <>Duration<br/><span style={{ color: "#F0EDE8" }}>{inv.beta_duration_days} days</span></>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

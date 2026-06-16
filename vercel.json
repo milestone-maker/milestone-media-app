@@ -12,7 +12,8 @@
     "api/microsite-chat.js": { "maxDuration": 60 },
     "api/classify-photos.js": { "maxDuration": 120 },
     "api/social-post.js": { "maxDuration": 60 },
-    "api/render-microsite.js": { "includeFiles": "dist/**" }
+    "api/render-microsite.js": { "includeFiles": "dist/**" },
+    "api/beta-invites.js": { "includeFiles": "api/_assets/**" }
   },
   "crons": [
     { "path": "/api/refresh-mortgage-rates", "schedule": "0 20 * * *" }
