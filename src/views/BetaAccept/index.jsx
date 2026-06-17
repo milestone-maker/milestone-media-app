@@ -1,5 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../../supabaseClient";
+
+// Hard upper bound on the accept POST. If the network hangs we surface a
+// retryable error rather than sitting on "Granting beta access…" forever.
+const ACCEPT_TIMEOUT_MS = 20000;
 
 // /beta/accept?token=... — public landing for beta invite redemption.
 //
@@ -58,6 +62,14 @@ export default function BetaAccept() {
   const [session, setSession] = useState(null);
   const [accept, setAccept] = useState({ state: "idle" }); // idle | accepting | done | error
   const [acceptResult, setAcceptResult] = useState(null);
+  // One-shot guard: the accept POST must fire exactly once across the
+  // component's lifetime, regardless of how many times session/lookup
+  // re-render (Supabase TOKEN_REFRESHED, parent re-render, etc.). The
+  // previous cleanup-based cancellation was racing with the very first
+  // setAccept({state:"accepting"}) call — that re-render killed the
+  // in-flight fetch's continuation and left the UI hung on "Granting…".
+  const acceptStartedRef = useRef(false);
+  const [retryNonce, setRetryNonce] = useState(0); // bumping this re-arms the accept effect
 
   // Lookup the invite once on mount.
   useEffect(() => {
@@ -102,10 +114,22 @@ export default function BetaAccept() {
   }, []);
 
   // Once the visitor is signed in AND the lookup says the invite is valid,
-  // POST accept automatically.
+  // POST accept automatically. Guarded by a ref so it fires exactly once —
+  // a Supabase TOKEN_REFRESHED event or a parent re-render won't restart
+  // an in-flight POST or race the continuation.
+  // NOTE: accept.state is intentionally NOT in deps. The effect's first
+  // action calls setAccept({state:"accepting"}); if accept.state were a
+  // dep, that state change would re-fire the effect and the cleanup
+  // would cancel the in-flight fetch's continuation — leaving the UI
+  // hung on "Granting beta access…" even though the server succeeded.
   useEffect(() => {
-    if (lookup.state !== "valid" || !session || accept.state !== "idle") return;
-    let cancelled = false;
+    if (lookup.state !== "valid" || !session) return;
+    if (acceptStartedRef.current) return;
+    acceptStartedRef.current = true;
+
+    const ctrl = new AbortController();
+    const timeoutId = setTimeout(() => ctrl.abort(), ACCEPT_TIMEOUT_MS);
+
     (async () => {
       setAccept({ state: "accepting" });
       try {
@@ -116,9 +140,9 @@ export default function BetaAccept() {
             Authorization: `Bearer ${session.access_token}`,
           },
           body: JSON.stringify({ token }),
+          signal: ctrl.signal,
         });
         const body = await resp.json().catch(() => ({}));
-        if (cancelled) return;
         if (!resp.ok) {
           setAccept({ state: "error", reason: body?.error || `accept failed (${resp.status})` });
           return;
@@ -126,11 +150,24 @@ export default function BetaAccept() {
         setAcceptResult(body);
         setAccept({ state: "done" });
       } catch (err) {
-        if (!cancelled) setAccept({ state: "error", reason: err?.message || "network error" });
+        const reason = err?.name === "AbortError"
+          ? `the request took longer than ${Math.round(ACCEPT_TIMEOUT_MS / 1000)} seconds — please try again`
+          : (err?.message || "network error");
+        setAccept({ state: "error", reason });
+      } finally {
+        clearTimeout(timeoutId);
       }
     })();
-    return () => { cancelled = true; };
-  }, [lookup.state, session, accept.state, token]);
+    // No cleanup-based cancellation: a re-render shouldn't abort an
+    // in-flight grant. The AbortController is solely for the timeout.
+  }, [lookup.state, session, token, retryNonce]);
+
+  const retryAccept = () => {
+    acceptStartedRef.current = false;
+    setAccept({ state: "idle" });
+    setAcceptResult(null);
+    setRetryNonce((n) => n + 1);
+  };
 
   return (
     <div style={{
@@ -219,6 +256,10 @@ export default function BetaAccept() {
               <div style={{ color: PALETTE.danger, textAlign: "center", fontSize: 14 }}>
                 {accept.reason}
               </div>
+              <button
+                style={{ ...buttonStyle, marginTop: 24 }}
+                onClick={retryAccept}
+              >Try again</button>
             </>
           )}
         </div>
