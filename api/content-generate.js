@@ -29,6 +29,7 @@ import { canonicalizeHashtags } from "./_content/post-processors.js";
 import { UNIVERSAL_REQUIRED_OUTPUT_FIELDS } from "./_content/prompts/_helpers.js";
 import { selectCarouselPhotos } from "./_content/selectCarouselPhotos.js";
 import { resolvePublishedMicrositeUrl, appendMicrositeToken } from "./_lib/microsite.js";
+import { withSentry } from "./_lib/sentry.js";
 
 const CAROUSEL_FRAMEWORK = "walkthrough_carousel";
 
@@ -221,7 +222,7 @@ export async function generateAndParseObject(opts) {
 
 // ── main handler ─────────────────────────────────────────────────────
 
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -545,3 +546,5 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: err.message || "internal error" });
   }
 }
+
+export default withSentry(handler);

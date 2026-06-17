@@ -24,6 +24,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
+import { withSentry } from "./_lib/sentry.js";
 
 // ── constants ────────────────────────────────────────────────────────
 const MODEL          = "claude-sonnet-4-6";
@@ -129,7 +130,7 @@ function normalizeComp(c) {
 //
 // depsOverride is for unit tests only — production callers use the 2-arg
 // form and the lazy default singletons are used.
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -221,6 +222,8 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: "Something went wrong. Please try again." });
   }
 }
+
+export default withSentry(handler);
 
 // Exposed for tests.
 export const _internals = { extractJson, normalizeComp, SYSTEM_PROMPT };

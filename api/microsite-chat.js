@@ -36,6 +36,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
 import { getFreshMortgageRates } from "./_lib/mortgageRates.js";
 import { getCommute } from "./_lib/commute.js";
+import { withSentry } from "./_lib/sentry.js";
 
 // ── constants ────────────────────────────────────────────────────────
 const MODEL                 = "claude-sonnet-4-6";
@@ -334,7 +335,7 @@ function leadInfoIsComplete(mode, info) {
 }
 
 // ── main handler ─────────────────────────────────────────────────────
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -760,6 +761,8 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: "Something went wrong. Please try again." });
   }
 }
+
+export default withSentry(handler);
 
 // Exposed for tests.
 export const _internals = {
