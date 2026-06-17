@@ -74,18 +74,25 @@ function BookingsManagerView() {
       if (data) allBookings = data;
       if (error) console.error("Error loading bookings:", error);
     } else if (user?.id) {
+      // Email columns are stored lowercased (create-booking normalizes + backfill
+      // applied), and Supabase auth emails are lowercased. Use case-insensitive
+      // EXACT match via .eq on the lowercased value — NOT .ilike, since ilike
+      // treats `_` and `%` as wildcards and could over-match a different client's
+      // booking (correctness + privacy bug).
+      const userEmail = (user.email || "").trim().toLowerCase();
+
       // Fetch bookings by agent_id
       const { data: ownData } = await supabase.from("bookings").select("*")
         .eq("agent_id", user.id).order("created_at", { ascending: false });
 
       // Fetch unclaimed website bookings that match this agent's email
       const { data: emailData } = await supabase.from("bookings").select("*")
-        .eq("client_email", user.email).is("agent_id", null)
+        .eq("client_email", userEmail).is("agent_id", null)
         .order("created_at", { ascending: false });
 
       // Fetch bookings where this user is a CC'd assistant/collaborator
       const { data: ccData } = await supabase.from("bookings").select("*")
-        .eq("cc_email", user.email).order("created_at", { ascending: false });
+        .eq("cc_email", userEmail).order("created_at", { ascending: false });
 
       // Merge and deduplicate
       const combined = [...(ownData || []), ...(emailData || []), ...(ccData || [])];
