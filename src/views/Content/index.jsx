@@ -17,7 +17,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
 import { useAuth } from "../../lib/auth";
-import { isSubscribed } from "../../lib/subscription";
+import { hasFeatureAccess } from "../../lib/subscription";
 import { PUBLIC_APP_BASE as MICROSITE_PUBLIC_BASE } from "../../lib/siteConfig";
 import VoiceProfileModal from "../../components/VoiceProfileModal";
 import SubscriptionsView from "../Subscriptions";
@@ -141,7 +141,7 @@ function ContentView() {
   const { user, profile } = useAuth();
   // Admins always pass; otherwise an active subscription is required.
   const isAdmin = profile?.role === "admin";
-  const canGenerate = isAdmin || isSubscribed(profile);
+  const canGenerate = isAdmin || hasFeatureAccess(profile);
 
   // Data
   const [listings, setListings] = useState([]);
