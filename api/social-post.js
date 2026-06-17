@@ -41,7 +41,7 @@
 // Required env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BUNDLE_API_KEY.
 
 import { createClient } from "@supabase/supabase-js";
-import { isSubscribed } from "./_lib/subscription.js";
+import { hasFeatureAccess } from "./_lib/subscription.js";
 import {
   createUploadFromUrl as bundleCreateUploadFromUrl,
   createPost as bundleCreatePost,
@@ -175,7 +175,7 @@ export default async function handler(req, res, depsOverride) {
     // ── 1b. Subscription gate (admins exempt) ──
     const { data: agentRow, error: agentErr } = await supabase
       .from("agents")
-      .select("role, subscription_status")
+      .select("role, subscription_status, is_beta, beta_expires_at")
       .eq("id", authUser.id)
       .maybeSingle();
     if (agentErr) {
@@ -185,7 +185,7 @@ export default async function handler(req, res, depsOverride) {
     if (!agentRow) {
       return res.status(401).json({ error: "no agent profile for this user" });
     }
-    if (agentRow.role !== "admin" && !isSubscribed(agentRow)) {
+    if (agentRow.role !== "admin" && !hasFeatureAccess(agentRow)) {
       return res.status(402).json({ error: "subscription_required" });
     }
 

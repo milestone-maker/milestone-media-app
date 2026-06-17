@@ -31,7 +31,7 @@
 //   ANTHROPIC_API_KEY            (read by @anthropic-ai/sdk inside engine)
 
 import { createClient } from "@supabase/supabase-js";
-import { isSubscribed } from "./_lib/subscription.js";
+import { hasFeatureAccess } from "./_lib/subscription.js";
 
 // Engine is CommonJS; lazy-imported on first use so test runs that inject a
 // mock classifier (via depsOverride.classifyImages) don't require the package
@@ -234,7 +234,7 @@ export default async function handler(req, res, depsOverride) {
     // ── 1b. Subscription gate (mirrors content-generate.js; admins exempt) ──
     const { data: agentRow, error: agentErr } = await supabase
       .from("agents")
-      .select("role, subscription_status")
+      .select("role, subscription_status, is_beta, beta_expires_at")
       .eq("id", authUser.id)
       .maybeSingle();
     if (agentErr) {
@@ -245,7 +245,7 @@ export default async function handler(req, res, depsOverride) {
       return res.status(401).json({ error: "no agent profile for this user" });
     }
     const isAdmin = agentRow.role === "admin";
-    if (!isAdmin && !isSubscribed(agentRow)) {
+    if (!isAdmin && !hasFeatureAccess(agentRow)) {
       return res.status(402).json({ error: "subscription_required" });
     }
 

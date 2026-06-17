@@ -15,14 +15,14 @@
 // Auth + gating mirror api/social-status.js EXACTLY:
 //   1. CORS + method guard (GET)
 //   2. Bearer auth → supabase.auth.getUser
-//   3. Subscription gate (admins exempt) via _lib/subscription.isSubscribed
+//   3. Feature-access gate (admins exempt) via _lib/subscription.hasFeatureAccess
 //   4. Service-role load of social_posts, explicitly scoped to agent_id =
 //      auth.uid() (same effect as the table's RLS self-select policy).
 //
 // Required env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 
 import { createClient } from "@supabase/supabase-js";
-import { isSubscribed } from "./_lib/subscription.js";
+import { hasFeatureAccess } from "./_lib/subscription.js";
 
 const SUPABASE_URL              = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -124,7 +124,7 @@ export default async function handler(req, res, depsOverride) {
     // ── 1b. Subscription gate (admins exempt) ──
     const { data: agentRow, error: agentErr } = await supabase
       .from("agents")
-      .select("role, subscription_status")
+      .select("role, subscription_status, is_beta, beta_expires_at")
       .eq("id", authUser.id)
       .maybeSingle();
     if (agentErr) {
@@ -134,7 +134,7 @@ export default async function handler(req, res, depsOverride) {
     if (!agentRow) {
       return res.status(401).json({ error: "no agent profile for this user" });
     }
-    if (agentRow.role !== "admin" && !isSubscribed(agentRow)) {
+    if (agentRow.role !== "admin" && !hasFeatureAccess(agentRow)) {
       return res.status(402).json({ error: "subscription_required" });
     }
 

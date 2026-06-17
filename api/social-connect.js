@@ -23,7 +23,7 @@
 // Auth + gating mirror the prior Instagram-only version EXACTLY:
 //   1. CORS + method guard
 //   2. Bearer auth → supabase.auth.getUser
-//   3. Subscription gate (admins exempt) via _lib/subscription.isSubscribed
+//   3. Feature-access gate (admins exempt) via _lib/subscription.hasFeatureAccess
 //   4. Service-role load/upsert of agent_platform_connections for auth.uid()
 //   5. Idempotent create-team (only when the agent has no team on any row),
 //      then create-portal-link scoped to the requested platform
@@ -31,7 +31,7 @@
 // Required env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, BUNDLE_API_KEY.
 
 import { createClient } from "@supabase/supabase-js";
-import { isSubscribed } from "./_lib/subscription.js";
+import { hasFeatureAccess } from "./_lib/subscription.js";
 import {
   createTeam as bundleCreateTeam,
   createPortalLink as bundleCreatePortalLink,
@@ -112,7 +112,7 @@ export default async function handler(req, res, depsOverride) {
     // ── 1b. Subscription gate (admins exempt) ──
     const { data: agentRow, error: agentErr } = await supabase
       .from("agents")
-      .select("role, subscription_status, full_name")
+      .select("role, subscription_status, full_name, is_beta, beta_expires_at")
       .eq("id", authUser.id)
       .maybeSingle();
     if (agentErr) {
@@ -122,7 +122,7 @@ export default async function handler(req, res, depsOverride) {
     if (!agentRow) {
       return res.status(401).json({ error: "no agent profile for this user" });
     }
-    if (agentRow.role !== "admin" && !isSubscribed(agentRow)) {
+    if (agentRow.role !== "admin" && !hasFeatureAccess(agentRow)) {
       return res.status(402).json({ error: "subscription_required" });
     }
 

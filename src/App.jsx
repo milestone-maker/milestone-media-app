@@ -17,7 +17,7 @@ import BetaAccept from "./views/BetaAccept";
 // Production minification turned that cycle into a TDZ runtime error.
 import { PRICING, PACKAGES, SQFT_TIERS, ESSENTIAL_PRICING, INDIVIDUAL_SERVICES, ADDONS, SUBSCRIPTIONS, PROMOS, STRIPE_IDS } from "./lib/pricing";
 import { AuthContext, useAuth } from "./lib/auth";
-import { isSubscribed } from "./lib/subscription";
+import { hasFeatureAccess } from "./lib/subscription";
 import { MEDIA_ICONS, THEMES, StatusBadge, PackageBadge } from "./lib/ui";
 import MicrositeRenderer from "./components/MicrositeRenderer";
 import VoiceProfileModal from "./components/VoiceProfileModal";
@@ -1014,7 +1014,7 @@ function AppShell() {
             setShowProfile(false);
             // Gate behind an active subscription (admins exempt). Unsubscribed
             // non-admins are routed to the subscription page instead of the modal.
-            if (!isAdmin && !isSubscribed(profile)) { setExtraView("Subscriptions"); return; }
+            if (!isAdmin && !hasFeatureAccess(profile)) { setExtraView("Subscriptions"); return; }
             setShowVoiceProfile(true);
           }}
           style={{
@@ -1060,7 +1060,7 @@ function AppShell() {
             setShowProfile(false);
             // Gate behind an active subscription (admins exempt), mirroring
             // Voice Profile — unsubscribed non-admins go to the plan page.
-            if (!isAdmin && !isSubscribed(profile)) { setExtraView("Subscriptions"); return; }
+            if (!isAdmin && !hasFeatureAccess(profile)) { setExtraView("Subscriptions"); return; }
             setExtraView("Instagram");
           }}
           style={{
