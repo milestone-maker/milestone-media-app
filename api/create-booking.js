@@ -172,7 +172,7 @@ export default async function handler(req, res, depsOverride) {
     // ── 2. Resolve agent (tier + status) ──
     const { data: agent, error: agentErr } = await supabase
       .from("agents")
-      .select("id, email, full_name, subscription_tier, subscription_status")
+      .select("id, email, full_name, role, subscription_tier, subscription_status")
       .eq("id", authUser.id)
       .single();
     if (agentErr || !agent) {
@@ -181,6 +181,18 @@ export default async function handler(req, res, depsOverride) {
 
     // ── 3. Decide credit eligibility ──
     const payload = req.body || {};
+
+    // Normalize contact emails. The booking-ownership-claim machinery is
+    // case-insensitive end-to-end; store canonical lowercase to keep RLS
+    // and downstream joins simple.
+    if (typeof payload.client_email === "string") {
+      payload.client_email = payload.client_email.trim().toLowerCase();
+    }
+    if (typeof payload.cc_email === "string") {
+      payload.cc_email = payload.cc_email.trim().toLowerCase();
+      if (!payload.cc_email) payload.cc_email = null;
+    }
+
     const subActive = ACTIVE_STATUSES.has(agent.subscription_status);
     const tier = agent.subscription_tier;
     const isPackageMode = payload.booking_mode === "package";
@@ -246,9 +258,30 @@ export default async function handler(req, res, depsOverride) {
     }
 
     // ── 6. Insert booking with server-computed values ──
+    // Resolve booking owner:
+    //   - Default: caller's uid (existing behavior).
+    //   - If caller is staff (admin) AND a client_email is provided AND that
+    //     email already belongs to an existing agent, target that agent's uid
+    //     so the booking is owned by the rightful client from minute one.
+    //   - Non-staff callers can never reassign ownership by contact email.
+    //   - If no existing agent matches, keep agent_id = caller's uid; the
+    //     verification-gated claim trigger will transfer ownership when the
+    //     client signs up.
+    let bookingAgentId = agent.id;
+    if (agent.role === "admin" && payload.client_email) {
+      const { data: existingClient } = await supabase
+        .from("agents")
+        .select("id")
+        .ilike("email", payload.client_email)
+        .maybeSingle();
+      if (existingClient?.id) {
+        bookingAgentId = existingClient.id;
+      }
+    }
+
     const bookingInsert = {
       source: "app",
-      agent_id: agent.id,
+      agent_id: bookingAgentId,
       client_name: payload.client_name,
       client_email: payload.client_email,
       client_phone: payload.client_phone || null,
