@@ -1,4 +1,4 @@
-// Relay: Sentry alert webhook -> Slack Incoming Webhook.
+// Relay: Sentry Internal Integration webhook -> Slack Incoming Webhook.
 //
 // Required env vars (set in Vercel, Preview + Production):
 //   SENTRY_WEBHOOK_SECRET  Client secret of the Sentry Internal Integration.
@@ -6,17 +6,19 @@
 //                          (HMAC-SHA256 of the raw request body).
 //   SLACK_WEBHOOK_URL      Slack Incoming Webhook URL for #milestone-alerts.
 //
-// Manual setup (do once per environment):
-//   1. Slack: create an Incoming Webhook in the Milestone workspace pointed
-//      at #milestone-alerts. Copy the URL into SLACK_WEBHOOK_URL.
+// Manual setup (do once):
+//   1. Slack: create an Incoming Webhook pointed at #milestone-alerts;
+//      put the URL in SLACK_WEBHOOK_URL.
 //   2. Sentry: Settings -> Developer Settings -> New Internal Integration.
-//      Webhook URL: https://<your-prod-host>/api/sentry-to-slack
-//      Enable "Alerts" + "Issue" webhooks. Copy the client secret into
+//      Webhook URL: https://<prod-host>/api/sentry-to-slack
+//      Enable the "Issue" webhook. Copy the client secret into
 //      SENTRY_WEBHOOK_SECRET.
-//   3. Sentry: Alerts -> Create Alert Rule. Scope:
-//        Environment = production
-//        When: a new issue is created
-//        Action: send a notification via <Internal Integration name>
+//
+// Routing:
+//   We dispatch on the Sentry-Hook-Resource request header. Today only
+//   "issue" is wired up, and only its "created" action posts to Slack —
+//   resolved/assigned/archived/unresolved are acknowledged with 200 and
+//   silently dropped to keep #milestone-alerts low-noise.
 //
 // Wrapped with withSentry so failures in this relay also report to Sentry.
 
@@ -60,37 +62,59 @@ function pick(obj, ...paths) {
   return undefined;
 }
 
-function buildSlackMessage(payload) {
-  // Sentry payload shapes vary between "issue" and "event_alert" webhooks.
-  // Try both locations for each field.
+function buildIssueMessage(payload) {
+  const issue = payload?.data?.issue ?? {};
   const title =
-    pick(payload, "data.event.title", "data.event.metadata.title", "data.issue.title", "data.event.message") ||
-    "Sentry alert";
-  const level =
-    pick(payload, "data.event.level", "data.issue.level") || "error";
-  const environment =
-    pick(payload, "data.event.environment", "data.issue.project.environment") || "unknown";
+    pick(issue, "title", "metadata.title", "metadata.value", "culprit") ||
+    "Sentry issue";
+  const level = pick(issue, "level", "metadata.level") || "error";
   const project =
-    pick(payload, "data.event.project_slug", "data.issue.project.slug", "data.event.project") || "unknown";
-  const url =
-    pick(payload, "data.event.web_url", "data.issue.web_url", "data.event.url") || null;
-  const rule = pick(payload, "data.triggered_rule");
+    pick(issue, "project.slug", "project.name") ||
+    pick(payload, "data.project.slug", "data.project.name") ||
+    "unknown";
+  const culprit = pick(issue, "culprit");
+  const url = pick(issue, "web_url", "permalink") || null;
+  const count = pick(issue, "count");
+  const timesSeen = pick(issue, "timesSeen", "times_seen");
 
   const headerText = url ? `<${url}|${title}>` : title;
   const fields = [
     { type: "mrkdwn", text: `*Project:*\n${project}` },
-    { type: "mrkdwn", text: `*Environment:*\n${environment}` },
     { type: "mrkdwn", text: `*Level:*\n${level}` },
   ];
-  if (rule) fields.push({ type: "mrkdwn", text: `*Rule:*\n${rule}` });
+  if (culprit && culprit !== title) {
+    fields.push({ type: "mrkdwn", text: `*Culprit:*\n${culprit}` });
+  }
+  const seen = timesSeen ?? count;
+  if (seen != null) {
+    fields.push({ type: "mrkdwn", text: `*Times seen:*\n${seen}` });
+  }
 
   return {
-    text: `Sentry: ${title}`, // fallback for notifications
+    text: `Sentry: ${title}`,
     blocks: [
-      { type: "section", text: { type: "mrkdwn", text: `:rotating_light: *${headerText}*` } },
+      { type: "section", text: { type: "mrkdwn", text: `:rotating_light: *New Sentry issue:* ${headerText}` } },
       { type: "section", fields },
     ],
   };
+}
+
+async function postToSlack(slackUrl, message) {
+  let slackRes;
+  try {
+    slackRes = await fetch(slackUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(message),
+    });
+  } catch (err) {
+    return { ok: false, status: 0, body: err?.message || "fetch failed" };
+  }
+  if (!slackRes.ok) {
+    const body = await slackRes.text().catch(() => "");
+    return { ok: false, status: slackRes.status, body };
+  }
+  return { ok: true };
 }
 
 async function handler(req, res) {
@@ -122,24 +146,20 @@ async function handler(req, res) {
     return res.status(400).json({ error: "invalid json" });
   }
 
-  const message = buildSlackMessage(payload);
+  const resource = (req.headers["sentry-hook-resource"] || "").toString().toLowerCase();
+  const action = (payload?.action || "").toString().toLowerCase();
 
-  let slackRes;
-  try {
-    slackRes = await fetch(slackUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(message),
-    });
-  } catch (err) {
-    return res.status(502).json({ error: "slack request failed", detail: err?.message });
+  // Route on the resource. Today only "issue" + action "created" is forwarded;
+  // every other (resource, action) pair is acknowledged and dropped.
+  if (resource !== "issue" || action !== "created") {
+    return res.status(200).json({ ok: true, skipped: true, resource, action });
   }
 
-  if (!slackRes.ok) {
-    const body = await slackRes.text().catch(() => "");
-    return res.status(502).json({ error: "slack rejected", status: slackRes.status, body });
+  const message = buildIssueMessage(payload);
+  const slack = await postToSlack(slackUrl, message);
+  if (!slack.ok) {
+    return res.status(502).json({ error: "slack rejected", status: slack.status, body: slack.body });
   }
-
   return res.status(200).json({ ok: true });
 }
 
