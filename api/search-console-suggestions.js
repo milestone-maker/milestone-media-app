@@ -19,6 +19,7 @@ import { createClient } from "@supabase/supabase-js";
 import Anthropic from "@anthropic-ai/sdk";
 import { fetchPageQueryData as realFetchPageQueryData } from "./_lib/searchConsole.js";
 import { buildTitle, buildDescription } from "./render-microsite.js";
+import { withSentry } from "./_lib/sentry.js";
 
 const MODEL      = "claude-sonnet-4-6"; // generative tier (matches parse-comps / microsite-chat)
 const MAX_TOKENS = 1024;
@@ -139,7 +140,7 @@ ${queryLines || "(none)"}`;
 }
 
 // ── main handler ─────────────────────────────────────────────────────
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -257,3 +258,5 @@ export default async function handler(req, res, depsOverride) {
 
 // Exposed for tests.
 export const _internals = { extractJson, normalizeSuggestions, buildSuggestionPrompt, SYSTEM_PROMPT };
+
+export default withSentry(handler);

@@ -49,6 +49,7 @@ import {
 import { INSTAGRAM_MAX_CAROUSEL_IMAGES } from "../shared/carouselPosting.js";
 import { facebookAlbumUrls } from "./_content/selectCarouselPhotos.js";
 import { resolvePublishedMicrositeUrl, substituteMicrositeToken } from "./_lib/microsite.js";
+import { withSentry } from "./_lib/sentry.js";
 
 const SUPABASE_URL              = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -144,7 +145,7 @@ function buildFacebookAlbum(photoLabels, extraPhotoUrls = []) {
   return album;
 }
 
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -420,3 +421,5 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: err.message || "internal error" });
   }
 }
+
+export default withSentry(handler);

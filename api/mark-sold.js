@@ -24,6 +24,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { isMicrositeLive } from "../shared/micrositeAccess.js";
+import { withSentry } from "./_lib/sentry.js";
 
 // ── CORS helper (matches retire-microsite.js) ────────────────────────
 function corsHeaders() {
@@ -63,7 +64,7 @@ function normalizeSoldPrice(raw) {
 //
 // depsOverride is for unit tests only — production callers use the 2-arg
 // form and the lazy default supabase singleton.
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -139,3 +140,5 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: err.message || "internal error" });
   }
 }
+
+export default withSentry(handler);

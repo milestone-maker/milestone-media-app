@@ -19,6 +19,7 @@ import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
 import { resolve as pathResolve } from "node:path";
 import { packageCoveredByTier } from "./_lib/credits.js";
+import { withSentry } from "./_lib/sentry.js";
 
 // ── module-load deps (overridable via depsOverride for tests) ────────
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -143,7 +144,7 @@ function buildItemLists(payload, pricing) {
 
 // ── main handler ─────────────────────────────────────────────────────
 
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -417,3 +418,5 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: err.message || "internal error" });
   }
 }
+
+export default withSentry(handler);

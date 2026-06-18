@@ -32,6 +32,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { hasFeatureAccess } from "./_lib/subscription.js";
+import { withSentry } from "./_lib/sentry.js";
 
 // Engine is CommonJS; lazy-imported on first use so test runs that inject a
 // mock classifier (via depsOverride.classifyImages) don't require the package
@@ -203,7 +204,7 @@ async function runPool(items, limit, worker) {
 
 // ── main handler ─────────────────────────────────────────────────────
 
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -428,3 +429,5 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: err.message || "internal error" });
   }
 }
+
+export default withSentry(handler);

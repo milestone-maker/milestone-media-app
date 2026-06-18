@@ -26,6 +26,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { PUBLIC_APP_BASE } from "./_lib/microsite.js";
+import { withSentry } from "./_lib/sentry.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PRICING_PATH = resolve(__dirname, "..", "public", "pricing.json");
@@ -57,7 +58,7 @@ async function buildRealDeps() {
   return { stripe, supabase, pricing };
 }
 
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -165,3 +166,5 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: err.message || "internal error" });
   }
 }
+
+export default withSentry(handler);

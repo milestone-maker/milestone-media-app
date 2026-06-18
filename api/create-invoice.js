@@ -7,6 +7,7 @@
 //   STRIPE_SECRET_KEY
 
 import Stripe from "stripe";
+import { withSentry } from "./_lib/sentry.js";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
@@ -29,7 +30,7 @@ function buildDescription(booking) {
   return parts.join(" | ") || "Real Estate Media Services";
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -147,3 +148,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Failed to create invoice", details: err.message });
   }
 }
+
+export default withSentry(handler);

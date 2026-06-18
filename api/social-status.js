@@ -31,6 +31,7 @@ import {
   getSocialAccountByType as bundleGetAccount,
   platformToBundleType,
 } from "./_lib/bundle.js";
+import { withSentry } from "./_lib/sentry.js";
 
 const ALLOWED_PLATFORMS = ["instagram", "facebook", "threads"];
 const DEFAULT_PLATFORM = "instagram";
@@ -74,7 +75,7 @@ function summarize(platform, row) {
   };
 }
 
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -212,3 +213,5 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: err.message || "internal error" });
   }
 }
+
+export default withSentry(handler);

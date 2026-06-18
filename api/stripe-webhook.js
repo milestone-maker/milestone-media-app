@@ -29,6 +29,7 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 import { grantCreditsFromInvoice, handleTierChange } from "./_lib/credits.js";
+import { withSentry } from "./_lib/sentry.js";
 
 // Must disable Vercel's body parser so we can verify the raw Stripe signature
 export const config = {
@@ -264,7 +265,7 @@ async function handleSubscriptionInvoicePaid(supabase, invoice) {
 // ──────────────────────────────────────────────────────────────────────
 // Handler
 // ──────────────────────────────────────────────────────────────────────
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   const sig = req.headers["stripe-signature"];
@@ -350,3 +351,5 @@ export default async function handler(req, res) {
 
   return res.status(200).json({ received: true });
 }
+
+export default withSentry(handler);

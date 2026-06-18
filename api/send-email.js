@@ -10,6 +10,7 @@
 //   (reuses same OAuth2 creds as calendar.js)
 
 import nodemailer from "nodemailer";
+import { withSentry } from "./_lib/sentry.js";
 
 const BUSINESS_EMAIL = "smiles@milestonemediaphoto.com";   // owner inbox — receives notifications
 const FROM_EMAIL     = "info@milestonemediaphoto.com";      // public-facing sender address
@@ -174,7 +175,7 @@ function buildClientEmail(b) {
 }
 
 // ── Handler ──
-export default async function handler(req, res) {
+async function handler(req, res) {
   // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -219,3 +220,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Failed to send emails", details: err.message });
   }
 };
+
+export default withSentry(handler);
