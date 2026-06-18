@@ -17,6 +17,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { PUBLIC_APP_BASE } from "./_lib/microsite.js";
+import { withSentry } from "./_lib/sentry.js";
 
 const SUPABASE_URL              = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -66,7 +67,7 @@ export function buildSitemapXml(rows, base = PUBLIC_APP_BASE) {
 }
 
 // ── Handler ──────────────────────────────────────────────────────────────────
-export default async function handler(req, res, deps = {}) {
+async function handler(req, res, deps = {}) {
   try {
     const supabase = deps.supabase || defaultSupabase();
     // published = true AND retired_at IS NULL deliberately INCLUDES sold pages
@@ -90,3 +91,5 @@ export default async function handler(req, res, deps = {}) {
     return res.end("Sitemap temporarily unavailable.");
   }
 }
+
+export default withSentry(handler);

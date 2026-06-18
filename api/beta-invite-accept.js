@@ -25,6 +25,7 @@
 // Required env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
 import { createClient } from "@supabase/supabase-js";
+import { withSentry } from "./_lib/sentry.js";
 
 function corsHeaders() {
   return {
@@ -53,7 +54,7 @@ function bearerFrom(req) {
 
 const TOKEN_RE = /^[0-9a-f]{64}$/;
 
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -191,3 +192,5 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: "internal error", detail: err?.message });
   }
 }
+
+export default withSentry(handler);

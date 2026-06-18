@@ -16,6 +16,7 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 import { PUBLIC_APP_BASE } from "./_lib/microsite.js";
+import { withSentry } from "./_lib/sentry.js";
 
 function corsHeaders() {
   return {
@@ -40,7 +41,7 @@ function buildRealDeps() {
   return { stripe, supabase };
 }
 
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -92,3 +93,5 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: err.message || "internal error" });
   }
 }
+
+export default withSentry(handler);

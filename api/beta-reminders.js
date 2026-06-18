@@ -33,6 +33,7 @@ import {
   BUSINESS_EMAIL, BUSINESS_NAME, FROM_EMAIL,
 } from "./_lib/mailer.js";
 import { PUBLIC_APP_BASE } from "./_lib/microsite.js";
+import { withSentry } from "./_lib/sentry.js";
 
 let _supabaseSingleton = null;
 function defaultSupabase() {
@@ -232,7 +233,7 @@ export async function processBetaReminders({ supabase, transporter, now = Date.n
   return results;
 }
 
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   // Vercel Cron sends either Authorization: Bearer <CRON_SECRET> OR the
   // x-vercel-cron header. Accept both, but ALWAYS require one.
   const expected = process.env.CRON_SECRET ? `Bearer ${process.env.CRON_SECRET}` : null;
@@ -255,3 +256,5 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: "internal error", detail: err?.message });
   }
 }
+
+export default withSentry(handler);

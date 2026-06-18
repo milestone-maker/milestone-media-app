@@ -34,6 +34,7 @@ import { listingPayloadFromMicrosite } from "./_lib/listingFromMicrosite.js";
 import { geocodeAddress, getNearbySchoolsFromGeo } from "./_lib/schools.js";
 import { withinMicrositeCap, micrositeCapForTier } from "../shared/micrositeAccess.js";
 import { PUBLIC_APP_BASE } from "./_lib/microsite.js";
+import { withSentry } from "./_lib/sentry.js";
 
 // Best-effort, strictly non-blocking bake of schools + coordinates. Geocodes
 // ONCE, then derives both from that geo. Races the whole thing against a
@@ -96,7 +97,7 @@ function bearerFrom(req) {
 //
 // depsOverride is for unit tests only — production callers use the
 // 2-arg form and the lazy default supabase singleton is used.
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -513,3 +514,5 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: err.message || "internal error" });
   }
 }
+
+export default withSentry(handler);

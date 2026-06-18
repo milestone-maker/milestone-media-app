@@ -24,6 +24,7 @@ import { resolve as pathResolve, join as pathJoin } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PUBLIC_APP_BASE } from "./_lib/microsite.js";
 import { createTransporter, defaultFrom, BUSINESS_EMAIL, BUSINESS_NAME, FROM_EMAIL } from "./_lib/mailer.js";
+import { withSentry } from "./_lib/sentry.js";
 
 // The beta one-pager bundled with this function (see
 // vercel.json includeFiles). At runtime the file is alongside the
@@ -150,7 +151,7 @@ function daysRemaining(betaExpiresAt) {
   return Math.ceil(ms / 86400000);
 }
 
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -298,3 +299,5 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: "internal error", detail: err?.message });
   }
 }
+
+export default withSentry(handler);

@@ -25,6 +25,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { refreshMortgageRates } from "./_lib/mortgageRates.js";
+import { withSentry } from "./_lib/sentry.js";
 
 // ── supabase singleton (matches microsite-chat.js idiom) ─────────────
 let _supabaseSingleton = null;
@@ -38,7 +39,7 @@ function defaultSupabase() {
   return _supabaseSingleton;
 }
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   // ── Authorize ──
   const expected = `Bearer ${process.env.CRON_SECRET}`;
   const provided = req.headers?.authorization || req.headers?.Authorization;
@@ -52,3 +53,5 @@ export default async function handler(req, res) {
   const statusCode = result.status === "error" ? 502 : 200;
   return res.status(statusCode).json(result);
 }
+
+export default withSentry(handler);

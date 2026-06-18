@@ -14,6 +14,7 @@ import Stripe from "stripe";
 // Single source of truth for the app base (see api/_lib/microsite.js). Aliased to
 // the existing local name so the email-body usage below stays unchanged.
 import { PUBLIC_APP_BASE as APP_URL } from "./_lib/microsite.js";
+import { withSentry } from "./_lib/sentry.js";
 
 const FROM_EMAIL     = "info@milestonemediaphoto.com";
 const BUSINESS_EMAIL = "smiles@milestonemediaphoto.com";
@@ -144,7 +145,7 @@ function buildMediaReadyEmail(b, invoiceUrl) {
 }
 
 // ── Handler ──
-export default async function handler(req, res) {
+async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -172,3 +173,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "Failed to send email", details: err.message });
   }
 }
+
+export default withSentry(handler);

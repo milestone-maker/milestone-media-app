@@ -7,6 +7,8 @@
 //   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN, GOOGLE_CALENDAR_ID
 //   SUPABASE_SERVICE_ROLE_KEY (optional — for updating booking records)
 
+import { withSentry } from "./_lib/sentry.js";
+
 const SUPABASE_URL = "https://cbpnjuotoxtmefmedpmj.supabase.co";
 
 // ── helpers ──────────────────────────────────────────────────────────
@@ -173,7 +175,7 @@ async function handlePost(req, res) {
 }
 
 // ── main handler ─────────────────────────────────────────────────────
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -190,3 +192,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: err.message });
   }
 }
+
+export default withSentry(handler);

@@ -28,6 +28,7 @@ import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PUBLIC_APP_BASE } from "./_lib/microsite.js";
+import { withSentry } from "./_lib/sentry.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -422,7 +423,7 @@ export function renderNotFound(template) {
 // at HTTP 200, indexable, rendered client-side by React — never a 500, never a
 // broken page. The INTENTIONAL not-found / retired path is a normal `return` of the
 // 404 + noindex shell (data === null with no error), so the catch never swallows it.
-export default async function handler(req, res, deps = {}) {
+async function handler(req, res, deps = {}) {
   let template;
   try {
     template = await loadTemplate();
@@ -490,3 +491,5 @@ export default async function handler(req, res, deps = {}) {
     return res.end(template);
   }
 }
+
+export default withSentry(handler);

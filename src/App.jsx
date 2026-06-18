@@ -1384,18 +1384,6 @@ export default function App() {
     <AuthContext.Provider value={{ session, user, profile, signOut, fetchProfile }}>
       <div style={{ opacity: mounted ? 1 : 0, transition: "opacity 0.4s ease" }}>
         {user ? <AppShell /> : <AuthView />}
-        {/* TEMP: remove before deploy — Sentry client smoke-test button */}
-        <button
-          onClick={() => { throw new Error("Sentry client test error — fired from App.jsx button"); }}
-          style={{
-            position: "fixed", bottom: 12, right: 12, zIndex: 99999,
-            padding: "8px 12px", borderRadius: 8, border: "1px solid #C9A84C",
-            background: "#0f0f1a", color: "#C9A84C", fontFamily: "'Jost', sans-serif",
-            fontSize: 12, cursor: "pointer",
-          }}
-        >
-          Trigger Sentry test error
-        </button>
       </div>
     </AuthContext.Provider>
   );

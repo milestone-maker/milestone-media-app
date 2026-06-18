@@ -23,6 +23,7 @@
 //   SUPABASE_SERVICE_ROLE_KEY
 
 import { createClient } from "@supabase/supabase-js";
+import { withSentry } from "./_lib/sentry.js";
 
 // ── CORS helper (matches publish-microsite.js) ───────────────────────
 function corsHeaders() {
@@ -56,7 +57,7 @@ function bearerFrom(req) {
 //
 // depsOverride is for unit tests only — production callers use the 2-arg
 // form and the lazy default supabase singleton.
-export default async function handler(req, res, depsOverride) {
+async function handler(req, res, depsOverride) {
   if (req.method === "OPTIONS") {
     res.writeHead(204, corsHeaders());
     return res.end();
@@ -136,3 +137,5 @@ export default async function handler(req, res, depsOverride) {
     return res.status(500).json({ error: err.message || "internal error" });
   }
 }
+
+export default withSentry(handler);
