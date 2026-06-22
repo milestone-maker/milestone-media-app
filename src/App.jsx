@@ -933,7 +933,7 @@ function AppShell() {
   const viewMap = {
     Showcase: <ShowcaseView onBook={handleBook} />,
     Book: <BookView />,
-    Content: <ContentView />,
+    Content: <ContentView onOpenSubscriptions={() => setExtraView("Subscriptions")} />,
     Analytics: <AnalyticsView />,
     Microsite: <MicrositeView />,
     // Subscriptions is reachable only from the profile dropdown — not in navItems.

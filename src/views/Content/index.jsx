@@ -14,13 +14,12 @@
 // history) so a future "photo intelligence" panel can be slotted in without
 // restructuring this screen.
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "../../supabaseClient";
 import { useAuth } from "../../lib/auth";
 import { hasFeatureAccess } from "../../lib/subscription";
 import { PUBLIC_APP_BASE as MICROSITE_PUBLIC_BASE } from "../../lib/siteConfig";
 import VoiceProfileModal from "../../components/VoiceProfileModal";
-import SubscriptionsView from "../Subscriptions";
 import PhotosPanel from "./PhotosPanel";
 import CarouselView from "./CarouselView";
 import FacebookAlbumEditor from "./FacebookAlbumEditor";
@@ -137,11 +136,91 @@ function CopyButton({ text, label = "Copy" }) {
   );
 }
 
-function ContentView() {
+function ContentView({ onOpenSubscriptions } = {}) {
   const { user, profile } = useAuth();
   // Admins always pass; otherwise an active subscription is required.
   const isAdmin = profile?.role === "admin";
   const canGenerate = isAdmin || hasFeatureAccess(profile);
+
+  // ── Onboarding overlay state ──
+  // overlay: null | "tour" | "landing"
+  // overlayMode: "initial" (first-time tour — flips seen flag on exit) or "replay" (no DB write)
+  const [overlay, setOverlay] = useState(null);
+  const [overlayMode, setOverlayMode] = useState("initial");
+  const [overlayDecided, setOverlayDecided] = useState(false);
+
+  // Decide initial overlay once profile is loaded.
+  useEffect(() => {
+    if (overlayDecided) return;
+    if (!profile) return;
+    setOverlayDecided(true);
+    const seen = profile?.seen_content_onboarding === true;
+    if (!canGenerate) {
+      setOverlayMode("initial");
+      setOverlay("landing");
+    } else if (!seen) {
+      setOverlayMode("initial");
+      setOverlay("tour");
+    }
+  }, [profile, canGenerate, overlayDecided]);
+
+  // Latest-value refs for the postMessage handler so the listener can be
+  // registered ONCE (empty deps) without going stale on state changes or
+  // capturing a new onOpenSubscriptions arrow on every App render.
+  const overlayRef = useRef(overlay);
+  const overlayModeRef = useRef(overlayMode);
+  const profileRef = useRef(profile);
+  const onOpenSubscriptionsRef = useRef(onOpenSubscriptions);
+  useEffect(() => { overlayRef.current = overlay; }, [overlay]);
+  useEffect(() => { overlayModeRef.current = overlayMode; }, [overlayMode]);
+  useEffect(() => { profileRef.current = profile; }, [profile]);
+  useEffect(() => { onOpenSubscriptionsRef.current = onOpenSubscriptions; }, [onOpenSubscriptions]);
+
+  // Listen for the tour's exit postMessage. Registered once; reads current
+  // state through the refs above so it never operates on stale values.
+  useEffect(() => {
+    function onMsg(e) {
+      if (!e || !e.data || e.data.type !== "milestone-tour-exit") return;
+      const cur = overlayRef.current;
+      const mode = overlayModeRef.current;
+      const prof = profileRef.current;
+      const openSubs = onOpenSubscriptionsRef.current;
+      // Landing flow → close overlay and hand off to Subscriptions.
+      if (cur === "landing") {
+        setOverlay(null);
+        if (typeof openSubs === "function") openSubs();
+        return;
+      }
+      // Tour flow.
+      if (cur === "tour") {
+        if (
+          mode === "initial" &&
+          prof?.id &&
+          prof?.seen_content_onboarding !== true
+        ) {
+          supabase
+            .from("agents")
+            .update({ seen_content_onboarding: true })
+            .eq("id", prof.id)
+            .then(({ error }) => {
+              if (error) console.error("[content] mark onboarding seen failed:", error);
+            });
+        }
+        setOverlay(null);
+      }
+    }
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
+  const openReplay = () => {
+    setOverlayMode("replay");
+    setOverlay("tour");
+  };
+  const closeLandingToPlans = () => {
+    setOverlay(null);
+    if (typeof onOpenSubscriptions === "function") onOpenSubscriptions();
+  };
 
   // Data
   const [listings, setListings] = useState([]);
@@ -552,69 +631,164 @@ function ContentView() {
           Generate on-brand social content for your listings
         </div>
       </div>
+      {canGenerate && (
+        <button
+          onClick={openReplay}
+          aria-label="Replay onboarding tour"
+          style={{
+            background: "transparent",
+            border: "1px solid rgba(201,168,76,0.35)",
+            color: "#C9A84C",
+            fontFamily: "'Jost', sans-serif",
+            fontSize: 11,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            padding: "8px 14px",
+            borderRadius: 20,
+            cursor: "pointer",
+            transition: "background 0.2s, border-color 0.2s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(201,168,76,0.08)";
+            e.currentTarget.style.borderColor = "rgba(201,168,76,0.7)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+            e.currentTarget.style.borderColor = "rgba(201,168,76,0.35)";
+          }}
+        >
+          ↺ Replay tour
+        </button>
+      )}
     </div>
   );
+
+  // ── Onboarding overlay layer (rendered above all return branches) ──
+  const OverlayLayer = overlay ? (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 9999,
+        background: "#0e1220",
+      }}
+    >
+      <iframe
+        title={overlay === "tour" ? "Milestone tour" : "Milestone landing"}
+        src={overlay === "tour" ? "/tours/milestone-tour.html" : "/tours/milestone-landing.html"}
+        style={{ width: "100%", height: "100%", border: 0, display: "block" }}
+      />
+      {overlay === "landing" && (
+        <div
+          style={{
+            position: "fixed",
+            top: 12,
+            right: 16,
+            zIndex: 10001,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          <button
+            onClick={closeLandingToPlans}
+            style={{
+              background: "rgba(14,18,32,0.92)",
+              border: "1px solid rgba(201,168,76,0.4)",
+              color: "#C9A84C",
+              fontFamily: "'Jost', sans-serif",
+              fontSize: 12,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              padding: "9px 16px",
+              borderRadius: 20,
+              cursor: "pointer",
+            }}
+          >
+            View plans →
+          </button>
+        </div>
+      )}
+    </div>
+  ) : null;
 
   // ── Render: loading ──
   if (!listingsLoaded || !profileLoaded) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-        {Header}
-        <div style={{ ...panelSt, textAlign: "center", color: "rgba(255,255,255,0.4)", fontFamily: "'Jost', sans-serif", fontSize: 13, padding: 40 }}>
-          Loading…
+      <>
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          {Header}
+          <div style={{ ...panelSt, textAlign: "center", color: "rgba(255,255,255,0.4)", fontFamily: "'Jost', sans-serif", fontSize: 13, padding: 40 }}>
+            Loading…
+          </div>
         </div>
-      </div>
+        {OverlayLayer}
+      </>
     );
   }
 
   // ── Render: subscription gate (FIRST gate; admins exempt) ──
-  // Unsubscribed non-admins see the existing subscription page in place —
-  // tier picker + Stripe checkout, self-contained. Subscribed agents and
-  // admins fall through to the voice-profile gate below.
+  // Unsubscribed non-admins see the landing overlay; closing/finishing it
+  // routes them to the Subscriptions view via onOpenSubscriptions. The page
+  // body underneath stays minimal because the overlay covers it.
   if (!canGenerate) {
-    return <SubscriptionsView />;
+    return (
+      <>
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          {Header}
+        </div>
+        {OverlayLayer}
+      </>
+    );
   }
 
   // ── Render: voice-profile gate ──
   if (!hasUsableProfile) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-        {Header}
-        <div style={{ ...panelSt, textAlign: "center", padding: "44px 28px", border: "1px solid rgba(201,168,76,0.25)" }}>
-          <div style={{ fontSize: 34, marginBottom: 12 }}>🗣</div>
-          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#fff", marginBottom: 8 }}>
-            Set up your voice profile to start generating content
+      <>
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          {Header}
+          <div style={{ ...panelSt, textAlign: "center", padding: "44px 28px", border: "1px solid rgba(201,168,76,0.25)" }}>
+            <div style={{ fontSize: 34, marginBottom: 12 }}>🗣</div>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: "#fff", marginBottom: 8 }}>
+              Set up your voice profile to start generating content
+            </div>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.45)", maxWidth: 420, margin: "0 auto 22px", lineHeight: 1.6 }}>
+              {voiceProfile
+                ? "Your voice profile is missing a license number, which is required on every post for TREC compliance. Add it to unlock content generation."
+                : "Your voice profile is what the AI writes in — your tone, your phrases, your hashtags. Create it once and every caption sounds like you."}
+            </div>
+            <button onClick={() => setShowVoiceModal(true)} style={{ ...goldBtn(false), width: "auto", padding: "13px 28px" }}>
+              {voiceProfile ? "Complete Voice Profile" : "Set Up Voice Profile"}
+            </button>
           </div>
-          <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.45)", maxWidth: 420, margin: "0 auto 22px", lineHeight: 1.6 }}>
-            {voiceProfile
-              ? "Your voice profile is missing a license number, which is required on every post for TREC compliance. Add it to unlock content generation."
-              : "Your voice profile is what the AI writes in — your tone, your phrases, your hashtags. Create it once and every caption sounds like you."}
-          </div>
-          <button onClick={() => setShowVoiceModal(true)} style={{ ...goldBtn(false), width: "auto", padding: "13px 28px" }}>
-            {voiceProfile ? "Complete Voice Profile" : "Set Up Voice Profile"}
-          </button>
+          {showVoiceModal && (
+            <VoiceProfileModal onClose={() => { setShowVoiceModal(false); loadVoiceProfile(); }} />
+          )}
         </div>
-        {showVoiceModal && (
-          <VoiceProfileModal onClose={() => { setShowVoiceModal(false); loadVoiceProfile(); }} />
-        )}
-      </div>
+        {OverlayLayer}
+      </>
     );
   }
 
   // ── Render: no listings ──
   if (listings.length === 0) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-        {Header}
-        <div style={{ ...panelSt, textAlign: "center", color: "rgba(255,255,255,0.45)", fontFamily: "'Jost', sans-serif", fontSize: 13, padding: 40 }}>
-          You don't have any listings yet. Once a listing is added to your account, you can generate content for it here.
+      <>
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          {Header}
+          <div style={{ ...panelSt, textAlign: "center", color: "rgba(255,255,255,0.45)", fontFamily: "'Jost', sans-serif", fontSize: 13, padding: 40 }}>
+            You don't have any listings yet. Once a listing is added to your account, you can generate content for it here.
+          </div>
         </div>
-      </div>
+        {OverlayLayer}
+      </>
     );
   }
 
   // ── Render: full generator ──
   return (
+    <>
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
       {Header}
 
@@ -956,6 +1130,8 @@ function ContentView() {
         <VoiceProfileModal onClose={() => { setShowVoiceModal(false); loadVoiceProfile(); }} />
       )}
     </div>
+    {OverlayLayer}
+    </>
   );
 }
 
