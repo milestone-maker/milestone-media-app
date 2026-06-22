@@ -548,8 +548,17 @@ async function handler(req, res, depsOverride) {
     // Additive response fields: saved_id (when persisted) + microsite_url for
     // Facebook (the resolved link, or null when none — the UI uses null to show
     // the "link inserts at post time" note). Never added for Instagram.
+    // OVERRIDE the model-emitted platform with the REQUESTED platform. Needed
+    // for the LinkedIn stopgap: the FB-aliased prompt forces the model to emit
+    // "platform": "facebook" in its JSON output (per fbOutputFormatBlock), but
+    // the caller asked for "linkedin" and the persisted row stores "linkedin"
+    // — the response must agree so the result-panel render gates pick the
+    // LinkedIn UI, not the FB album editor. Same defensive override is
+    // applied to content_type for symmetry.
     return res.status(200).json({
       ...finalParsed,
+      platform,                          // ← authoritative; ignores model echo
+      content_type,                      // ← same reason
       ...(savedId ? { saved_id: savedId } : {}),
       ...(platform === "facebook" || platform === "linkedin" ? { microsite_url: micrositeUrl } : {}),
     });

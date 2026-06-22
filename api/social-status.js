@@ -197,6 +197,18 @@ async function handler(req, res, depsOverride) {
         // rejects it and we surface that error.
         if (queried === "linkedin") {
           queriedChannels = Array.isArray(account.channels) ? account.channels : [];
+          // Diagnostic so we can confirm in Vercel logs whether bundle returns
+          // one channel (single LinkedIn identity picked at connect time) or
+          // many (personal profile + admined pages). Logs only counts + ids,
+          // never any user-identifiable channel content.
+          try {
+            console.log("[social-status][LINKEDIN_DIAG]", JSON.stringify({
+              agent: authUser.id.slice(0, 8),
+              channelCount: queriedChannels.length,
+              channelIds: queriedChannels.map((c) => c?.id).filter(Boolean),
+              hasNames: queriedChannels.map((c) => !!(c?.name || c?.username)).filter(Boolean).length,
+            }));
+          } catch { /* never let a log throw */ }
         }
 
         queriedSummary = { platform: queried, status: "connected", username, connected_at: nowIso };

@@ -1178,7 +1178,7 @@ function ContentView({ onOpenSubscriptions } = {}) {
               "Post as" picker shows the personal profile + admined pages. */}
           {result.platform === "linkedin" && result.saved_id && (
             <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-              <PostToLinkedInButton contentId={result.saved_id} />
+              <PostToLinkedInButton contentId={result.saved_id} photos={photoPool} />
             </div>
           )}
         </div>
@@ -1291,7 +1291,7 @@ function ContentView({ onOpenSubscriptions } = {}) {
                       {/* LinkedIn post button + target picker for LinkedIn history rows. */}
                       {h.platform === "linkedin" && (
                         <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                          <PostToLinkedInButton contentId={h.id} />
+                          <PostToLinkedInButton contentId={h.id} photos={photoPool} />
                         </div>
                       )}
                     </div>

@@ -36,7 +36,7 @@ function channelLabel(c) {
   return c.name || c.username || c.id || "(no name)";
 }
 
-function PostToLinkedInButton({ contentId }) {
+function PostToLinkedInButton({ contentId, photos = [] }) {
   const [connection, setConnection] = useState("checking"); // checking|connected|none|error
   const [channels, setChannels] = useState([]);             // bundle channels[]
   const [channelId, setChannelId] = useState("");           // currently selected
@@ -46,6 +46,9 @@ function PostToLinkedInButton({ contentId }) {
   const [scheduleLocal, setScheduleLocal] = useState("");
   const [scheduledLabel, setScheduledLabel] = useState("");
   const [existing, setExisting] = useState({ kind: "none", record: null });
+  // Optional single image (LinkedIn MVP: text-only OR one image; never an
+  // album). null = text-only post. Reset whenever the post modal opens.
+  const [photoUrl, setPhotoUrl] = useState(null);
 
   // Initial connection + channels load. The status endpoint returns channels[]
   // and the agent's sticky channelId default for platform=linkedin in one call.
@@ -92,7 +95,7 @@ function PostToLinkedInButton({ contentId }) {
     setMsg("");
     if (connection !== "connected") { goConnect(); return; }
     if (!contentId) { setPhase("error"); setMsg("This post is still saving — try again in a moment."); return; }
-    setMode("now"); setScheduleLocal("");
+    setMode("now"); setScheduleLocal(""); setPhotoUrl(null);
     setPhase("confirm");
   };
 
@@ -115,6 +118,8 @@ function PostToLinkedInButton({ contentId }) {
       if (!token) throw new Error("Your session expired. Please sign in again.");
       const body = { contentId, platform: "linkedin", channelId };
       if (postDate) body.postDate = postDate;
+      // LinkedIn MVP: 0 or 1 image. The server validates this — never send more.
+      if (photoUrl) body.imageUrls = [photoUrl];
       const res = await fetch("/api/social-post", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -241,6 +246,65 @@ function PostToLinkedInButton({ contentId }) {
             </div>
           </div>
 
+          {/* Optional single image. LinkedIn MVP supports text-only OR one
+              image (no carousel). The agent picks from this listing's
+              analyzed photo pool, or skips for text-only. Photo count cap is
+              enforced server-side (LinkedIn rejects >1). */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{
+              fontFamily: "'Jost', sans-serif", fontSize: 10.5, letterSpacing: "0.1em",
+              textTransform: "uppercase", color: "rgba(255,255,255,0.45)", marginBottom: 7,
+            }}>
+              Image <span style={{ textTransform: "none", letterSpacing: 0, color: "rgba(255,255,255,0.3)" }}>· optional, one photo</span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {/* "No image" tile — text-only post. */}
+              <button
+                onClick={() => setPhotoUrl(null)}
+                title="Post text only"
+                style={{
+                  width: 76, height: 76, borderRadius: 8,
+                  border: photoUrl === null ? `2px solid ${LI_BLUE}` : "1px solid rgba(255,255,255,0.14)",
+                  background: photoUrl === null ? "rgba(10,102,194,0.16)" : "rgba(255,255,255,0.03)",
+                  color: photoUrl === null ? "#cfe1f4" : "rgba(255,255,255,0.55)",
+                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                  fontFamily: "'Jost', sans-serif", fontSize: 10.5, fontWeight: 600, letterSpacing: "0.04em",
+                  textAlign: "center", padding: 4,
+                }}
+              >Text only</button>
+              {(Array.isArray(photos) ? photos : []).filter((p) => p && p.photo_url).map((p) => {
+                const selected = photoUrl === p.photo_url;
+                return (
+                  <button
+                    key={p.photo_url}
+                    onClick={() => setPhotoUrl(p.photo_url)}
+                    title={p.category || "photo"}
+                    style={{
+                      width: 76, height: 76, padding: 0, overflow: "hidden", borderRadius: 8,
+                      border: selected ? `2px solid ${LI_BLUE}` : "1px solid rgba(255,255,255,0.14)",
+                      background: "rgba(255,255,255,0.04)", cursor: "pointer", position: "relative",
+                    }}
+                  >
+                    <img src={p.photo_url} alt="" loading="lazy" crossOrigin="anonymous" style={{
+                      width: "100%", height: "100%", objectFit: "cover", display: "block",
+                    }} />
+                    {selected && (
+                      <span style={{
+                        position: "absolute", top: 4, right: 4, background: LI_BLUE, color: "#fff",
+                        borderRadius: 4, padding: "1px 5px", fontFamily: "'Jost', sans-serif", fontSize: 9, fontWeight: 700,
+                      }}>✓</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {(!Array.isArray(photos) || photos.length === 0) && (
+              <div style={{ marginTop: 6, fontFamily: "'Jost', sans-serif", fontSize: 10.5, color: "rgba(255,255,255,0.35)" }}>
+                No analyzed photos for this listing — posting as text only. Run photo analysis on the listing to add an image.
+              </div>
+            )}
+          </div>
+
           <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
             {[["now", "Post now"], ["schedule", "Pick a time"]].map(([m, label]) => (
               <button key={m} onClick={() => { setMode(m); setMsg(""); }} style={{
@@ -273,7 +337,9 @@ function PostToLinkedInButton({ contentId }) {
             {btn("Cancel", () => { setPhase("idle"); setMsg(""); }, { ghost: true })}
           </div>
           <div style={{ marginTop: 10, fontFamily: "'Jost', sans-serif", fontSize: 10.5, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>
-            We'll post the caption as text (MVP — no image yet) and insert the live microsite link automatically.
+            {photoUrl
+              ? "We'll post this image with the caption and insert the live microsite link automatically."
+              : "We'll post the caption as a text-only update and insert the live microsite link automatically."}
           </div>
         </div>
       )}
