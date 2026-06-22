@@ -19,6 +19,8 @@
 // The leading underscore on the parent folder marks this as a private helper,
 // not a deployable Vercel function.
 
+import { INSTAGRAM_MAX_CAROUSEL_IMAGES } from "../../shared/carouselPosting.js";
+
 const BUNDLE_API_BASE = "https://api.bundle.social/api/v1";
 
 // App platform slug → bundle social-account type. bundle's account-type enum is
@@ -231,7 +233,13 @@ export async function createPost({ teamId, title, postDate, status = "SCHEDULED"
   if (!Array.isArray(uploadIds) || (uploadIds.length === 0 && !isFacebook)) {
     throw new BundleApiError("uploadIds must be a non-empty array for create-post", { status: 0 });
   }
-  const safeUploadIds = Array.isArray(uploadIds) ? uploadIds : [];
+  const rawUploadIds = Array.isArray(uploadIds) ? uploadIds : [];
+  // Belt-and-suspenders: bundle/IG cap carousel uploads at INSTAGRAM_MAX_CAROUSEL_IMAGES.
+  // The pre-flight gate in shared/carouselPosting.js should already enforce this client-side;
+  // this cap prevents a missed gate from producing a confusing 400 from bundle.
+  const safeUploadIds = bundleType === "INSTAGRAM"
+    ? rawUploadIds.slice(0, INSTAGRAM_MAX_CAROUSEL_IMAGES)
+    : rawUploadIds;
   const body = {
     teamId,
     title: title || "Milestone carousel",
