@@ -9,10 +9,12 @@
 import { useState, useEffect, useRef } from "react";
 import {
   buildSlideSequence,
+  buildSlideSequenceCombined,
   downloadCarouselZip,
   DEFAULT_BRAND_TOKENS,
   renderCardSlide,
   renderPhotoSlide,
+  renderCombinedSlide,
   ensureFonts,
   loadImage,
   HUMAN_SUBJECT,
@@ -46,6 +48,45 @@ function MiniCopy({ text, label }) {
 }
 
 // CSS preview of a Style B text card (mirrors the canvas brand tokens).
+// Strip thumbnail for a combined photo+caption slide: photo top, caption band
+// bottom. Same aspect (4:5) shrunk to 120×150 — visually previews what the
+// posted slide will look like.
+function CombinedTile({ item, bt }) {
+  const photoH = Math.round(150 * 0.72); // 108
+  return (
+    <div style={{
+      width: 120, height: 150, borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)",
+      overflow: "hidden", background: bt.bgColor, display: "block", position: "relative",
+    }}>
+      {item.photo_url ? (
+        <img src={item.photo_url} alt="" loading="lazy" crossOrigin="anonymous" style={{
+          width: 120, height: photoH, objectFit: "cover", display: "block",
+        }} />
+      ) : (
+        <div style={{ width: 120, height: photoH, background: bt.bgColor }} />
+      )}
+      {/* gold rule at the band's top edge */}
+      <div style={{ height: 1, background: bt.accentColor, opacity: 0.95 }} />
+      <div style={{
+        height: 150 - photoH - 1, padding: "4px 6px", boxSizing: "border-box",
+        background: bt.bgColor, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center",
+        textAlign: "center",
+      }}>
+        {item.kicker && (
+          <div style={{
+            fontFamily: `'${bt.fontBody}', sans-serif`, fontSize: 6.5, letterSpacing: "0.14em",
+            color: bt.accentColor, textTransform: "uppercase", marginBottom: 2,
+          }}>{item.kicker}</div>
+        )}
+        <div style={{
+          fontFamily: `'${bt.fontHeadline}', serif`, color: bt.textColor, fontSize: 9, fontWeight: 600,
+          lineHeight: 1.15, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
+        }}>{item.statement}</div>
+      </div>
+    </div>
+  );
+}
+
 function CardTile({ item, bt }) {
   return (
     <div style={{
@@ -96,12 +137,14 @@ function SlidePreviewModal({ seq, index, bt, slides, photoPool, onClose, onPrev,
   const atLast  = index >= count - 1;
   const isCard  = item.type === "card";
   const isPhoto = item.type === "photo";
-  const canEdit = isCard && typeof onUpdateStatement === "function";
-  const canSwap = isPhoto && typeof onSwapPhoto === "function" && Array.isArray(photoPool) && photoPool.length > 0;
+  const isCombined = item.type === "combined";
+  // Combined slides own BOTH text and a photo — both controls apply.
+  const canEdit = (isCard || isCombined) && typeof onUpdateStatement === "function";
+  const canSwap = (isPhoto || isCombined) && typeof onSwapPhoto === "function" && Array.isArray(photoPool) && photoPool.length > 0;
 
   // Inline edit state. Re-seeded whenever the open slide changes.
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(isCard ? (item.statement || "") : "");
+  const [draft, setDraft] = useState((isCard || isCombined) ? (item.statement || "") : "");
 
   // Photo-swap state, scoped to the open slide. "regenerating" while the new
   // card statement is being generated; "error" if it failed (the swapped photo
@@ -111,7 +154,7 @@ function SlidePreviewModal({ seq, index, bt, slides, photoPool, onClose, onPrev,
   const [regenState, setRegenState] = useState("idle"); // "idle" | "regenerating" | "error"
   useEffect(() => {
     setEditing(false);
-    setDraft(item.type === "card" ? (item.statement || "") : "");
+    setDraft((item.type === "card" || item.type === "combined") ? (item.statement || "") : "");
     setPickerOpen(false);
     setRegenState("idle");
   }, [index]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -146,11 +189,12 @@ function SlidePreviewModal({ seq, index, bt, slides, photoPool, onClose, onPrev,
   const isStale = item.needsCaption === true || regenState === "error";
 
   // Re-fire the canvas render when the statement changes (an edit), not just on
-  // index/bt. statementKey is "" for photo slides (no editable text).
-  const statementKey = isCard ? (item.statement || "") : "";
-  // Photo slides must also repaint when their photo/category changes (a swap on
-  // the CURRENTLY-OPEN slide), so include those in the render key below.
-  const photoKey = isPhoto ? `${item.photo_url || ""}|${item.category || ""}` : "";
+  // index/bt. statementKey is "" for photo-only slides (no editable text).
+  const statementKey = (isCard || isCombined) ? (item.statement || "") : "";
+  // Photo and combined slides must also repaint when their photo/category
+  // changes (a swap on the CURRENTLY-OPEN slide), so include those in the
+  // render key below.
+  const photoKey = (isPhoto || isCombined) ? `${item.photo_url || ""}|${item.category || ""}` : "";
 
   // Render the current slide on demand. Keyed on index + bt-by-value (bt is
   // rebuilt each parent render, so stringify it to avoid spurious re-renders).
@@ -168,9 +212,11 @@ function SlidePreviewModal({ seq, index, bt, slides, photoPool, onClose, onPrev,
             catch { logoRef.current.img = null; }
           }
         }
-        const canvas = item.type === "card"
-          ? await renderCardSlide(item, bt, logoRef.current.img)
-          : await renderPhotoSlide(item.photo_url, { category: item.category, brandTokens: bt });
+        const canvas = item.type === "combined"
+          ? await renderCombinedSlide(item, bt)
+          : (item.type === "card"
+              ? await renderCardSlide(item, bt, logoRef.current.img)
+              : await renderPhotoSlide(item.photo_url, { category: item.category, brandTokens: bt }));
         if (cancelled) return; // a newer slide was opened — drop this stale canvas
         const host = containerRef.current;
         if (!host) return;
@@ -533,7 +579,7 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
       if (!token || !agentId) throw new Error("Your session expired. Please sign in again.");
 
       setStep("Composing & uploading images…");
-      const imageUrls = await composeAndUploadCarousel({ slides, stats, footer, brandTokens, agentId, contentId });
+      const imageUrls = await composeAndUploadCarousel({ slides, stats, footer, brandTokens, agentId, contentId, platform });
 
       setStep(isScheduled ? "Scheduling…" : "Posting to Instagram…");
       const res = await fetch("/api/social-post", {
@@ -789,7 +835,7 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
   );
 }
 
-function CarouselView({ slides, caption, hashtags, address, stats, footer, brandTokens, rowId, onUpdateStatement, photoPool, onSwapPhoto, onRetryStatement }) {
+function CarouselView({ slides, caption, hashtags, address, stats, footer, brandTokens, rowId, onUpdateStatement, photoPool, onSwapPhoto, onRetryStatement, platform = "instagram" }) {
   // Merge over the Milestone defaults, but IGNORE null/undefined token values so
   // an agent who hasn't set a given color/font falls back to the default rather
   // than overriding it with null (a plain spread copies the nullish value and
@@ -804,9 +850,19 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
 
   if (!Array.isArray(slides) || slides.length === 0) return null;
 
-  const seq = buildSlideSequence(slides, { stats, footer });
-  const cardCount = seq.filter((s) => s.type === "card").length;
-  const photoCount = seq.filter((s) => s.type === "photo").length;
+  const useCombined = platform === "instagram";
+  const seq = useCombined
+    ? buildSlideSequenceCombined(slides, { stats, footer })
+    : buildSlideSequence(slides, { stats, footer });
+  // Strip-summary counts: legacy splits cards vs photos; combined collapses
+  // both into a single per-source-slide image. cardCount stays = source-slide
+  // count for the combined path (so the "N slides" UX text keeps working).
+  const cardCount = useCombined
+    ? seq.length
+    : seq.filter((s) => s.type === "card").length;
+  const photoCount = useCombined
+    ? 0
+    : seq.filter((s) => s.type === "photo").length;
   // Source slides flagged stale (photo swapped, statement not regenerated). One
   // count per SOURCE slide (card+photo share needsCaption) — a soft heads-up so
   // a mismatched card isn't downloaded unnoticed. Download is never hard-blocked.
@@ -815,7 +871,7 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
   const onDownload = async () => {
     setErr(""); setBusy(true);
     try {
-      await downloadCarouselZip({ slides, stats, footer, brandTokens: bt, address });
+      await downloadCarouselZip({ slides, stats, footer, brandTokens: bt, address, platform });
     } catch (e) {
       console.error("[CarouselView] download failed:", e);
       setErr(e?.message || "Couldn't build the download. Please try again.");
@@ -874,6 +930,8 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
             >
               {item.type === "card" ? (
                 <CardTile item={item} bt={bt} />
+              ) : item.type === "combined" ? (
+                <CombinedTile item={item} bt={bt} />
               ) : (
                 <img src={item.photo_url} alt="" loading="lazy" crossOrigin="anonymous" style={{
                   width: 120, height: 150, objectFit: "cover", borderRadius: 6,
@@ -894,8 +952,14 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
             <div style={{
               marginTop: 4, textAlign: "center", fontFamily: "'Jost', sans-serif", fontSize: 8.5,
               letterSpacing: "0.08em", textTransform: "uppercase",
-              color: item.type === "card" ? "#c9a84c" : "rgba(255,255,255,0.35)",
-            }}>{item.type === "card" ? (item.kind === "hook" ? "Hook card" : item.kind === "cta" ? "CTA card" : "Card") : "Photo"}</div>
+              color: (item.type === "card" || item.type === "combined") ? "#c9a84c" : "rgba(255,255,255,0.35)",
+            }}>{
+              item.type === "combined"
+                ? (item.kind === "hook" ? "Hook" : item.kind === "cta" ? "CTA" : (item.kicker || "Slide"))
+                : (item.type === "card"
+                    ? (item.kind === "hook" ? "Hook card" : item.kind === "cta" ? "CTA card" : "Card")
+                    : "Photo")
+            }</div>
           </div>
         ))}
       </div>

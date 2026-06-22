@@ -45,7 +45,7 @@ export const CAROUSEL_BUCKET = "carousel-posts";
  * @returns {Promise<string[]>} ordered public URLs
  */
 export async function composeAndUploadCarousel(
-  { slides, stats, footer, brandTokens, agentId, contentId } = {},
+  { slides, stats, footer, brandTokens, agentId, contentId, platform = "instagram" } = {},
   deps = {}
 ) {
   const compose = deps.composeCarousel || defaultComposeCarousel;
@@ -54,7 +54,7 @@ export async function composeAndUploadCarousel(
   if (!agentId)   throw new Error("agentId is required to upload carousel images");
   if (!contentId) throw new Error("contentId is required to upload carousel images");
 
-  const files = await compose({ slides, stats, footer, brandTokens });
+  const files = await compose({ slides, stats, footer, brandTokens, platform });
   if (!Array.isArray(files) || files.length === 0) {
     throw new Error("Nothing to upload — no slides composed.");
   }

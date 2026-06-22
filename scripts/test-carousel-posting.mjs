@@ -33,33 +33,33 @@ const slidesWithPhotos = (n) => Array.from({ length: n }, (_, i) => ({ statement
 
 console.log("\n── shared/carouselPosting.js — carousel cap ──\n");
 
-// Cap constant (Instagram allows 20 since the 2024 increase).
-check("cap constant is 20", INSTAGRAM_MAX_CAROUSEL_IMAGES === 20);
+// Cap constant (bundle.social enforces 10 at its create-post boundary).
+check("cap constant is 10", INSTAGRAM_MAX_CAROUSEL_IMAGES === 10);
 
-// carouselImageCount: 1 card + 1 photo per slide WITH a photo_url.
-check("count: 2 per photo-bearing slide", carouselImageCount(slidesWithPhotos(3)) === 6);
-check("count: card-only slide (no photo_url) = 1", carouselImageCount([{ statement: "x" }]) === 1);
-check("count: mixed (1 with photo, 1 without) = 3", carouselImageCount([{ photo_url: "u" }, { statement: "x" }]) === 3);
+// carouselImageCount: one combined image per source slide (combined photo+caption format).
+check("count: 1 per slide regardless of photo_url", carouselImageCount(slidesWithPhotos(3)) === 3);
+check("count: card-only slide still counts = 1", carouselImageCount([{ statement: "x" }]) === 1);
+check("count: mixed slides still count by length", carouselImageCount([{ photo_url: "u" }, { statement: "x" }]) === 2);
 check("count: empty/invalid → 0", carouselImageCount([]) === 0 && carouselImageCount(null) === 0 && carouselImageCount(undefined) === 0);
 
-// checkCarouselImageCap: ok within range.
+// checkCarouselImageCap: ok within range (8 slides = 8 images).
 {
-  const r = checkCarouselImageCap(slidesWithPhotos(5)); // 10 images
-  check("5 photo-slides (10 imgs) → ok", r.ok === true && r.count === 10 && r.cap === 20);
+  const r = checkCarouselImageCap(slidesWithPhotos(8));
+  check("8 slides → ok", r.ok === true && r.count === 8 && r.cap === 10);
   check("ok → no message", r.message === "");
 }
 
-// At exactly the cap (10 photo-slides = 20 images) → still ok.
+// At exactly the cap (10 slides = 10 images) → still ok.
 {
-  const r = checkCarouselImageCap(slidesWithPhotos(10)); // 20 images
-  check("exactly cap (20) → ok", r.ok === true && r.count === 20);
+  const r = checkCarouselImageCap(slidesWithPhotos(10));
+  check("exactly cap (10) → ok", r.ok === true && r.count === 10);
 }
 
-// Over the cap (11 photo-slides = 22 images) → blocked with a clear message.
+// Over the cap (11 slides = 11 images) → blocked with a clear message.
 {
-  const r = checkCarouselImageCap(slidesWithPhotos(11)); // 22 images
-  check("over cap (22) → not ok", r.ok === false && r.count === 22);
-  check("over cap → names limit and count", r.message.includes("20") && r.message.includes("22") && /trim/i.test(r.message));
+  const r = checkCarouselImageCap(slidesWithPhotos(11));
+  check("over cap (11) → not ok", r.ok === false && r.count === 11);
+  check("over cap → names limit and count", r.message.includes("10") && r.message.includes("11") && /trim/i.test(r.message));
 }
 
 // Empty → not ok with a clear message.
@@ -71,8 +71,9 @@ check("count: empty/invalid → 0", carouselImageCount([]) === 0 && carouselImag
 
 // Custom cap override honored.
 {
-  const r = checkCarouselImageCap(slidesWithPhotos(3), 4); // 6 images, cap 4
-  check("custom cap honored", r.ok === false && r.cap === 4 && r.count === 6);
+  // 5 slides, custom cap of 4 → blocked at 5 images.
+  const r = checkCarouselImageCap(slidesWithPhotos(5), 4);
+  check("custom cap honored", r.ok === false && r.cap === 4 && r.count === 5);
 }
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

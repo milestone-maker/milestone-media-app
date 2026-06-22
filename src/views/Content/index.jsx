@@ -30,15 +30,21 @@ import { includable } from "../../../api/_content/selectCarouselPhotos.js";
 // platform. Instagram keeps its 7 listing frameworks; Facebook (Stage 2) adds
 // 5 FB-native long-form frameworks. The style picker swaps lists when the
 // platform toggle changes.
+//
+// `comingSoon: true` marks frameworks that are visible-but-disabled on the
+// platform until they're brought up to parity. Walkthrough Carousel is the
+// only Instagram framework currently shipping the combined photo+caption
+// slide format — the other six render visible with a "Coming soon" tag.
+// Facebook is unaffected.
 const FRAMEWORKS_BY_PLATFORM = {
   instagram: [
-    { label: "Story-Driven",                 slug: "story_driven_listing" },
-    { label: '"You" Hook',                   slug: "you_hook_listing" },
     { label: "Walkthrough Carousel",         slug: "walkthrough_carousel" },
-    { label: "Behind-the-Scenes / Pre-List", slug: "behind_the_scenes_prelist" },
-    { label: "Neighborhood-First",           slug: "neighborhood_first" },
-    { label: "Problem → Solution",           slug: "problem_solution" },
-    { label: "POV: Day in the Life",         slug: "pov_day_in_life" },
+    { label: "Story-Driven",                 slug: "story_driven_listing",       comingSoon: true },
+    { label: '"You" Hook',                   slug: "you_hook_listing",           comingSoon: true },
+    { label: "Behind-the-Scenes / Pre-List", slug: "behind_the_scenes_prelist",  comingSoon: true },
+    { label: "Neighborhood-First",           slug: "neighborhood_first",         comingSoon: true },
+    { label: "Problem → Solution",           slug: "problem_solution",           comingSoon: true },
+    { label: "POV: Day in the Life",         slug: "pov_day_in_life",            comingSoon: true },
   ],
   facebook: [
     // Listing-focused first, then community/market frameworks.
@@ -51,6 +57,20 @@ const FRAMEWORKS_BY_PLATFORM = {
     { label: "Resource Drop",       slug: "resource_drop" },
   ],
 };
+
+// First selectable (non-comingSoon) framework for a platform — the safe
+// default when the user lands on the platform or switches to it.
+function firstEnabledFramework(platform) {
+  const list = FRAMEWORKS_BY_PLATFORM[platform] || [];
+  const enabled = list.find((f) => !f.comingSoon);
+  return (enabled || list[0])?.slug;
+}
+// Whether a framework is currently selectable for a platform.
+function isFrameworkEnabled(platform, slug) {
+  const list = FRAMEWORKS_BY_PLATFORM[platform] || [];
+  const entry = list.find((f) => f.slug === slug);
+  return !!entry && !entry.comingSoon;
+}
 const PLATFORMS = [
   { key: "instagram", label: "Instagram", emoji: "📷" },
   { key: "facebook",  label: "Facebook",  emoji: "📘" },
@@ -233,18 +253,31 @@ function ContentView({ onOpenSubscriptions } = {}) {
 
   // Generator inputs
   const [platform, setPlatform] = useState("instagram");
-  const [framework, setFramework] = useState(FRAMEWORKS_BY_PLATFORM.instagram[0].slug);
+  const [framework, setFramework] = useState(firstEnabledFramework("instagram"));
   const [storyAngle, setStoryAngle] = useState("");
 
   // Switch platform: swap the style list and reset the framework selection to
-  // that platform's first. Clears any showing result so the panels stay coherent.
+  // that platform's first ENABLED framework. Prevents a previously-selected
+  // framework from getting stuck "selected" on a platform that doesn't allow
+  // it any more (e.g. Story-Driven selected on Facebook then user flips to
+  // Instagram, which currently restricts to Walkthrough only). Clears any
+  // showing result so the panels stay coherent.
   const switchPlatform = (next) => {
     if (next === platform) return;
     setPlatform(next);
-    setFramework(FRAMEWORKS_BY_PLATFORM[next][0].slug);
+    setFramework(firstEnabledFramework(next));
     setResult(null);
     setErrorMsg("");
   };
+
+  // Safety: if the active framework is ever disabled on the current platform
+  // (e.g. a future flag flip while the picker is mounted), snap to the first
+  // enabled one. Skip if no framework set yet.
+  useEffect(() => {
+    if (framework && !isFrameworkEnabled(platform, framework)) {
+      setFramework(firstEnabledFramework(platform));
+    }
+  }, [platform, framework]);
 
   // Photo-label count for the selected listing — drives the carousel nudge.
   // null = unknown / not applicable; a number once checked.
@@ -581,6 +614,14 @@ function ContentView({ onOpenSubscriptions } = {}) {
     if (!hasUsableProfile) { setErrorMsg("Set up your voice profile first."); return; }
     if (!selectedListingId) { setErrorMsg("Pick a listing to generate for."); return; }
     if (!framework) { setErrorMsg("Pick a content style."); return; }
+    // Defense in depth: never submit a framework that's disabled on this
+    // platform (the picker already prevents this, but a stale state could
+    // theoretically slip through). Snap to the default and bail.
+    if (!isFrameworkEnabled(platform, framework)) {
+      setFramework(firstEnabledFramework(platform));
+      setErrorMsg("That content style isn't available on this platform yet. Try again.");
+      return;
+    }
 
     setGenerating(true);
     setResult(null);
@@ -839,14 +880,46 @@ function ContentView({ onOpenSubscriptions } = {}) {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 20 }}>
           {FRAMEWORKS_BY_PLATFORM[platform].map((f) => {
             const selected = f.slug === framework;
+            const disabled = !!f.comingSoon;
             return (
-              <button key={f.slug} onClick={() => setFramework(f.slug)} style={{
-                padding: "8px 14px", borderRadius: 8, cursor: "pointer",
-                fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 500, letterSpacing: "0.03em",
-                border: selected ? "1px solid #c9a84c" : "1px solid rgba(255,255,255,0.12)",
-                background: selected ? "rgba(201,168,76,0.15)" : "rgba(255,255,255,0.04)",
-                color: selected ? "#c9a84c" : "rgba(255,255,255,0.55)",
-              }}>{f.label}</button>
+              <button
+                key={f.slug}
+                onClick={() => { if (!disabled) setFramework(f.slug); }}
+                disabled={disabled}
+                title={disabled ? "Coming soon — currently Instagram supports the Walkthrough Carousel only" : undefined}
+                style={{
+                  padding: "8px 14px", borderRadius: 8,
+                  cursor: disabled ? "not-allowed" : "pointer",
+                  fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 500, letterSpacing: "0.03em",
+                  border: selected
+                    ? "1px solid #c9a84c"
+                    : disabled
+                      ? "1px dashed rgba(255,255,255,0.10)"
+                      : "1px solid rgba(255,255,255,0.12)",
+                  background: selected
+                    ? "rgba(201,168,76,0.15)"
+                    : disabled
+                      ? "rgba(255,255,255,0.02)"
+                      : "rgba(255,255,255,0.04)",
+                  color: selected
+                    ? "#c9a84c"
+                    : disabled
+                      ? "rgba(255,255,255,0.28)"
+                      : "rgba(255,255,255,0.55)",
+                  opacity: disabled ? 0.75 : 1,
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                }}
+              >
+                <span>{f.label}</span>
+                {disabled && (
+                  <span style={{
+                    fontFamily: "'Jost', sans-serif", fontSize: 9, fontWeight: 600,
+                    letterSpacing: "0.06em", textTransform: "uppercase",
+                    padding: "1px 6px", borderRadius: 4,
+                    background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.45)",
+                  }}>Coming soon</span>
+                )}
+              </button>
             );
           })}
         </div>
@@ -957,6 +1030,7 @@ function ContentView({ onOpenSubscriptions } = {}) {
                 photoPool={photoPool}
                 onSwapPhoto={swapSlidePhoto}
                 onRetryStatement={retrySlideStatement}
+                platform={result.platform || platform}
                 brandTokens={{
                   bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
                   mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
@@ -1091,6 +1165,7 @@ function ContentView({ onOpenSubscriptions } = {}) {
                             photoPool={photoPool}
                             onSwapPhoto={swapSlidePhoto}
                             onRetryStatement={retrySlideStatement}
+                            platform={h.platform || "instagram"}
                             brandTokens={{
                               bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
                               mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
