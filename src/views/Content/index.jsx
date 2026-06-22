@@ -24,9 +24,10 @@ import PhotosPanel from "./PhotosPanel";
 import CarouselView from "./CarouselView";
 import FacebookAlbumEditor from "./FacebookAlbumEditor";
 import PostToLinkedInButton from "./PostToLinkedInButton";
+import LinkedInGalleryEditor from "./LinkedInGalleryEditor";
 import UpcomingPosts from "./UpcomingPosts";
 import { includable } from "../../../api/_content/selectCarouselPhotos.js";
-import { INSTAGRAM_MAX_CAROUSEL_IMAGES } from "../../../shared/carouselPosting.js";
+import { INSTAGRAM_MAX_CAROUSEL_IMAGES, LINKEDIN_MAX_GALLERY_IMAGES } from "../../../shared/carouselPosting.js";
 
 // Friendly label → exact framework_name slug the endpoint expects, keyed by
 // platform. Instagram keeps its 7 listing frameworks; Facebook (Stage 2) adds
@@ -58,14 +59,16 @@ const FRAMEWORKS_BY_PLATFORM = {
     { label: "Win Share",           slug: "win_share" },
     { label: "Resource Drop",       slug: "resource_drop" },
   ],
-  // LinkedIn STOPGAP: no LinkedIn-native prompts yet. The server aliases
-  // platform=linkedin to the Facebook prompt set (single-caption + microsite
-  // token), so a LinkedIn generation uses the same frameworks as Facebook
-  // under the hood. We surface ONE option here so the picker is clean and
-  // unambiguous; the real LinkedIn frameworks land later under
-  // api/_content/prompts/linkedin/ and replace this list.
+  // LinkedIn stopgaps until LinkedIn-native prompts ship at
+  // api/_content/prompts/linkedin/:
+  //   • "Standard post" → FB-aliased single-caption prompt (text + optional
+  //     single image). The original LinkedIn flow, proven live on prod.
+  //   • "Multi-photo gallery" → IG-walkthrough-aliased prompt that emits a
+  //     per-photo slides[] array. Drives the LinkedIn gallery editor
+  //     (combined photo+caption tiles, capped at 9 per LinkedIn's limit).
   linkedin: [
-    { label: "Standard post (stopgap)", slug: "property_showcase" },
+    { label: "Standard post (stopgap)",       slug: "property_showcase" },
+    { label: "Multi-photo gallery (stopgap)", slug: "walkthrough_carousel" },
   ],
 };
 
@@ -165,6 +168,130 @@ function CopyButton({ text, label = "Copy" }) {
       borderColor: copied ? "rgba(74,222,128,0.35)" : "rgba(201,168,76,0.25)",
       color: copied ? "#4ade80" : "#c9a84c",
     }}>{copied ? "✓ Copied" : label}</button>
+  );
+}
+
+// Editable caption block. Display mode shows the resolved caption (microsite
+// token substituted to the live URL) with Copy + Edit affordances. Edit mode
+// opens a textarea pre-filled with the RAW stored caption (token visible) so
+// the agent can keep/replace/remove the token, with Save/Cancel. Save calls
+// onSave(rawText) which the parent persists to generated_content.caption.
+// canPersist=false (an unsaved fresh generation with no saved_id) keeps the
+// textarea functional locally but disables the Save button — same shape as
+// the per-slide editor's behavior.
+function EditableCaption({
+  caption,
+  micrositeUrl,
+  onSave,
+  canPersist,
+  size = "result", // "result" | "history"
+}) {
+  const raw = typeof caption === "string" ? caption : "";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(raw);
+  const [saving, setSaving] = useState(false);
+
+  // Re-seed the draft when the upstream caption changes (e.g. a fresh
+  // generation lands while not in edit mode).
+  useEffect(() => { if (!editing) setDraft(raw); }, [raw, editing]);
+
+  const displayText = resolveCaptionForDisplay(raw, micrositeUrl);
+  const ghostBtnSm = {
+    padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontSize: 10,
+    fontFamily: "'Jost', sans-serif", fontWeight: 600, letterSpacing: "0.06em",
+    background: "rgba(201,168,76,0.08)", border: "1px solid rgba(201,168,76,0.25)", color: "#c9a84c",
+  };
+  const headerWrap = size === "result"
+    ? { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }
+    : { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 8 };
+  const bodyStyle = size === "result"
+    ? {
+        whiteSpace: "pre-wrap", fontFamily: "'Jost', sans-serif", fontSize: 13.5, color: "#ECE7DC",
+        lineHeight: 1.7, background: "rgba(0,0,0,0.2)", borderRadius: 10, padding: "16px 18px",
+        border: "1px solid rgba(255,255,255,0.06)",
+      }
+    : { whiteSpace: "pre-wrap", fontFamily: "'Jost', sans-serif", fontSize: 12.5, color: "#ECE7DC", lineHeight: 1.7 };
+  const taStyle = {
+    width: "100%", boxSizing: "border-box",
+    fontFamily: "'Jost', sans-serif", fontSize: size === "result" ? 13.5 : 12.5, color: "#ECE7DC",
+    lineHeight: 1.7, background: "rgba(0,0,0,0.3)", borderRadius: 10, padding: "14px 16px",
+    border: "1px solid rgba(201,168,76,0.4)", outline: "none", resize: "vertical",
+    minHeight: size === "result" ? 240 : 180,
+  };
+
+  const onClickSave = async () => {
+    if (typeof onSave !== "function") { setEditing(false); return; }
+    setSaving(true);
+    try { await onSave(draft); }
+    finally { setSaving(false); setEditing(false); }
+  };
+
+  return (
+    <>
+      <div style={headerWrap}>
+        {size === "result" && <label style={{ ...labelSt, marginBottom: 0 }}>Caption</label>}
+        {/* Copy still works regardless of edit mode; reflects the resolved-display text. */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <CopyButton text={displayText} label="Copy caption" />
+          {!editing && typeof onSave === "function" && (
+            <button
+              onClick={() => { setDraft(raw); setEditing(true); }}
+              style={ghostBtnSm}
+              title="Edit the post caption"
+            >✎ Edit</button>
+          )}
+        </div>
+      </div>
+      {!editing ? (
+        <div style={bodyStyle}>{displayText}</div>
+      ) : (
+        <div>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            style={taStyle}
+            autoFocus
+          />
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            gap: 10, marginTop: 8, flexWrap: "wrap",
+          }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10.5, color: "rgba(255,255,255,0.4)" }}>
+              {draft.length} chars
+              {!canPersist && " · edit not saved (no saved row yet)"}
+              {draft.includes(MICROSITE_TOKEN) && (
+                <> · contains microsite link token (live URL substitutes at post time)</>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => { setDraft(raw); setEditing(false); }}
+                style={{
+                  padding: "7px 14px", borderRadius: 8, cursor: "pointer",
+                  background: "transparent", border: "1px solid rgba(255,255,255,0.18)",
+                  color: "rgba(255,255,255,0.7)",
+                  fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 600, letterSpacing: "0.04em",
+                }}
+              >Cancel</button>
+              <button
+                onClick={onClickSave}
+                disabled={saving || !canPersist}
+                style={{
+                  padding: "7px 16px", borderRadius: 8,
+                  cursor: (saving || !canPersist) ? "default" : "pointer",
+                  background: (saving || !canPersist)
+                    ? "rgba(201,168,76,0.25)"
+                    : "linear-gradient(135deg, #C9A84C 0%, #e8c97a 100%)",
+                  color: (saving || !canPersist) ? "rgba(26,18,6,0.55)" : "#0a1628",
+                  border: "none", fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 700,
+                  letterSpacing: "0.04em",
+                }}
+              >{saving ? "Saving…" : "Save"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -375,6 +502,59 @@ function ContentView({ onOpenSubscriptions } = {}) {
   // dropped key on persist, so the DB row also loses the flag.
   const clearStale = (s) => { const { _needsCaption, ...rest } = s; return rest; };
 
+  // ── Edit the post caption (the post body the agent ships) ──
+  // Persists generated_content.caption for an owned row (RLS scopes by
+  // agent_id = auth.uid()). Mirrors updateSlideStatement's optimistic-
+  // update-then-persist-then-revert-on-error shape, but operates on the
+  // top-level caption field, not slides[]. The microsite token, if the
+  // agent leaves it in, still gets substituted to the live URL at post
+  // time by api/social-post.js. If they remove it, the post goes
+  // without a link.
+  const updateCaption = async (rowId, nextCaption) => {
+    setSaveError("");
+    const safe = typeof nextCaption === "string" ? nextCaption : "";
+
+    // Fresh result (matched by saved_id, or rowId absent → the result is
+    // the only candidate since every History row has an id).
+    if ((rowId && result?.saved_id === rowId) || (!rowId && result)) {
+      const prev = result;
+      setResult({ ...result, caption: safe });
+      if (!rowId) return; // local-only — nothing to persist
+      const { error } = await supabase
+        .from("generated_content")
+        .update({ caption: safe })
+        .eq("id", rowId);
+      if (error) {
+        console.error("[Content] caption edit save failed:", error);
+        setResult(prev); // revert
+        setSaveError("Couldn't save that edit. Please try again.");
+      }
+      return;
+    }
+
+    // History entry.
+    if (rowId) {
+      const prev = history;
+      let touched = false;
+      const nextHistory = history.map((h) => {
+        if (h.id !== rowId) return h;
+        touched = true;
+        return { ...h, caption: safe };
+      });
+      if (!touched) return;
+      setHistory(nextHistory);
+      const { error } = await supabase
+        .from("generated_content")
+        .update({ caption: safe })
+        .eq("id", rowId);
+      if (error) {
+        console.error("[Content] caption edit save failed:", error);
+        setHistory(prev); // revert
+        setSaveError("Couldn't save that edit. Please try again.");
+      }
+    }
+  };
+
   const updateSlideStatement = async (rowId, sourceIndex, text) => {
     setSaveError("");
     const applyEdit = (slides) =>
@@ -430,10 +610,18 @@ function ContentView({ onOpenSubscriptions } = {}) {
   // by id. Returns null when no store matches.
   const locateSlides = (rowId) => {
     if ((rowId && result?.saved_id === rowId) || (!rowId && result)) {
-      return { target: "result", baseSlides: Array.isArray(result.slides) ? result.slides : [] };
+      return {
+        target: "result",
+        baseSlides: Array.isArray(result.slides) ? result.slides : [],
+        platform:   result.platform || "instagram",
+      };
     }
     const h = history.find((x) => x.id === rowId);
-    if (h) return { target: "history", baseSlides: Array.isArray(h.slides) ? h.slides : [] };
+    if (h) return {
+      target: "history",
+      baseSlides: Array.isArray(h.slides) ? h.slides : [],
+      platform:   h.platform || "instagram",
+    };
     return null;
   };
   const writeSlides = (target, rowId, nextSlides) => {
@@ -569,14 +757,17 @@ function ContentView({ onOpenSubscriptions } = {}) {
 
   // Add a NEW interior slide using the picked photo, then regenerate its
   // caption via the same path swap uses. Insertion point = right before the
-  // final/CTA slide (so the new slide is always interior). Enforces the IG
-  // 10-image cap defensively; the picker UI itself also gates this.
+  // final/CTA slide (so the new slide is always interior). Per-platform cap
+  // enforced defensively (the picker UI also gates this): Instagram = 10,
+  // LinkedIn = 9, anything else (incl. future platforms with slides) defaults
+  // to the IG cap.
   const addSlide = async (rowId, candidate) => {
     setSaveError("");
     const loc = locateSlides(rowId);
     if (!loc) return { ok: false };
-    if (loc.baseSlides.length >= INSTAGRAM_MAX_CAROUSEL_IMAGES) {
-      return { ok: false, reason: "atCap", count: loc.baseSlides.length, cap: INSTAGRAM_MAX_CAROUSEL_IMAGES };
+    const cap = loc.platform === "linkedin" ? LINKEDIN_MAX_GALLERY_IMAGES : INSTAGRAM_MAX_CAROUSEL_IMAGES;
+    if (loc.baseSlides.length >= cap) {
+      return { ok: false, reason: "atCap", count: loc.baseSlides.length, cap };
     }
     if (!candidate || !candidate.photo_url) return { ok: false };
 
@@ -1061,24 +1252,30 @@ function ContentView({ onOpenSubscriptions } = {}) {
             </div>
           </div>
 
-          {/* Caption */}
+          {/* Caption (editable). The textarea opens with the RAW stored
+              caption (microsite token visible) so the agent can keep,
+              replace, or remove the link slot. Display mode shows the
+              resolved caption (token → live URL). Save persists to
+              generated_content.caption via Supabase RLS. */}
           <div style={{ marginBottom: 18 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <label style={{ ...labelSt, marginBottom: 0 }}>Caption</label>
-              <CopyButton text={resolveCaptionForDisplay(result.caption, micrositeUrlForListing)} label="Copy caption" />
-            </div>
-            <div style={{
-              whiteSpace: "pre-wrap", fontFamily: "'Jost', sans-serif", fontSize: 13.5, color: "#ECE7DC",
-              lineHeight: 1.7, background: "rgba(0,0,0,0.2)", borderRadius: 10, padding: "16px 18px",
-              border: "1px solid rgba(255,255,255,0.06)",
-            }}>{resolveCaptionForDisplay(result.caption, micrositeUrlForListing)}</div>
+            <EditableCaption
+              caption={result.caption}
+              micrositeUrl={micrositeUrlForListing}
+              onSave={(next) => updateCaption(result.saved_id || null, next)}
+              canPersist={!!result.saved_id}
+              size="result"
+            />
           </div>
 
-          {/* Facebook microsite-link status. The caption carries a placeholder
-              token; we substitute the listing's LIVE microsite URL for display +
-              copy here, and authoritatively again at post time. When none exists
-              yet, the CTA stands alone and the link inserts once a microsite is published. */}
-          {(result.platform === "facebook" || result.platform === "linkedin") && (
+          {/* Microsite-link status. Only meaningful when the caption actually
+              carries the placeholder token. If the agent edited the caption
+              and removed the token, hide the banner entirely (their choice
+              stands — we never re-inject it). If the token is present and a
+              microsite is published, show green with the live URL. If the
+              token is present but no microsite is published yet, show
+              yellow ("publish to fill the link spot"). */}
+          {(result.platform === "facebook" || result.platform === "linkedin") &&
+            typeof result.caption === "string" && result.caption.includes(MICROSITE_TOKEN) && (
             micrositeUrlForListing ? (
               <div style={{
                 marginBottom: 18, fontFamily: "'Jost', sans-serif", fontSize: 11.5, color: "#9fe3b0",
@@ -1093,13 +1290,16 @@ function ContentView({ onOpenSubscriptions } = {}) {
                 background: "rgba(201,168,76,0.07)", border: "1px solid rgba(201,168,76,0.22)",
                 borderRadius: 8, padding: "9px 12px", lineHeight: 1.5,
               }}>
-                No published microsite for this listing yet — the CTA stands alone for now. Publish a microsite and the link will be inserted automatically when this posts.
+                No published microsite for this listing yet — the link spot in the caption stands alone for now. Publish a microsite and the link will be inserted automatically when this posts.
               </div>
             )
           )}
 
-          {/* Carousel — Style B sequence + download (walkthrough_carousel only) */}
-          {Array.isArray(result.slides) && result.slides.length > 0 && (
+          {/* Carousel — Instagram walkthrough only. LinkedIn slides[] are
+              handled by LinkedInGalleryEditor below; never feed them
+              through CarouselView (its IG-specific chrome — Post-to-IG
+              button, IG cap, download zip — doesn't apply to LinkedIn). */}
+          {Array.isArray(result.slides) && result.slides.length > 0 && (result.platform || platform) === "instagram" && (
             <div style={{ marginBottom: 18 }}>
               <CarouselView
                 slides={result.slides}
@@ -1178,7 +1378,40 @@ function ContentView({ onOpenSubscriptions } = {}) {
               "Post as" picker shows the personal profile + admined pages. */}
           {result.platform === "linkedin" && result.saved_id && (
             <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-              <PostToLinkedInButton contentId={result.saved_id} photos={photoPool} />
+              {Array.isArray(result.slides) && result.slides.length > 0 && (
+                <LinkedInGalleryEditor
+                  slides={result.slides}
+                  rowId={result.saved_id}
+                  stats={carouselStats}
+                  footer={carouselFooter(result.license_number)}
+                  brandTokens={{
+                    bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
+                    mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
+                    fontHeadline: profile?.brand_font_headline, fontBody: profile?.brand_font_body,
+                    logoUrl: profile?.agency_logo_url || undefined,
+                  }}
+                  photoPool={photoPool}
+                  onUpdateStatement={updateSlideStatement}
+                  onSwapPhoto={swapSlidePhoto}
+                  onRetryStatement={retrySlideStatement}
+                  onDeleteSlide={deleteSlide}
+                  onAddSlide={addSlide}
+                />
+              )}
+              <PostToLinkedInButton
+                contentId={result.saved_id}
+                photos={photoPool}
+                slides={Array.isArray(result.slides) && result.slides.length > 0 ? result.slides : null}
+                stats={carouselStats}
+                footer={carouselFooter(result.license_number)}
+                address={selectedListing?.address}
+                brandTokens={{
+                  bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
+                  mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
+                  fontHeadline: profile?.brand_font_headline, fontBody: profile?.brand_font_body,
+                  logoUrl: profile?.agency_logo_url || undefined,
+                }}
+              />
             </div>
           )}
         </div>
@@ -1237,12 +1470,13 @@ function ContentView({ onOpenSubscriptions } = {}) {
                   </div>
                   {open && (
                     <div style={{ padding: "0 14px 14px" }}>
-                      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-                        <CopyButton text={resolveCaptionForDisplay(h.caption, micrositeUrlForListing)} label="Copy caption" />
-                      </div>
-                      <div style={{ whiteSpace: "pre-wrap", fontFamily: "'Jost', sans-serif", fontSize: 12.5, color: "#ECE7DC", lineHeight: 1.7 }}>
-                        {resolveCaptionForDisplay(h.caption, micrositeUrlForListing)}
-                      </div>
+                      <EditableCaption
+                        caption={h.caption}
+                        micrositeUrl={micrositeUrlForListing}
+                        onSave={(next) => updateCaption(h.id, next)}
+                        canPersist={!!h.id}
+                        size="history"
+                      />
                       {Array.isArray(h.hashtags) && h.hashtags.length > 0 && (
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
                           {h.hashtags.map((tag, i) => (
@@ -1253,8 +1487,9 @@ function ContentView({ onOpenSubscriptions } = {}) {
                           ))}
                         </div>
                       )}
-                      {/* Saved carousel — same renderer as the Result panel (persistence fix) */}
-                      {Array.isArray(h.slides) && h.slides.length > 0 && (
+                      {/* Saved carousel — Instagram only. LinkedIn slides[]
+                          are handled by LinkedInGalleryEditor below. */}
+                      {Array.isArray(h.slides) && h.slides.length > 0 && (h.platform || "instagram") === "instagram" && (
                         <div style={{ marginTop: 14 }}>
                           <CarouselView
                             slides={h.slides}
@@ -1291,7 +1526,40 @@ function ContentView({ onOpenSubscriptions } = {}) {
                       {/* LinkedIn post button + target picker for LinkedIn history rows. */}
                       {h.platform === "linkedin" && (
                         <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                          <PostToLinkedInButton contentId={h.id} photos={photoPool} />
+                          {Array.isArray(h.slides) && h.slides.length > 0 && (
+                            <LinkedInGalleryEditor
+                              slides={h.slides}
+                              rowId={h.id}
+                              stats={carouselStats}
+                              footer={carouselFooter(h.license_number)}
+                              brandTokens={{
+                                bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
+                                mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
+                                fontHeadline: profile?.brand_font_headline, fontBody: profile?.brand_font_body,
+                                logoUrl: profile?.agency_logo_url || undefined,
+                              }}
+                              photoPool={photoPool}
+                              onUpdateStatement={updateSlideStatement}
+                              onSwapPhoto={swapSlidePhoto}
+                              onRetryStatement={retrySlideStatement}
+                              onDeleteSlide={deleteSlide}
+                              onAddSlide={addSlide}
+                            />
+                          )}
+                          <PostToLinkedInButton
+                            contentId={h.id}
+                            photos={photoPool}
+                            slides={Array.isArray(h.slides) && h.slides.length > 0 ? h.slides : null}
+                            stats={carouselStats}
+                            footer={carouselFooter(h.license_number)}
+                            address={selectedListing?.address}
+                            brandTokens={{
+                              bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
+                              mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
+                              fontHeadline: profile?.brand_font_headline, fontBody: profile?.brand_font_body,
+                              logoUrl: profile?.agency_logo_url || undefined,
+                            }}
+                          />
                         </div>
                       )}
                     </div>

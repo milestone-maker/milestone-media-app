@@ -47,7 +47,7 @@ import {
   createPost as bundleCreatePost,
   setChannel as bundleSetChannel,
 } from "./_lib/bundle.js";
-import { INSTAGRAM_MAX_CAROUSEL_IMAGES } from "../shared/carouselPosting.js";
+import { INSTAGRAM_MAX_CAROUSEL_IMAGES, LINKEDIN_MAX_GALLERY_IMAGES } from "../shared/carouselPosting.js";
 import { facebookAlbumUrls } from "./_content/selectCarouselPhotos.js";
 import { resolvePublishedMicrositeUrl, substituteMicrositeToken } from "./_lib/microsite.js";
 import { withSentry } from "./_lib/sentry.js";
@@ -220,15 +220,20 @@ async function handler(req, res, depsOverride) {
     if (isFacebook) {
       // handled below — server resolves the album from photo_labels
     } else if (isLinkedIn) {
+      // LinkedIn accepts 0 to LINKEDIN_MAX_GALLERY_IMAGES (9) images in a
+      // single post. 0 = text-only; 1 = single image; 2..9 = multi-image
+      // gallery (the new combined-tile flow, where each image already has
+      // its caption baked on by the client compositor). The UI gates this
+      // at the same constant so the two never disagree.
       const imageUrls = body.imageUrls;
       if (imageUrls === undefined || imageUrls === null) {
         clientImageUrls = []; // text-only post
       } else {
         if (!Array.isArray(imageUrls)) {
-          return res.status(400).json({ error: "imageUrls must be an array (LinkedIn allows 0 or 1)" });
+          return res.status(400).json({ error: `imageUrls must be an array (LinkedIn allows 0 to ${LINKEDIN_MAX_GALLERY_IMAGES})` });
         }
-        if (imageUrls.length > 1) {
-          return res.status(400).json({ error: "LinkedIn currently supports at most 1 image per post" });
+        if (imageUrls.length > LINKEDIN_MAX_GALLERY_IMAGES) {
+          return res.status(400).json({ error: `LinkedIn allows at most ${LINKEDIN_MAX_GALLERY_IMAGES} images per post` });
         }
         for (const url of imageUrls) {
           if (!isAllowedStorageUrl(url)) {
@@ -311,7 +316,7 @@ async function handler(req, res, depsOverride) {
     // ── 4. Load + ownership-check the generated content (+ listing_id for FB) ──
     const { data: content, error: contentErr } = await supabase
       .from("generated_content")
-      .select("id, agent_id, listing_id, caption")
+      .select("id, agent_id, listing_id, caption, hook_line, hashtags, slides")
       .eq("id", contentId)
       .maybeSingle();
     if (contentErr) {
@@ -370,8 +375,13 @@ async function handler(req, res, depsOverride) {
     }
 
     // ── 4c. Resolve the post caption ──
-    // FB + LinkedIn: substitute the microsite token with the LIVE url
-    // (or drop the line). IG: caption verbatim (no token in IG captions).
+    // FB + LinkedIn (every variant — text-only, single-image, AND multi-photo
+    // gallery): substitute the microsite token in the FULL stored caption
+    // with the LIVE url (or drop the token's line). Hashtags are ALREADY at
+    // the tail of the stored caption (canonicalizeHashtags at generate time
+    // mirrors generated_content.hashtags[] into the caption's trailing
+    // paragraph), so we do NOT append them again — appending would duplicate
+    // the tag block. IG keeps its caption verbatim (no token in IG captions).
     let text = typeof content.caption === "string" ? content.caption : "";
     if (isFacebook || isLinkedIn) {
       const liveUrl = await resolveMicrositeUrl(supabase, content.listing_id);

@@ -14,6 +14,12 @@
 // ONLY place the number lives.
 export const INSTAGRAM_MAX_CAROUSEL_IMAGES = 10;
 
+// LinkedIn's effective images-per-post cap for the multi-image gallery flow.
+// LinkedIn itself accepts up to 9 images in a single post. The LinkedIn
+// gallery editor and the server-side backstop both anchor on this constant
+// so the UI cap and the post-time validation never drift.
+export const LINKEDIN_MAX_GALLERY_IMAGES = 9;
+
 /**
  * The number of images an Instagram carousel WOULD compose to, without
  * composing. Mirrors carouselCompose.buildSlideSequenceCombined(): one
