@@ -490,7 +490,7 @@ async function getSession() {
 //   • not connected → routes the agent to the Stage 1 Instagram connect view
 //   • over the cap  → blocks with a "trim to post" message
 //   • confirm       → shows the caption (already includes hashtags) + count
-function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, contentId }) {
+function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, contentId, platform = "instagram" }) {
   const [connection, setConnection] = useState("checking"); // checking|connected|none|error
   const [phase, setPhase] = useState("idle");               // idle|confirm|working|done|error
   const [step, setStep] = useState("");                     // progress label while working
@@ -971,7 +971,7 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
             color: "#0a1628", fontFamily: "'Jost', sans-serif", fontWeight: 700, fontSize: 11,
             letterSpacing: "0.06em", textTransform: "uppercase",
           }}>{busy ? "Composing…" : "⤓ Download all slides"}</button>
-          <PostToInstagramButton slides={slides} caption={caption} stats={stats} footer={footer} brandTokens={bt} contentId={rowId} />
+          <PostToInstagramButton slides={slides} caption={caption} stats={stats} footer={footer} brandTokens={bt} contentId={rowId} platform={platform} />
         </div>
       </div>
 
