@@ -456,20 +456,16 @@ async function handler(req, res, depsOverride) {
     //        Never applied to Instagram. We still resolve the current URL only to
     //        return microsite_url in the response (UI "is there a microsite yet?").
     let micrositeUrl = null;
-    // FB + LinkedIn-on-FB-aliased prompts use the microsite-token-in-caption
-    // pattern. The IG walkthrough path (LinkedIn multi-photo gallery) has no
-    // microsite token in its caption — social-post.js assembles a short
-    // LinkedIn body (hook + live url + hashtags) from the stored fields at
-    // post time, so the IG-shaped caption never needs the token. We still
-    // resolve the current URL so the response surfaces microsite_url for
-    // the UI's "is there a microsite yet?" indicator.
-    const useFbCaptionToken = platform === "facebook" || (platform === "linkedin" && framework_name !== CAROUSEL_FRAMEWORK);
-    if (useFbCaptionToken) {
+    // All LinkedIn flows AND all Facebook flows use the microsite-token-in-
+    // caption pattern: appendMicrositeToken at generation time, then
+    // substituteMicrositeToken at post time so the LIVE url at post time is
+    // what publishes (microsites published/retired AFTER generation are
+    // reflected). LinkedIn multi-photo gallery posts the FULL caption above
+    // the gallery, same as the single-image LinkedIn / FB flow — so it
+    // needs the token in the caption too.
+    if (platform === "facebook" || platform === "linkedin") {
       micrositeUrl = await resolveMicrositeUrl(supabase, listing_id);
       parsed = { ...parsed, caption: appendMicrositeToken(parsed.caption) };
-    } else if (platform === "linkedin" && framework_name === CAROUSEL_FRAMEWORK) {
-      // Resolve only — don't mutate the caption.
-      micrositeUrl = await resolveMicrositeUrl(supabase, listing_id);
     }
 
     // Canonicalize hashtags so the caption-body block and the structured

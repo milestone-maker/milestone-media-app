@@ -400,7 +400,7 @@ function PostToLinkedInButton({ contentId, photos = [], slides = null, stats, fo
               background: "rgba(10,102,194,0.08)", border: `1px solid ${LI_BLUE}55`,
               borderRadius: 8, padding: "8px 12px", lineHeight: 1.5,
             }}>
-              Posting {slides.length} composed tile{slides.length === 1 ? "" : "s"} from the gallery above — edit tiles there before posting. The post body is your hook + the live microsite link + hashtags.
+              Posting {slides.length} composed tile{slides.length === 1 ? "" : "s"} from the gallery above — edit tiles there before posting. The post body is your full caption with the live microsite link substituted in, plus hashtags.
             </div>
           )}
 
@@ -444,7 +444,7 @@ function PostToLinkedInButton({ contentId, photos = [], slides = null, stats, fo
           </div>
           <div style={{ marginTop: 10, fontFamily: "'Jost', sans-serif", fontSize: 10.5, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>
             {galleryMode
-              ? `We'll compose and post all ${slides.length} gallery tile${slides.length === 1 ? "" : "s"}; the post body is your hook + the live microsite link + hashtags.`
+              ? `We'll compose and post all ${slides.length} gallery tile${slides.length === 1 ? "" : "s"}; the post body is your full caption with the live microsite link substituted in, plus hashtags.`
               : photoUrl
                 ? "We'll post this image with the caption and insert the live microsite link automatically."
                 : "We'll post the caption as a text-only update and insert the live microsite link automatically."}

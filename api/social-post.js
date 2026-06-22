@@ -375,32 +375,24 @@ async function handler(req, res, depsOverride) {
     }
 
     // ── 4c. Resolve the post caption ──
-    // FB + LinkedIn (single-image / text-only): substitute the microsite
-    // token with the LIVE url (or drop the line). IG: caption verbatim
-    // (no token in IG captions).
-    //
-    // LinkedIn MULTI-PHOTO (the new combined-tile gallery flow, identified
-    // by content.slides being a non-empty array) follows a different rule:
-    // the long IG-style caption is NOT the LinkedIn body. Each tile carries
-    // its own caption baked onto the image, so the LinkedIn post text above
-    // the gallery is a SHORT body — hook + live microsite link + hashtags —
-    // assembled here from the stored hook_line + hashtags + the listing's
-    // current microsite URL. The single-image LinkedIn path stays on the
-    // legacy caption-with-token substitution.
+    // FB + LinkedIn (every variant — text-only, single-image, AND multi-photo
+    // gallery): substitute the microsite token in the FULL stored caption
+    // with the LIVE url (or drop the token's line), then for LinkedIn
+    // multi-photo append the hashtags so the LinkedIn post body matches
+    // what the Result panel shows. On LinkedIn the written caption IS the
+    // post; the gallery tiles carry their per-tile baked captions in
+    // addition. IG keeps its caption verbatim (no token in IG captions).
     let text = typeof content.caption === "string" ? content.caption : "";
     const isLinkedInMultiPhoto = isLinkedIn && Array.isArray(content.slides) && content.slides.length > 0;
-    if (isLinkedInMultiPhoto) {
-      const liveUrl = await resolveMicrositeUrl(supabase, content.listing_id);
-      const parts = [];
-      const hook = typeof content.hook_line === "string" ? content.hook_line.trim() : "";
-      if (hook) parts.push(hook);
-      if (liveUrl) parts.push(liveUrl);
-      const tags = Array.isArray(content.hashtags) ? content.hashtags.filter((t) => typeof t === "string" && t.trim()) : [];
-      if (tags.length) parts.push(tags.join(" "));
-      text = parts.join("\n\n");
-    } else if (isFacebook || isLinkedIn) {
+    if (isFacebook || isLinkedIn) {
       const liveUrl = await resolveMicrositeUrl(supabase, content.listing_id);
       text = substituteMicrositeToken(text, liveUrl);
+      if (isLinkedInMultiPhoto) {
+        const tags = Array.isArray(content.hashtags)
+          ? content.hashtags.filter((t) => typeof t === "string" && t.trim())
+          : [];
+        if (tags.length) text = `${text}\n\n${tags.join(" ")}`;
+      }
     }
 
     // ── 4d. Open a tracking row (pending) for this attempt ──
