@@ -218,20 +218,24 @@ async function handler(req, res, depsOverride) {
             || (matchByUser && matchByUser.id)
             || (matchByName && matchByName.id)
             || null;
-          // Diagnostic so we can confirm in Vercel logs how bundle returns
-          // LinkedIn channels + which is active. Counts + ids only, no PII.
-          try {
-            console.log("[social-status][LINKEDIN_DIAG]", JSON.stringify({
-              agent: authUser.id.slice(0, 8),
-              channelCount: queriedChannels.length,
-              channelIds: queriedChannels.map((c) => c?.id).filter(Boolean),
-              hasNames: queriedChannels.map((c) => !!(c?.name || c?.username)).filter(Boolean).length,
-              accountExternalId: externalId,
-              accountUsername:   acctUser,
-              accountDisplayName: acctName,
-              activeChannelId:    queriedActiveChannelId,
-            }));
-          } catch { /* never let a log throw */ }
+          // Opt-in diagnostic. Off by default — every status call fires this
+          // on every page load, which is noisy in prod. Set LINKEDIN_DIAG=1
+          // in the Vercel env to re-enable without a redeploy when debugging
+          // a LinkedIn channel-detection issue. Counts + ids only, no PII.
+          if (process.env.LINKEDIN_DIAG === "1") {
+            try {
+              console.log("[social-status][LINKEDIN_DIAG]", JSON.stringify({
+                agent: authUser.id.slice(0, 8),
+                channelCount: queriedChannels.length,
+                channelIds: queriedChannels.map((c) => c?.id).filter(Boolean),
+                hasNames: queriedChannels.map((c) => !!(c?.name || c?.username)).filter(Boolean).length,
+                accountExternalId: externalId,
+                accountUsername:   acctUser,
+                accountDisplayName: acctName,
+                activeChannelId:    queriedActiveChannelId,
+              }));
+            } catch { /* never let a log throw */ }
+          }
         }
 
         queriedSummary = { platform: queried, status: "connected", username, connected_at: nowIso };
