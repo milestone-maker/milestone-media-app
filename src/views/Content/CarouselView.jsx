@@ -125,7 +125,7 @@ function CardTile({ item, bt }) {
 const STATEMENT_MAX = 200;   // hard cap to prevent pathological overflow
 const STATEMENT_WARN = 140;  // soft warning — past this, lines may shrink/overflow
 
-function SlidePreviewModal({ seq, index, bt, slides, photoPool, onClose, onPrev, onNext, onUpdateStatement, onSwapPhoto, onRetryStatement, canPersist }) {
+function SlidePreviewModal({ seq, index, bt, slides, photoPool, onClose, onPrev, onNext, onUpdateStatement, onSwapPhoto, onRetryStatement, onDeleteSlide, canPersist }) {
   const containerRef = useRef(null);
   const logoRef  = useRef({ loaded: false, img: null }); // logo loaded once, cached
   const fontsRef = useRef(false);                         // ensureFonts run once
@@ -389,8 +389,8 @@ function SlidePreviewModal({ seq, index, bt, slides, photoPool, onClose, onPrev,
         </div>
       )}
 
-      {/* Photo-swap controls (photo slides only) */}
-      {isPhoto && (
+      {/* Photo-swap controls (photo slides + combined slides — both own a photo) */}
+      {(isPhoto || isCombined) && (
         <div onClick={(e) => e.stopPropagation()} style={{ width: "min(95vw, 520px)" }}>
           {regenState === "regenerating" ? (
             <div style={{
@@ -451,6 +451,23 @@ function SlidePreviewModal({ seq, index, bt, slides, photoPool, onClose, onPrev,
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Delete affordance — interior combined slides only (kind === "room").
+          Hook (first) and CTA (last) cannot be deleted. The parent closes the
+          lightbox when delete succeeds. */}
+      {isCombined && item.kind === "room" && typeof onDeleteSlide === "function" && (
+        <div onClick={(e) => e.stopPropagation()} style={{ width: "min(95vw, 520px)" }}>
+          <button
+            onClick={() => onDeleteSlide(item.sourceIndex)}
+            title="Delete this slide from the carousel"
+            style={{
+              background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.32)",
+              color: "#f87171", borderRadius: 8, padding: "8px 14px", cursor: "pointer",
+              fontFamily: "'Jost', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: "0.04em",
+            }}
+          >🗑 Delete slide</button>
         </div>
       )}
     </div>
@@ -835,7 +852,7 @@ function PostToInstagramButton({ slides, caption, stats, footer, brandTokens, co
   );
 }
 
-function CarouselView({ slides, caption, hashtags, address, stats, footer, brandTokens, rowId, onUpdateStatement, photoPool, onSwapPhoto, onRetryStatement, platform = "instagram" }) {
+function CarouselView({ slides, caption, hashtags, address, stats, footer, brandTokens, rowId, onUpdateStatement, photoPool, onSwapPhoto, onRetryStatement, onDeleteSlide, onAddSlide, platform = "instagram" }) {
   // Merge over the Milestone defaults, but IGNORE null/undefined token values so
   // an agent who hasn't set a given color/font falls back to the default rather
   // than overriding it with null (a plain spread copies the nullish value and
@@ -879,6 +896,38 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
     setBusy(false);
   };
 
+  // ── Add-photo state (combined IG only) ───────────────────────────────
+  // Reuses the SAME candidate-picker UX the lightbox uses for Replace photo:
+  // same photoPool, same "exclude photos already in this carousel" filter,
+  // same regen-on-pick flow. Hosted at the CarouselView level so an agent can
+  // add a NEW interior slide rather than swap an existing one.
+  const [addOpen, setAddOpen] = useState(false);
+  const [addBusy, setAddBusy] = useState(false);
+  const [addErr, setAddErr] = useState("");
+  const slidesArr = Array.isArray(slides) ? slides : [];
+  const liveCount = slidesArr.length;
+  const capLimit  = useCombined ? 10 : 20; // mirrors INSTAGRAM_MAX_CAROUSEL_IMAGES; legacy left at 20 for unaffected flows
+  const atCap     = useCombined && liveCount >= capLimit;
+  const overCap   = useCombined && liveCount > capLimit;
+  const addCandidates = useCombined
+    ? (() => {
+        const used = new Set(slidesArr.map((s) => s && s.photo_url).filter(Boolean));
+        return (Array.isArray(photoPool) ? photoPool : []).filter((c) => c.photo_url && !used.has(c.photo_url));
+      })()
+    : [];
+  const onPickAdd = async (candidate) => {
+    if (typeof onAddSlide !== "function") return;
+    setAddErr(""); setAddBusy(true);
+    const res = (await onAddSlide(rowId, candidate)) || {};
+    setAddBusy(false);
+    if (res.ok) { setAddOpen(false); return; }
+    if (res.reason === "atCap") {
+      setAddErr(`Instagram allows up to ${res.cap} images; this carousel already has ${res.count}. Delete a slide first.`);
+      return;
+    }
+    setAddErr("Couldn't add that slide. Please try again.");
+  };
+
   const labelSt = {
     fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)",
     letterSpacing: "0.12em", textTransform: "uppercase", display: "block",
@@ -888,9 +937,32 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
     <div style={{ marginTop: 6 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
         <label style={{ ...labelSt, marginBottom: 0 }}>
-          Carousel · {seq.length} slides <span style={{ color: "rgba(255,255,255,0.25)" }}>({cardCount} cards · {photoCount} photos)</span>
+          Carousel · {seq.length} slides {useCombined
+            ? <span style={{ color: overCap ? "#f87171" : atCap ? "#e8c97a" : "rgba(255,255,255,0.25)" }}>
+                ({liveCount} / {capLimit} images)
+              </span>
+            : <span style={{ color: "rgba(255,255,255,0.25)" }}>({cardCount} cards · {photoCount} photos)</span>}
         </label>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {useCombined && typeof onAddSlide === "function" && (
+            <button
+              onClick={() => { setAddErr(""); setAddOpen(true); }}
+              disabled={atCap || addCandidates.length === 0}
+              title={atCap
+                ? `At the ${capLimit}-image Instagram cap — delete a slide first`
+                : addCandidates.length === 0
+                  ? "No other usable photos for this listing — every analyzed photo is already in the carousel."
+                  : "Add a new interior slide"}
+              style={{
+                padding: "8px 12px", borderRadius: 8,
+                border: "1px solid rgba(201,168,76,0.4)",
+                background: "rgba(201,168,76,0.08)", color: "#e8c97a",
+                cursor: (atCap || addCandidates.length === 0) ? "not-allowed" : "pointer",
+                opacity: (atCap || addCandidates.length === 0) ? 0.55 : 1,
+                fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 600, letterSpacing: "0.04em",
+              }}
+            >＋ Add photo</button>
+          )}
           {caption && <MiniCopy text={caption} label="Copy caption" />}
           {Array.isArray(hashtags) && hashtags.length > 0 && <MiniCopy text={hashtags.join(" ")} label="Copy hashtags" />}
           <button onClick={onDownload} disabled={busy} style={{
@@ -916,6 +988,15 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
           background: "rgba(234,179,8,0.1)", border: "1px solid rgba(234,179,8,0.35)", borderRadius: 8, padding: "10px 12px",
         }}>
           ⚠ {staleCount} {staleCount === 1 ? "slide has" : "slides have"} a swapped photo whose caption hasn’t been regenerated. Open the slide to retry or edit the text before downloading.
+        </div>
+      )}
+
+      {overCap && (
+        <div style={{
+          marginBottom: 12, fontFamily: "'Jost', sans-serif", fontSize: 12, color: "#f87171",
+          background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, padding: "10px 12px",
+        }}>
+          ⚠ This carousel has {liveCount} images — Instagram allows up to {capLimit}. Delete slides to bring it under the cap before posting.
         </div>
       )}
 
@@ -947,6 +1028,25 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
                   position: "absolute", top: 5, right: 5, background: "rgba(234,179,8,0.92)", color: "#1a1505",
                   borderRadius: 4, padding: "1px 5px", fontFamily: "'Jost', sans-serif", fontSize: 9, fontWeight: 700,
                 }}>⚠ caption</span>
+              )}
+              {/* Delete affordance — interior combined slides only (kind === "room").
+                  Hook (first) and CTA (last) are intentionally non-deletable.
+                  stopPropagation so the click doesn't also open the lightbox. */}
+              {item.type === "combined" && item.kind === "room" && typeof onDeleteSlide === "function" && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteSlide(rowId, item.sourceIndex);
+                  }}
+                  title="Delete this slide"
+                  style={{
+                    position: "absolute", bottom: 6, right: 6,
+                    width: 22, height: 22, borderRadius: 11,
+                    background: "rgba(8,12,20,0.85)", border: "1px solid rgba(255,255,255,0.25)",
+                    color: "#f87171", cursor: "pointer", lineHeight: "20px", padding: 0,
+                    fontFamily: "'Jost', sans-serif", fontSize: 14, fontWeight: 700,
+                  }}
+                >×</button>
               )}
             </div>
             <div style={{
@@ -990,7 +1090,79 @@ function CarouselView({ slides, caption, hashtags, address, stats, footer, brand
               ? (sourceIndex) => onRetryStatement(rowId, sourceIndex)
               : undefined
           }
+          onDeleteSlide={
+            typeof onDeleteSlide === "function"
+              ? async (sourceIndex) => {
+                  const res = (await onDeleteSlide(rowId, sourceIndex)) || {};
+                  if (res.ok) setLightboxIndex(null); // close the lightbox; the slide is gone
+                  return res;
+                }
+              : undefined
+          }
         />
+      )}
+
+      {/* Add-photo modal — same candidate-picker UX as Replace photo. */}
+      {addOpen && (
+        <div onClick={() => !addBusy && setAddOpen(false)} style={{
+          position: "fixed", inset: 0, background: "rgba(4,8,16,0.78)", zIndex: 1000,
+          display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+        }}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            width: "min(95vw, 560px)", background: "#0e1220", border: "1px solid rgba(201,168,76,0.2)",
+            borderRadius: 14, padding: 18, fontFamily: "'Jost', sans-serif", color: "#F0EDE8",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, fontWeight: 600, color: "#F5ECD7" }}>
+                Add a slide
+              </div>
+              <button onClick={() => !addBusy && setAddOpen(false)} style={{
+                background: "none", border: "none", color: "rgba(255,255,255,0.5)", cursor: "pointer", fontSize: 22, lineHeight: 1, padding: 0,
+              }}>×</button>
+            </div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", lineHeight: 1.5, marginBottom: 12 }}>
+              Picking a photo inserts a new interior slide and writes a caption for it on its own — written for that room in isolation, so it won’t reference the rest of the carousel’s narrative arc. The slide lands between your existing room slides and the CTA.
+            </div>
+            {addErr && (
+              <div style={{
+                marginBottom: 10, fontSize: 12, color: "#f87171",
+                background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", borderRadius: 8, padding: "8px 10px",
+              }}>{addErr}</div>
+            )}
+            {addBusy ? (
+              <div style={{
+                fontSize: 12, color: "#e8c97a",
+                background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.25)",
+                borderRadius: 8, padding: "10px 14px",
+              }}>⟳ Adding slide and generating its caption…</div>
+            ) : addCandidates.length === 0 ? (
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", padding: "8px 2px" }}>
+                No other usable photos for this listing — every analyzed photo is already in the carousel.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, maxHeight: "55vh", overflowY: "auto" }}>
+                {addCandidates.map((c) => (
+                  <button key={c.id || c.photo_url} onClick={() => onPickAdd(c)} title="Add this photo" style={{
+                    width: 100, padding: 0, border: "1px solid rgba(255,255,255,0.14)",
+                    borderRadius: 8, background: "rgba(255,255,255,0.04)", cursor: "pointer", overflow: "hidden", textAlign: "left",
+                  }}>
+                    <img src={c.photo_url} alt="" loading="lazy" crossOrigin="anonymous" style={{ width: "100%", height: 76, objectFit: "cover", display: "block" }} />
+                    <div style={{ padding: "4px 5px 5px" }}>
+                      <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 8.5, color: "#c9a84c", letterSpacing: "0.06em", textTransform: "uppercase", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {HUMAN_SUBJECT[c.category] || c.category}
+                      </div>
+                      {Array.isArray(c.features) && c.features.length > 0 && (
+                        <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 8, color: "rgba(255,255,255,0.45)", lineHeight: 1.3, marginTop: 2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                          {c.features.slice(0, 3).join(", ")}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

@@ -25,6 +25,7 @@ import CarouselView from "./CarouselView";
 import FacebookAlbumEditor from "./FacebookAlbumEditor";
 import UpcomingPosts from "./UpcomingPosts";
 import { includable } from "../../../api/_content/selectCarouselPhotos.js";
+import { INSTAGRAM_MAX_CAROUSEL_IMAGES } from "../../../shared/carouselPosting.js";
 
 // Friendly label → exact framework_name slug the endpoint expects, keyed by
 // platform. Instagram keeps its 7 listing frameworks; Facebook (Stage 2) adds
@@ -525,6 +526,77 @@ function ContentView({ onOpenSubscriptions } = {}) {
     const s = loc.baseSlides[sourceIndex];
     if (!s) return { ok: false };
     return runRegen(rowId, sourceIndex, { category: s.category, features: Array.isArray(s._features) ? s._features : [] }, loc.target, loc.baseSlides);
+  };
+
+  // Delete an INTERIOR source slide (never the hook/cover or the final/CTA).
+  // Removes the slide from the array, persists, and the renderer + post path
+  // pick up the change automatically (they read straight from slides[]). No
+  // Storage orphans: uploads happen at post time from the current slides[],
+  // so a deleted slide simply never gets uploaded.
+  const deleteSlide = async (rowId, sourceIndex) => {
+    setSaveError("");
+    const loc = locateSlides(rowId);
+    if (!loc) return { ok: false };
+    const target = loc.baseSlides[sourceIndex];
+    if (!target) return { ok: false };
+    const isHook  = target.is_cover || target.subject === "cover";
+    const isFinal = target.subject === "final";
+    if (isHook || isFinal) return { ok: false, reason: "protected" };
+
+    const next = loc.baseSlides.filter((_, i) => i !== sourceIndex);
+    writeSlides(loc.target, rowId, next); // optimistic
+    if (!rowId) return { ok: true };      // local-only — nothing to persist
+    const { error } = await persistSlides(rowId, next);
+    if (error) {
+      console.error("[content] delete persist failed:", error);
+      writeSlides(loc.target, rowId, loc.baseSlides); // revert
+      setSaveError("Couldn't delete that slide. Please try again.");
+      return { ok: false };
+    }
+    return { ok: true };
+  };
+
+  // Add a NEW interior slide using the picked photo, then regenerate its
+  // caption via the same path swap uses. Insertion point = right before the
+  // final/CTA slide (so the new slide is always interior). Enforces the IG
+  // 10-image cap defensively; the picker UI itself also gates this.
+  const addSlide = async (rowId, candidate) => {
+    setSaveError("");
+    const loc = locateSlides(rowId);
+    if (!loc) return { ok: false };
+    if (loc.baseSlides.length >= INSTAGRAM_MAX_CAROUSEL_IMAGES) {
+      return { ok: false, reason: "atCap", count: loc.baseSlides.length, cap: INSTAGRAM_MAX_CAROUSEL_IMAGES };
+    }
+    if (!candidate || !candidate.photo_url) return { ok: false };
+
+    const finalIdx = loc.baseSlides.findIndex((s) => s && s.subject === "final");
+    const insertAt = finalIdx === -1 ? loc.baseSlides.length : finalIdx;
+    const newSlide = {
+      subject:    candidate.category || "added",
+      statement:  "",
+      text:       "",
+      photo_url:  candidate.photo_url,
+      category:   candidate.category,
+      _features:  Array.isArray(candidate.features) ? candidate.features : [],
+      _needsCaption: true, // surfaces the "caption needs updating" marker until regen lands
+    };
+    const next = [
+      ...loc.baseSlides.slice(0, insertAt),
+      newSlide,
+      ...loc.baseSlides.slice(insertAt),
+    ];
+    writeSlides(loc.target, rowId, next); // optimistic insert
+    if (rowId) {
+      const { error } = await persistSlides(rowId, next);
+      if (error) {
+        console.error("[content] add persist failed:", error);
+        writeSlides(loc.target, rowId, loc.baseSlides); // revert
+        setSaveError("Couldn't add that slide. Please try again.");
+        return { ok: false };
+      }
+    }
+    // Same regen path swap uses — fills in the caption and clears the stale flag.
+    return runRegen(rowId, insertAt, { category: candidate.category, features: candidate.features }, loc.target, next);
   };
 
   useEffect(() => {
@@ -1030,6 +1102,8 @@ function ContentView({ onOpenSubscriptions } = {}) {
                 photoPool={photoPool}
                 onSwapPhoto={swapSlidePhoto}
                 onRetryStatement={retrySlideStatement}
+                onDeleteSlide={deleteSlide}
+                onAddSlide={addSlide}
                 platform={result.platform || platform}
                 brandTokens={{
                   bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
@@ -1165,6 +1239,8 @@ function ContentView({ onOpenSubscriptions } = {}) {
                             photoPool={photoPool}
                             onSwapPhoto={swapSlidePhoto}
                             onRetryStatement={retrySlideStatement}
+                            onDeleteSlide={deleteSlide}
+                            onAddSlide={addSlide}
                             platform={h.platform || "instagram"}
                             brandTokens={{
                               bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
