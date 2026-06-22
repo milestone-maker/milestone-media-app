@@ -61,6 +61,21 @@ const PLATFORMS = [
       "When you connect, sign in with Facebook, choose the Page you want to publish to, and approve all requested permissions. Posting to a personal profile isn't supported.",
     ack: "I understand Facebook posting publishes to a Facebook Page I manage, and I'll connect the account that manages it.",
   },
+  {
+    key: "linkedin",
+    name: "LinkedIn",
+    emoji: "💼",
+    blurb: "Connect LinkedIn so you can publish your generated posts to your personal profile or an admined company page from Milestone.",
+    requirementTitle: "Before connecting your LinkedIn",
+    requirementIntro: "LinkedIn posting publishes to either your personal profile OR a company page you manage. To connect you need:",
+    requirements: [
+      <>A <strong>LinkedIn account</strong> (personal profile is required)</>,
+      <>Optionally, <strong>admin access to one or more LinkedIn Company Pages</strong> if you want to post as a page</>,
+    ],
+    requirementNote:
+      "When you connect, sign in with LinkedIn and approve all requested permissions. You'll pick which target (your profile or a page) at post time; that choice becomes the sticky default and you can change it any time.",
+    ack: "I understand LinkedIn posts publish to my personal profile or to a Company Page I administer, and I'll pick the target at post time.",
+  },
 ];
 
 async function authedFetch(path, { method = "GET", body } = {}) {

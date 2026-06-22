@@ -33,6 +33,7 @@ export const PLATFORM_TO_BUNDLE_TYPE = {
   instagram: "INSTAGRAM",
   facebook:  "FACEBOOK",
   threads:   "THREADS",
+  linkedin:  "LINKEDIN",
 };
 
 /**
@@ -184,6 +185,40 @@ export async function getSocialAccountByType({ teamId, type = "INSTAGRAM", fetch
   }
 }
 
+/**
+ * Set the active channel on a social account that exposes multiple posting
+ * targets under ONE connection (LinkedIn personal profile + admined company
+ * pages; also relevant for FB Pages, IG with multiple Business accounts, and
+ * YouTube channels). bundle resolves the per-channel target on the next /post/
+ * from whatever channel is currently active — so for LinkedIn we call this
+ * immediately before createPost when the agent picks a target.
+ *
+ * Endpoint: POST /api/v1/social-account/set-channel
+ * Body:    { type, teamId, channelId }
+ * bundle's swagger description (verbatim): "Needed only for some social account
+ * types - Youtube, Instagram, Facebook and Linkedin."
+ *
+ * `type` is a bundle account type (e.g. "LINKEDIN") — callers pass either that
+ * directly or an app slug via platformToBundleType. For app-slug ergonomics
+ * symmetric with createPost, this helper accepts a `platform` slug as an
+ * alternative; it translates internally so call sites stay slug-friendly.
+ *
+ * @param {{ teamId: string, channelId: string, type?: string, platform?: string, fetchImpl?: typeof fetch, apiKey?: string }} args
+ * @returns {Promise<any>} bundle's updated social-account response
+ */
+export async function setChannel({ teamId, channelId, type, platform, fetchImpl, apiKey } = {}) {
+  if (!teamId)    throw new BundleApiError("teamId is required for set-channel", { status: 0 });
+  if (!channelId) throw new BundleApiError("channelId is required for set-channel", { status: 0 });
+  const bundleType = type || (platform ? platformToBundleType(platform) : null);
+  if (!bundleType) throw new BundleApiError("type or platform is required for set-channel", { status: 0 });
+  return bundleFetch("/social-account/set-channel", {
+    method: "POST",
+    body: { type: bundleType, teamId, channelId },
+    fetchImpl,
+    apiKey,
+  });
+}
+
 // ── Posting (Stage 2) ────────────────────────────────────────────────
 
 /**
@@ -225,12 +260,13 @@ export async function createUploadFromUrl({ teamId, url, fetchImpl, apiKey } = {
  */
 export async function createPost({ teamId, title, postDate, status = "SCHEDULED", text, uploadIds, platform = "instagram", fetchImpl, apiKey } = {}) {
   if (!teamId) throw new BundleApiError("teamId is required for create-post", { status: 0 });
-  const bundleType = platformToBundleType(platform); // INSTAGRAM / FACEBOOK / THREADS
+  const bundleType = platformToBundleType(platform); // INSTAGRAM / FACEBOOK / THREADS / LINKEDIN
   const isFacebook = bundleType === "FACEBOOK";
-  // Instagram REQUIRES media (≥1 upload). Facebook does not (text-only allowed),
-  // so the empty-uploadIds guard is relaxed for FB — defensive only; our FB flow
-  // always sends a photo album.
-  if (!Array.isArray(uploadIds) || (uploadIds.length === 0 && !isFacebook)) {
+  const isLinkedIn = bundleType === "LINKEDIN";
+  // Instagram REQUIRES media (≥1 upload). Facebook + LinkedIn allow text-only
+  // posts (FB album path always sends media in practice; LinkedIn MVP supports
+  // a single image OR pure text).
+  if (!Array.isArray(uploadIds) || (uploadIds.length === 0 && !isFacebook && !isLinkedIn)) {
     throw new BundleApiError("uploadIds must be a non-empty array for create-post", { status: 0 });
   }
   const rawUploadIds = Array.isArray(uploadIds) ? uploadIds : [];

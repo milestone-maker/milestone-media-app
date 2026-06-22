@@ -296,10 +296,18 @@ async function handler(req, res, depsOverride) {
     if (!framework_name)   return res.status(400).json({ error: "framework_name is required" });
 
     // ── 3. Look up prompt module ──
-    const promptMod = findPrompt(platform, content_type, framework_name);
+    // LinkedIn STOPGAP (no LinkedIn-native prompts shipped yet): we route the
+    // prompt lookup to the Facebook prompt set, because FB frameworks already
+    // produce the exact shape LinkedIn needs (single-caption text + microsite
+    // token + hashtags, no slides). The persisted generated_content row still
+    // stores platform='linkedin' so the post path, scheduling, and analytics
+    // treat it as LinkedIn. Real LinkedIn-native frameworks will live at
+    // api/_content/prompts/linkedin/ and drop this alias.
+    const promptPlatform = platform === "linkedin" ? "facebook" : platform;
+    const promptMod = findPrompt(promptPlatform, content_type, framework_name);
     if (!promptMod) {
       return res.status(400).json({
-        error: `no prompt registered for ${platform}/${content_type}/${framework_name}`,
+        error: `no prompt registered for ${promptPlatform}/${content_type}/${framework_name}`,
       });
     }
 
@@ -383,7 +391,9 @@ async function handler(req, res, depsOverride) {
     //        AFTER its HOOK ORIGINALITY / BANNED OPENERS rules, so the new hook
     //        diverges from what this agent has already used. Never for Instagram;
     //        no-ops when the agent has no FB history yet.
-    if (platform === "facebook") {
+    // FB + LinkedIn (stopgap) share the same prompt path → same anti-repetition
+    // signal applies. Skipped for IG.
+    if (platform === "facebook" || platform === "linkedin") {
       const recentHooks = await resolveRecentHooks(supabase, authUser.id);
       built.systemPrompt = appendHookAvoidanceBlock(built.systemPrompt, recentHooks);
     }
@@ -435,7 +445,9 @@ async function handler(req, res, depsOverride) {
     //        Never applied to Instagram. We still resolve the current URL only to
     //        return microsite_url in the response (UI "is there a microsite yet?").
     let micrositeUrl = null;
-    if (platform === "facebook") {
+    // LinkedIn (stopgap) reuses the FB caption pattern → same microsite-token
+    // insertion. The token is resolved to the live URL at post time, same as FB.
+    if (platform === "facebook" || platform === "linkedin") {
       micrositeUrl = await resolveMicrositeUrl(supabase, listing_id);
       parsed = { ...parsed, caption: appendMicrositeToken(parsed.caption) };
     }
@@ -536,10 +548,19 @@ async function handler(req, res, depsOverride) {
     // Additive response fields: saved_id (when persisted) + microsite_url for
     // Facebook (the resolved link, or null when none — the UI uses null to show
     // the "link inserts at post time" note). Never added for Instagram.
+    // OVERRIDE the model-emitted platform with the REQUESTED platform. Needed
+    // for the LinkedIn stopgap: the FB-aliased prompt forces the model to emit
+    // "platform": "facebook" in its JSON output (per fbOutputFormatBlock), but
+    // the caller asked for "linkedin" and the persisted row stores "linkedin"
+    // — the response must agree so the result-panel render gates pick the
+    // LinkedIn UI, not the FB album editor. Same defensive override is
+    // applied to content_type for symmetry.
     return res.status(200).json({
       ...finalParsed,
+      platform,                          // ← authoritative; ignores model echo
+      content_type,                      // ← same reason
       ...(savedId ? { saved_id: savedId } : {}),
-      ...(platform === "facebook" ? { microsite_url: micrositeUrl } : {}),
+      ...(platform === "facebook" || platform === "linkedin" ? { microsite_url: micrositeUrl } : {}),
     });
   } catch (err) {
     console.error("[content-generate] fatal:", err);

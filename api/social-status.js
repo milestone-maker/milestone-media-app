@@ -33,7 +33,7 @@ import {
 } from "./_lib/bundle.js";
 import { withSentry } from "./_lib/sentry.js";
 
-const ALLOWED_PLATFORMS = ["instagram", "facebook", "threads"];
+const ALLOWED_PLATFORMS = ["instagram", "facebook", "threads", "linkedin"];
 const DEFAULT_PLATFORM = "instagram";
 
 const SUPABASE_URL              = process.env.SUPABASE_URL;
@@ -124,9 +124,10 @@ async function handler(req, res, depsOverride) {
     }
 
     // ── 2. Load all of the agent's per-platform rows ──
+    // bundle_channel_id is meaningful only for the linkedin row (sticky target).
     const { data: rows, error: rowsErr } = await supabase
       .from("agent_platform_connections")
-      .select("platform, bundle_team_id, connection_status, connected_username, connected_at")
+      .select("platform, bundle_team_id, connection_status, connected_username, connected_at, bundle_channel_id")
       .eq("agent_id", authUser.id);
     if (rowsErr) {
       console.error("[social-status] connections lookup error:", rowsErr);
@@ -139,6 +140,15 @@ async function handler(req, res, depsOverride) {
     // The fresh summary for the queried platform — starts from stored state and
     // is overwritten below if bundle reports a (new) connected account.
     let queriedSummary = summarize(queried, queriedRow);
+    // LinkedIn extras: the channels[] from the live bundle account + the agent's
+    // sticky channel id. Only attached for platform=linkedin (kept off other
+    // platforms to keep the response shape stable for IG/FB).
+    let queriedChannels = null;
+    let queriedChannelId = queried === "linkedin" ? (queriedRow?.bundle_channel_id || null) : null;
+    // The CURRENTLY-BOUND LinkedIn channel id (which channel bundle will
+    // actually post to). Computed below from bundle's account response.
+    // Null when not connected, not LinkedIn, or no match found.
+    let queriedActiveChannelId = null;
 
     // ── 3. Live-check the queried platform against bundle (if it has a team) ──
     if (queriedRow?.bundle_team_id) {
@@ -184,6 +194,50 @@ async function handler(req, res, depsOverride) {
           if (legacyErr) console.error("[social-status] legacy mirror update error (continuing):", legacyErr);
         }
 
+        // LinkedIn extras: surface bundle's channels[] so the UI's "Post as"
+        // picker has the personal-profile + admined-pages list without a
+        // second call. Keep ALL channels — admin filtering is deferred; if
+        // the agent picks a target they cannot post to, bundle/LinkedIn
+        // rejects it and we surface that error.
+        if (queried === "linkedin") {
+          queriedChannels = Array.isArray(account.channels) ? account.channels : [];
+          // Detect which channel is CURRENTLY ACTIVE (bound). bundle.social's
+          // social-account top-level fields (externalId / username /
+          // displayName) reflect the active channel; we match them against
+          // the channels[] entries to find the one bound right now. Used by
+          // the UI to preselect the active row in the "Post as" picker and
+          // gray the others ("reconnect to switch"). Falls back to null if
+          // no match — UI then preselects the first channel.
+          const externalId = account.externalId || null;
+          const acctUser   = account.username || null;
+          const acctName   = account.displayName || null;
+          const matchByExt  = externalId && queriedChannels.find((c) => c?.id === externalId);
+          const matchByUser = !matchByExt && acctUser && queriedChannels.find((c) => c?.username === acctUser);
+          const matchByName = !matchByExt && !matchByUser && acctName && queriedChannels.find((c) => c?.name === acctName);
+          queriedActiveChannelId = (matchByExt && matchByExt.id)
+            || (matchByUser && matchByUser.id)
+            || (matchByName && matchByName.id)
+            || null;
+          // Opt-in diagnostic. Off by default — every status call fires this
+          // on every page load, which is noisy in prod. Set LINKEDIN_DIAG=1
+          // in the Vercel env to re-enable without a redeploy when debugging
+          // a LinkedIn channel-detection issue. Counts + ids only, no PII.
+          if (process.env.LINKEDIN_DIAG === "1") {
+            try {
+              console.log("[social-status][LINKEDIN_DIAG]", JSON.stringify({
+                agent: authUser.id.slice(0, 8),
+                channelCount: queriedChannels.length,
+                channelIds: queriedChannels.map((c) => c?.id).filter(Boolean),
+                hasNames: queriedChannels.map((c) => !!(c?.name || c?.username)).filter(Boolean).length,
+                accountExternalId: externalId,
+                accountUsername:   acctUser,
+                accountDisplayName: acctName,
+                activeChannelId:    queriedActiveChannelId,
+              }));
+            } catch { /* never let a log throw */ }
+          }
+        }
+
         queriedSummary = { platform: queried, status: "connected", username, connected_at: nowIso };
       } else if (account === null) {
         // bundle definitively reports no account yet → team exists but pending.
@@ -202,12 +256,22 @@ async function handler(req, res, depsOverride) {
       p === queried ? queriedSummary : summarize(p, byPlatform.get(p) || null)
     );
 
-    return res.status(200).json({
+    // LinkedIn-only extras on the response root: channels[] from the live
+    // bundle account (or null if not connected / lookup failed) + the sticky
+    // bundle_channel_id from the stored row, so the "Post as" picker can
+    // render targets and preselect the agent's default without a 2nd call.
+    const response = {
       status:   queriedSummary.status,
       username: queriedSummary.username,
       platform: queried,
       platforms,
-    });
+    };
+    if (queried === "linkedin") {
+      response.channels = queriedChannels;                   // null when not connected / unknown
+      response.channelId = queriedChannelId;                 // sticky default (last picked)
+      response.activeChannelId = queriedActiveChannelId;     // channel bundle will actually post to
+    }
+    return res.status(200).json(response);
   } catch (err) {
     console.error("[social-status] fatal:", err);
     return res.status(500).json({ error: err.message || "internal error" });
