@@ -101,7 +101,14 @@ function LinkedInGalleryEditor({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
         <label style={{ ...labelSt, marginBottom: 0 }}>
           LinkedIn gallery · {seq.length} slides{" "}
-          <span style={{ color: overCap ? "#f87171" : atCap ? "#e8c97a" : "rgba(255,255,255,0.25)" }}>
+          {/* Count badge — neutral under the cap, emphasized (gold) only at
+              or above the cap. The over-cap banner below stays red because
+              that's an actionable warning, but the inline count shouldn't
+              look like an error while there's still headroom (8/9, 7/9, …). */}
+          <span style={{
+            color: atCap ? "#e8c97a" : "rgba(255,255,255,0.45)",
+            fontWeight: atCap ? 600 : 400,
+          }}>
             ({liveCount} / {cap} images)
           </span>
         </label>

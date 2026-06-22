@@ -559,7 +559,11 @@ export async function composeCarousel({ slides, stats, footer, brandTokens, plat
   // without a logo) — strictly better than tainting the export.
   if (bt.logoUrl) { try { logoImg = await loadImage(bt.logoUrl, "anonymous"); } catch { logoImg = null; } }
 
-  const useCombined = platform === "instagram";
+  // Combined photo+caption tiles for BOTH Instagram (Walkthrough Carousel)
+  // and LinkedIn (Multi-photo gallery). Falling through to the legacy
+  // card+photo sequence for LinkedIn doubled the image count (16 emitted for
+  // 8 source slides) and was rejected by the server's LinkedIn 9-image cap.
+  const useCombined = platform === "instagram" || platform === "linkedin";
   const seq = useCombined
     ? buildSlideSequenceCombined(slides, { stats, footer })
     : buildSlideSequence(slides, { stats, footer });
