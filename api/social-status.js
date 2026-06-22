@@ -33,7 +33,7 @@ import {
 } from "./_lib/bundle.js";
 import { withSentry } from "./_lib/sentry.js";
 
-const ALLOWED_PLATFORMS = ["instagram", "facebook", "threads"];
+const ALLOWED_PLATFORMS = ["instagram", "facebook", "threads", "linkedin"];
 const DEFAULT_PLATFORM = "instagram";
 
 const SUPABASE_URL              = process.env.SUPABASE_URL;
@@ -124,9 +124,10 @@ async function handler(req, res, depsOverride) {
     }
 
     // ── 2. Load all of the agent's per-platform rows ──
+    // bundle_channel_id is meaningful only for the linkedin row (sticky target).
     const { data: rows, error: rowsErr } = await supabase
       .from("agent_platform_connections")
-      .select("platform, bundle_team_id, connection_status, connected_username, connected_at")
+      .select("platform, bundle_team_id, connection_status, connected_username, connected_at, bundle_channel_id")
       .eq("agent_id", authUser.id);
     if (rowsErr) {
       console.error("[social-status] connections lookup error:", rowsErr);
@@ -139,6 +140,11 @@ async function handler(req, res, depsOverride) {
     // The fresh summary for the queried platform — starts from stored state and
     // is overwritten below if bundle reports a (new) connected account.
     let queriedSummary = summarize(queried, queriedRow);
+    // LinkedIn extras: the channels[] from the live bundle account + the agent's
+    // sticky channel id. Only attached for platform=linkedin (kept off other
+    // platforms to keep the response shape stable for IG/FB).
+    let queriedChannels = null;
+    let queriedChannelId = queried === "linkedin" ? (queriedRow?.bundle_channel_id || null) : null;
 
     // ── 3. Live-check the queried platform against bundle (if it has a team) ──
     if (queriedRow?.bundle_team_id) {
@@ -184,6 +190,15 @@ async function handler(req, res, depsOverride) {
           if (legacyErr) console.error("[social-status] legacy mirror update error (continuing):", legacyErr);
         }
 
+        // LinkedIn extras: surface bundle's channels[] so the UI's "Post as"
+        // picker has the personal-profile + admined-pages list without a
+        // second call. Keep ALL channels — admin filtering is deferred; if
+        // the agent picks a target they cannot post to, bundle/LinkedIn
+        // rejects it and we surface that error.
+        if (queried === "linkedin") {
+          queriedChannels = Array.isArray(account.channels) ? account.channels : [];
+        }
+
         queriedSummary = { platform: queried, status: "connected", username, connected_at: nowIso };
       } else if (account === null) {
         // bundle definitively reports no account yet → team exists but pending.
@@ -202,12 +217,21 @@ async function handler(req, res, depsOverride) {
       p === queried ? queriedSummary : summarize(p, byPlatform.get(p) || null)
     );
 
-    return res.status(200).json({
+    // LinkedIn-only extras on the response root: channels[] from the live
+    // bundle account (or null if not connected / lookup failed) + the sticky
+    // bundle_channel_id from the stored row, so the "Post as" picker can
+    // render targets and preselect the agent's default without a 2nd call.
+    const response = {
       status:   queriedSummary.status,
       username: queriedSummary.username,
       platform: queried,
       platforms,
-    });
+    };
+    if (queried === "linkedin") {
+      response.channels = queriedChannels; // null when not connected / unknown
+      response.channelId = queriedChannelId; // null when no sticky default yet
+    }
+    return res.status(200).json(response);
   } catch (err) {
     console.error("[social-status] fatal:", err);
     return res.status(500).json({ error: err.message || "internal error" });

@@ -48,8 +48,9 @@ console.log("\n── api/_lib/bundle.js — platform generalization ──\n");
   check("instagram → INSTAGRAM", platformToBundleType("instagram") === "INSTAGRAM");
   check("facebook → FACEBOOK", platformToBundleType("facebook") === "FACEBOOK");
   check("threads → THREADS", platformToBundleType("threads") === "THREADS");
+  check("linkedin → LINKEDIN", platformToBundleType("linkedin") === "LINKEDIN");
   check("case-insensitive (FaceBook)", platformToBundleType("FaceBook") === "FACEBOOK");
-  check("map export covers 3 platforms", Object.keys(PLATFORM_TO_BUNDLE_TYPE).length === 3);
+  check("map export covers 4 platforms", Object.keys(PLATFORM_TO_BUNDLE_TYPE).length === 4);
   let threw = false;
   try { platformToBundleType("tiktok"); } catch { threw = true; }
   check("unknown slug throws", threw);

@@ -42,7 +42,7 @@ import { withSentry } from "./_lib/sentry.js";
 // Networks an agent can connect today. Mirrors the platform CHECK on
 // agent_platform_connections (migration 040) and social_posts (036). Only
 // instagram + facebook are surfaced in Stage 1; threads is a forward hook.
-const ALLOWED_PLATFORMS = ["instagram", "facebook", "threads"];
+const ALLOWED_PLATFORMS = ["instagram", "facebook", "threads", "linkedin"];
 const DEFAULT_PLATFORM = "instagram";
 
 const SUPABASE_URL              = process.env.SUPABASE_URL;

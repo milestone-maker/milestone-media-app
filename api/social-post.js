@@ -45,6 +45,7 @@ import { hasFeatureAccess } from "./_lib/subscription.js";
 import {
   createUploadFromUrl as bundleCreateUploadFromUrl,
   createPost as bundleCreatePost,
+  setChannel as bundleSetChannel,
 } from "./_lib/bundle.js";
 import { INSTAGRAM_MAX_CAROUSEL_IMAGES } from "../shared/carouselPosting.js";
 import { facebookAlbumUrls } from "./_content/selectCarouselPhotos.js";
@@ -76,13 +77,14 @@ const PUBLIC_STORAGE_PATH = "/storage/v1/object/public/";
 const SCHEDULE_BUFFER_MS = 3 * 60 * 1000; // 3 minutes
 
 // Allowed target networks — mirrors the social_posts.platform CHECK (036).
-const ALLOWED_PLATFORMS = ["instagram", "facebook", "threads"];
+const ALLOWED_PLATFORMS = ["instagram", "facebook", "threads", "linkedin"];
 const DEFAULT_PLATFORM = "instagram";
 
 // Human label for user-facing strings (so they're not Instagram-only).
 function platformDisplay(p) {
   if (p === "facebook") return "Facebook";
   if (p === "threads")  return "Threads";
+  if (p === "linkedin") return "LinkedIn";
   return "Instagram";
 }
 
@@ -205,11 +207,37 @@ async function handler(req, res, depsOverride) {
       return res.status(400).json({ error: `platform must be one of: ${ALLOWED_PLATFORMS.join(", ")}` });
     }
     const isFacebook = platform === "facebook";
+    const isLinkedIn = platform === "linkedin";
 
-    // Instagram requires client-supplied imageUrls (the composed carousel).
-    // Facebook builds its album server-side, so imageUrls is ignored for FB.
+    // Per-platform image policy:
+    //   • Instagram requires client-supplied imageUrls (the composed carousel).
+    //   • Facebook builds its album server-side, so imageUrls is ignored for FB.
+    //   • LinkedIn (MVP) allows text-only OR a single image. We deliberately
+    //     reject >1 here so the post path can't be used to push an unbuilt IG
+    //     carousel through the LinkedIn flow before the LinkedIn-native
+    //     composition is designed.
     let clientImageUrls = null;
-    if (!isFacebook) {
+    if (isFacebook) {
+      // handled below — server resolves the album from photo_labels
+    } else if (isLinkedIn) {
+      const imageUrls = body.imageUrls;
+      if (imageUrls === undefined || imageUrls === null) {
+        clientImageUrls = []; // text-only post
+      } else {
+        if (!Array.isArray(imageUrls)) {
+          return res.status(400).json({ error: "imageUrls must be an array (LinkedIn allows 0 or 1)" });
+        }
+        if (imageUrls.length > 1) {
+          return res.status(400).json({ error: "LinkedIn currently supports at most 1 image per post" });
+        }
+        for (const url of imageUrls) {
+          if (!isAllowedStorageUrl(url)) {
+            return res.status(400).json({ error: "imageUrls must be public Supabase Storage URLs for this project" });
+          }
+        }
+        clientImageUrls = imageUrls;
+      }
+    } else {
       const imageUrls = body.imageUrls;
       if (!Array.isArray(imageUrls) || imageUrls.length === 0) {
         return res.status(400).json({ error: "imageUrls must be a non-empty array" });
@@ -223,6 +251,21 @@ async function handler(req, res, depsOverride) {
         }
       }
       clientImageUrls = imageUrls;
+    }
+
+    // LinkedIn requires the agent to choose a target channel (personal profile
+    // or admined company page) at post time. Bundle's /post/ doesn't take an
+    // account selector — instead we call POST /social-account/set-channel
+    // BEFORE /post/, and the channelId is also persisted to the connection row
+    // as the sticky default. Validate it here so the rest of the flow can
+    // trust its presence.
+    let linkedInChannelId = null;
+    if (isLinkedIn) {
+      const cid = body.channelId;
+      if (typeof cid !== "string" || !cid.trim()) {
+        return res.status(400).json({ error: "channelId is required for LinkedIn — pick a target channel" });
+      }
+      linkedInChannelId = cid.trim();
     }
 
     // ── 2b. Resolve the effective postDate (immediate vs scheduled) ──
@@ -249,9 +292,10 @@ async function handler(req, res, depsOverride) {
     }
 
     // ── 3. Require a connected account for this platform (agent_platform_connections) ──
+    // bundle_channel_id is meaningful only for linkedin (sticky default channel).
     const { data: conn, error: connErr } = await supabase
       .from("agent_platform_connections")
-      .select("bundle_team_id, connection_status")
+      .select("bundle_team_id, connection_status, bundle_channel_id")
       .eq("agent_id", authUser.id)
       .eq("platform", platform)
       .maybeSingle();
@@ -326,10 +370,10 @@ async function handler(req, res, depsOverride) {
     }
 
     // ── 4c. Resolve the post caption ──
-    // FB: substitute the microsite token with the LIVE url (or drop the line).
-    // IG: caption verbatim (no token in IG captions).
+    // FB + LinkedIn: substitute the microsite token with the LIVE url
+    // (or drop the line). IG: caption verbatim (no token in IG captions).
     let text = typeof content.caption === "string" ? content.caption : "";
-    if (isFacebook) {
+    if (isFacebook || isLinkedIn) {
       const liveUrl = await resolveMicrositeUrl(supabase, content.listing_id);
       text = substituteMicrositeToken(text, liveUrl);
     }
@@ -383,6 +427,24 @@ async function handler(req, res, depsOverride) {
       }
     }
 
+    // ── 5b. LinkedIn: set the active channel BEFORE creating the post. ─────
+    // bundle.social's /post/ resolves a per-channel target from the currently
+    // active channel on the social-account, not from a per-post field. For IG
+    // and FB this step does not run.
+    if (isLinkedIn) {
+      try {
+        await (depsOverride?.setChannel || bundleSetChannel)({
+          teamId,
+          channelId: linkedInChannelId,
+          type: "LINKEDIN",
+        });
+      } catch (e) {
+        console.error("[social-post] bundle set-channel (linkedin) failed:", e?.status, e?.message);
+        await markFailed(`could not select LinkedIn target channel`);
+        return res.status(502).json({ error: `could not select LinkedIn target channel`, details: e?.message });
+      }
+    }
+
     // ── 6. Create the post (immediate or scheduled) ──
     let post;
     try {
@@ -399,6 +461,19 @@ async function handler(req, res, depsOverride) {
       console.error("[social-post] bundle create-post failed:", e?.status, e?.message);
       await markFailed(`could not create ${platformDisplay(platform)} post`);
       return res.status(502).json({ error: `could not create ${platformDisplay(platform)} post`, details: e?.message });
+    }
+
+    // ── 6b. LinkedIn: persist the chosen channel as the sticky default. ────
+    // Best-effort — the post already succeeded; a failure to write the sticky
+    // default just means the next visit won't pre-pick this target. Don't
+    // surface the error to the caller.
+    if (isLinkedIn && linkedInChannelId && conn.bundle_channel_id !== linkedInChannelId) {
+      const { error: stickyErr } = await supabase
+        .from("agent_platform_connections")
+        .update({ bundle_channel_id: linkedInChannelId, updated_at: new Date().toISOString() })
+        .eq("agent_id", authUser.id)
+        .eq("platform", "linkedin");
+      if (stickyErr) console.error("[social-post] sticky channel persist failed (continuing):", stickyErr);
     }
 
     // ── 7. Record success ──

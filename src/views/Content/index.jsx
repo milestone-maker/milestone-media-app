@@ -23,6 +23,7 @@ import VoiceProfileModal from "../../components/VoiceProfileModal";
 import PhotosPanel from "./PhotosPanel";
 import CarouselView from "./CarouselView";
 import FacebookAlbumEditor from "./FacebookAlbumEditor";
+import PostToLinkedInButton from "./PostToLinkedInButton";
 import UpcomingPosts from "./UpcomingPosts";
 import { includable } from "../../../api/_content/selectCarouselPhotos.js";
 import { INSTAGRAM_MAX_CAROUSEL_IMAGES } from "../../../shared/carouselPosting.js";
@@ -57,6 +58,15 @@ const FRAMEWORKS_BY_PLATFORM = {
     { label: "Win Share",           slug: "win_share" },
     { label: "Resource Drop",       slug: "resource_drop" },
   ],
+  // LinkedIn STOPGAP: no LinkedIn-native prompts yet. The server aliases
+  // platform=linkedin to the Facebook prompt set (single-caption + microsite
+  // token), so a LinkedIn generation uses the same frameworks as Facebook
+  // under the hood. We surface ONE option here so the picker is clean and
+  // unambiguous; the real LinkedIn frameworks land later under
+  // api/_content/prompts/linkedin/ and replace this list.
+  linkedin: [
+    { label: "Standard post (stopgap)", slug: "property_showcase" },
+  ],
 };
 
 // First selectable (non-comingSoon) framework for a platform — the safe
@@ -75,6 +85,7 @@ function isFrameworkEnabled(platform, slug) {
 const PLATFORMS = [
   { key: "instagram", label: "Instagram", emoji: "📷" },
   { key: "facebook",  label: "Facebook",  emoji: "📘" },
+  { key: "linkedin",  label: "LinkedIn",  emoji: "💼" },
 ];
 const ALL_FRAMEWORKS = [...FRAMEWORKS_BY_PLATFORM.instagram, ...FRAMEWORKS_BY_PLATFORM.facebook];
 const labelForSlug = (slug) => ALL_FRAMEWORKS.find((f) => f.slug === slug)?.label || slug;
@@ -1067,7 +1078,7 @@ function ContentView({ onOpenSubscriptions } = {}) {
               token; we substitute the listing's LIVE microsite URL for display +
               copy here, and authoritatively again at post time. When none exists
               yet, the CTA stands alone and the link inserts once a microsite is published. */}
-          {result.platform === "facebook" && (
+          {(result.platform === "facebook" || result.platform === "linkedin") && (
             micrositeUrlForListing ? (
               <div style={{
                 marginBottom: 18, fontFamily: "'Jost', sans-serif", fontSize: 11.5, color: "#9fe3b0",
@@ -1160,6 +1171,16 @@ function ContentView({ onOpenSubscriptions } = {}) {
               <FacebookAlbumEditor key={result.saved_id} contentId={result.saved_id} photos={photoPool} />
             </div>
           )}
+
+          {/* LinkedIn post button + target picker (no album editor — MVP is
+              text post + microsite token). The PostToLinkedInButton fetches
+              channels[] from /api/social-status?platform=linkedin so the
+              "Post as" picker shows the personal profile + admined pages. */}
+          {result.platform === "linkedin" && result.saved_id && (
+            <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+              <PostToLinkedInButton contentId={result.saved_id} />
+            </div>
+          )}
         </div>
       )}
 
@@ -1186,16 +1207,24 @@ function ContentView({ onOpenSubscriptions } = {}) {
                   <div onClick={() => setExpandedId(open ? null : h.id)} style={{
                     display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", cursor: "pointer",
                   }}>
-                    {/* Platform badge — rows now mix Instagram + Facebook */}
-                    <span style={{
-                      background: (h.platform === "facebook") ? "rgba(59,130,246,0.14)" : "rgba(225,48,108,0.12)",
-                      border: (h.platform === "facebook") ? "1px solid rgba(59,130,246,0.4)" : "1px solid rgba(225,48,108,0.35)",
-                      color: (h.platform === "facebook") ? "#93c5fd" : "#f9a8c4",
-                      borderRadius: 6, padding: "3px 7px", fontFamily: "'Jost', sans-serif", fontSize: 10, flexShrink: 0,
-                      display: "flex", alignItems: "center", gap: 4,
-                    }}>
-                      {(h.platform === "facebook") ? "📘" : "📷"}{platformLabel(h.platform || "instagram")}
-                    </span>
+                    {/* Platform badge — rows now mix Instagram + Facebook + LinkedIn */}
+                    {(() => {
+                      const p = h.platform || "instagram";
+                      const tint = p === "facebook"
+                        ? { bg: "rgba(59,130,246,0.14)", border: "rgba(59,130,246,0.4)",  fg: "#93c5fd", emoji: "📘" }
+                        : p === "linkedin"
+                          ? { bg: "rgba(10,102,194,0.16)", border: "rgba(10,102,194,0.45)", fg: "#7aa8d8", emoji: "💼" }
+                          : { bg: "rgba(225,48,108,0.12)", border: "rgba(225,48,108,0.35)", fg: "#f9a8c4", emoji: "📷" };
+                      return (
+                        <span style={{
+                          background: tint.bg, border: `1px solid ${tint.border}`, color: tint.fg,
+                          borderRadius: 6, padding: "3px 7px", fontFamily: "'Jost', sans-serif", fontSize: 10, flexShrink: 0,
+                          display: "flex", alignItems: "center", gap: 4,
+                        }}>
+                          {tint.emoji}{platformLabel(p)}
+                        </span>
+                      );
+                    })()}
                     <span style={{
                       background: "rgba(201,168,76,0.12)", border: "1px solid rgba(201,168,76,0.3)", color: "#e8c97a",
                       borderRadius: 6, padding: "3px 8px", fontFamily: "'Jost', sans-serif", fontSize: 10, flexShrink: 0,
@@ -1256,6 +1285,13 @@ function ContentView({ onOpenSubscriptions } = {}) {
                       {h.platform === "facebook" && (
                         <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
                           <FacebookAlbumEditor key={h.id} contentId={h.id} photos={photoPool} />
+                        </div>
+                      )}
+
+                      {/* LinkedIn post button + target picker for LinkedIn history rows. */}
+                      {h.platform === "linkedin" && (
+                        <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                          <PostToLinkedInButton contentId={h.id} />
                         </div>
                       )}
                     </div>

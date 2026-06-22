@@ -311,21 +311,23 @@ console.log("\n── api/social-post.js — publish carousel to Instagram ─�
   }
 }
 
-// 12. Over the 20-image backstop → 400
+// 12. Over the 10-image backstop → 400
+//     (Cap lowered from 20→10 when bundle.social started enforcing the real
+//     Instagram limit at its create-post boundary — see shared/carouselPosting.js.)
 {
-  const many = Array.from({ length: 21 }, (_, i) => `https://${SB_HOST}/storage/v1/object/public/b/${i}.jpg`);
+  const many = Array.from({ length: 11 }, (_, i) => `https://${SB_HOST}/storage/v1/object/public/b/${i}.jpg`);
   const bundle = makeBundleMocks();
   const { res } = await callHandler({ body: { contentId: CONTENT_ID, imageUrls: many }, bundle });
-  check("over-20 images → 400", res.statusCode === 400, `got ${res.statusCode}`);
-  check("over-20 → no bundle call", bundle.calls.uploads.length === 0);
+  check("over-10 images → 400", res.statusCode === 400, `got ${res.statusCode}`);
+  check("over-10 → no bundle call", bundle.calls.uploads.length === 0);
 }
 
-// 13. Exactly 20 images → allowed (passes validation through to bundle)
+// 13. Exactly 10 images → allowed (passes validation through to bundle)
 {
-  const twenty = Array.from({ length: 20 }, (_, i) => `https://${SB_HOST}/storage/v1/object/public/b/${i}.jpg`);
-  const { res, bundle } = await callHandler({ body: { contentId: CONTENT_ID, imageUrls: twenty } });
-  check("exactly 20 images → 200", res.statusCode === 200, `got ${res.statusCode}`);
-  check("20 uploads attempted", bundle.calls.uploads.length === 20);
+  const ten = Array.from({ length: 10 }, (_, i) => `https://${SB_HOST}/storage/v1/object/public/b/${i}.jpg`);
+  const { res, bundle } = await callHandler({ body: { contentId: CONTENT_ID, imageUrls: ten } });
+  check("exactly 10 images → 200", res.statusCode === 200, `got ${res.statusCode}`);
+  check("10 uploads attempted", bundle.calls.uploads.length === 10);
 }
 
 // 14. Bundle upload failure → 502, no post created, tracking → failed
