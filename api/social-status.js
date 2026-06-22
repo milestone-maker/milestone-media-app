@@ -145,6 +145,10 @@ async function handler(req, res, depsOverride) {
     // platforms to keep the response shape stable for IG/FB).
     let queriedChannels = null;
     let queriedChannelId = queried === "linkedin" ? (queriedRow?.bundle_channel_id || null) : null;
+    // The CURRENTLY-BOUND LinkedIn channel id (which channel bundle will
+    // actually post to). Computed below from bundle's account response.
+    // Null when not connected, not LinkedIn, or no match found.
+    let queriedActiveChannelId = null;
 
     // ── 3. Live-check the queried platform against bundle (if it has a team) ──
     if (queriedRow?.bundle_team_id) {
@@ -197,16 +201,35 @@ async function handler(req, res, depsOverride) {
         // rejects it and we surface that error.
         if (queried === "linkedin") {
           queriedChannels = Array.isArray(account.channels) ? account.channels : [];
-          // Diagnostic so we can confirm in Vercel logs whether bundle returns
-          // one channel (single LinkedIn identity picked at connect time) or
-          // many (personal profile + admined pages). Logs only counts + ids,
-          // never any user-identifiable channel content.
+          // Detect which channel is CURRENTLY ACTIVE (bound). bundle.social's
+          // social-account top-level fields (externalId / username /
+          // displayName) reflect the active channel; we match them against
+          // the channels[] entries to find the one bound right now. Used by
+          // the UI to preselect the active row in the "Post as" picker and
+          // gray the others ("reconnect to switch"). Falls back to null if
+          // no match — UI then preselects the first channel.
+          const externalId = account.externalId || null;
+          const acctUser   = account.username || null;
+          const acctName   = account.displayName || null;
+          const matchByExt  = externalId && queriedChannels.find((c) => c?.id === externalId);
+          const matchByUser = !matchByExt && acctUser && queriedChannels.find((c) => c?.username === acctUser);
+          const matchByName = !matchByExt && !matchByUser && acctName && queriedChannels.find((c) => c?.name === acctName);
+          queriedActiveChannelId = (matchByExt && matchByExt.id)
+            || (matchByUser && matchByUser.id)
+            || (matchByName && matchByName.id)
+            || null;
+          // Diagnostic so we can confirm in Vercel logs how bundle returns
+          // LinkedIn channels + which is active. Counts + ids only, no PII.
           try {
             console.log("[social-status][LINKEDIN_DIAG]", JSON.stringify({
               agent: authUser.id.slice(0, 8),
               channelCount: queriedChannels.length,
               channelIds: queriedChannels.map((c) => c?.id).filter(Boolean),
               hasNames: queriedChannels.map((c) => !!(c?.name || c?.username)).filter(Boolean).length,
+              accountExternalId: externalId,
+              accountUsername:   acctUser,
+              accountDisplayName: acctName,
+              activeChannelId:    queriedActiveChannelId,
             }));
           } catch { /* never let a log throw */ }
         }
@@ -240,8 +263,9 @@ async function handler(req, res, depsOverride) {
       platforms,
     };
     if (queried === "linkedin") {
-      response.channels = queriedChannels; // null when not connected / unknown
-      response.channelId = queriedChannelId; // null when no sticky default yet
+      response.channels = queriedChannels;                   // null when not connected / unknown
+      response.channelId = queriedChannelId;                 // sticky default (last picked)
+      response.activeChannelId = queriedActiveChannelId;     // channel bundle will actually post to
     }
     return res.status(200).json(response);
   } catch (err) {

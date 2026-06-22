@@ -39,7 +39,8 @@ function channelLabel(c) {
 function PostToLinkedInButton({ contentId, photos = [] }) {
   const [connection, setConnection] = useState("checking"); // checking|connected|none|error
   const [channels, setChannels] = useState([]);             // bundle channels[]
-  const [channelId, setChannelId] = useState("");           // currently selected
+  const [channelId, setChannelId] = useState("");           // user's selected target
+  const [activeChannelId, setActiveChannelId] = useState(null); // channel bundle will actually post to
   const [phase, setPhase] = useState("idle");               // idle|confirm|working|done|error
   const [msg, setMsg] = useState("");
   const [mode, setMode] = useState("now");                  // now|schedule
@@ -65,10 +66,15 @@ function PostToLinkedInButton({ contentId, photos = [] }) {
           setConnection("connected");
           const list = Array.isArray(body.channels) ? body.channels : [];
           setChannels(list);
-          // Preselect the sticky default if it's still present, else the first
-          // channel, else empty (post button stays disabled until one is picked).
-          const sticky = body.channelId && list.find((c) => c.id === body.channelId);
-          setChannelId(sticky ? sticky.id : (list[0]?.id || ""));
+          const active = body.activeChannelId || null;
+          setActiveChannelId(active);
+          // Preselect the ACTIVE channel — that's the only one bundle will
+          // actually post to right now (set-channel is a one-shot bind we
+          // can't safely re-run). Fall back to sticky preference if for
+          // some reason the active is missing, then first, then empty.
+          const activeMatch = active && list.find((c) => c.id === active);
+          const sticky     = body.channelId && list.find((c) => c.id === body.channelId);
+          setChannelId(activeMatch ? activeMatch.id : (sticky ? sticky.id : (list[0]?.id || "")));
         } else {
           setConnection("none");
         }
@@ -213,37 +219,81 @@ function PostToLinkedInButton({ contentId, photos = [] }) {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {channels.map((c) => {
-                  const selected = c.id === channelId;
+                  const isActive   = activeChannelId ? c.id === activeChannelId : false;
+                  const isSelected = c.id === channelId;
+                  // ANY channel is selectable for ergonomics — but only the
+                  // ACTIVE one will actually post. Non-active picks trigger
+                  // the reconnect-to-switch hint below the picker and disable
+                  // the Post button. activeChannelId === null (couldn't be
+                  // detected) falls through to the legacy behaviour: every
+                  // channel selectable, post goes to whatever bundle thinks
+                  // is bound.
+                  const disabled = !!(activeChannelId && !isActive);
                   return (
                     <label key={c.id} style={{
-                      display: "flex", alignItems: "center", gap: 8, cursor: "pointer",
+                      display: "flex", alignItems: "center", gap: 8,
+                      cursor: disabled ? "not-allowed" : "pointer",
                       padding: "7px 10px", borderRadius: 8,
-                      border: selected ? `1px solid ${LI_BLUE}` : "1px solid rgba(255,255,255,0.12)",
-                      background: selected ? "rgba(10,102,194,0.15)" : "rgba(255,255,255,0.03)",
+                      border: isSelected ? `1px solid ${LI_BLUE}` : "1px solid rgba(255,255,255,0.12)",
+                      background: isSelected ? "rgba(10,102,194,0.15)" : "rgba(255,255,255,0.03)",
+                      opacity: disabled ? 0.55 : 1,
                     }}>
                       <input
                         type="radio"
                         name="li-channel"
                         value={c.id}
-                        checked={selected}
+                        checked={isSelected}
                         onChange={() => setChannelId(c.id)}
-                        style={{ accentColor: LI_BLUE, cursor: "pointer" }}
+                        style={{ accentColor: LI_BLUE, cursor: disabled ? "not-allowed" : "pointer" }}
                       />
                       <span style={{
                         fontFamily: "'Jost', sans-serif", fontSize: 12.5,
-                        color: selected ? "#cfe1f4" : "rgba(255,255,255,0.75)",
+                        color: isSelected ? "#cfe1f4" : "rgba(255,255,255,0.75)",
+                        flex: 1,
                       }}>{channelLabel(c)}</span>
+                      {isActive && (
+                        <span style={{
+                          fontFamily: "'Jost', sans-serif", fontSize: 9, fontWeight: 700,
+                          letterSpacing: "0.06em", textTransform: "uppercase",
+                          padding: "1px 6px", borderRadius: 4,
+                          background: "rgba(74,222,128,0.16)", color: "#86efac",
+                        }}>Active</span>
+                      )}
                     </label>
                   );
                 })}
               </div>
             )}
-            <div style={{
-              marginTop: 6, fontFamily: "'Jost', sans-serif", fontSize: 10.5,
-              color: "rgba(255,255,255,0.35)", lineHeight: 1.5,
-            }}>
-              Whatever you pick becomes the default next time — change it any time. If you pick a target you can't post to, LinkedIn will reject the post and we'll show the error.
-            </div>
+            {/* Switching active LinkedIn target requires a reconnect — bundle's
+                runtime set-channel rejects re-binds. Surface the hint only
+                when (a) we know the active channel and (b) the user has
+                picked a non-active one. */}
+            {activeChannelId && channelId && channelId !== activeChannelId ? (
+              <div style={{
+                marginTop: 8, fontFamily: "'Jost', sans-serif", fontSize: 11, lineHeight: 1.5,
+                color: "#e8c97a", background: "rgba(201,168,76,0.07)",
+                border: "1px solid rgba(201,168,76,0.25)", borderRadius: 8, padding: "8px 10px",
+              }}>
+                LinkedIn posting goes to your currently-active target only. To post as this one instead,{" "}
+                <button
+                  onClick={goConnect}
+                  style={{ background: "none", border: "none", color: "#e8c97a", textDecoration: "underline", cursor: "pointer", padding: 0, fontSize: 11 }}
+                >reconnect LinkedIn</button>
+                {" "}and pick it during the OAuth flow.
+              </div>
+            ) : (
+              <div style={{
+                marginTop: 6, fontFamily: "'Jost', sans-serif", fontSize: 10.5,
+                color: "rgba(255,255,255,0.35)", lineHeight: 1.5,
+              }}>
+                The post goes to the channel marked Active. To switch the active target you'll need to{" "}
+                <button
+                  onClick={goConnect}
+                  style={{ background: "none", border: "none", color: "rgba(255,255,255,0.6)", textDecoration: "underline", cursor: "pointer", padding: 0, fontSize: 10.5 }}
+                >reconnect LinkedIn</button>
+                {" "}and pick the new one in the bundle.social portal.
+              </div>
+            )}
           </div>
 
           {/* Optional single image. LinkedIn MVP supports text-only OR one
@@ -333,7 +383,14 @@ function PostToLinkedInButton({ contentId, photos = [] }) {
           {msg && <div style={{ marginBottom: 12, fontFamily: "'Jost', sans-serif", fontSize: 11.5, color: "#f87171", lineHeight: 1.5 }}>{msg}</div>}
 
           <div style={{ display: "flex", gap: 8 }}>
-            {btn(mode === "now" ? "Post now" : "Schedule", doPost, { disabled: !channelId })}
+            {btn(mode === "now" ? "Post now" : "Schedule", doPost, {
+              // Block posting on a non-active target — bundle would silently
+              // route to the active channel anyway, which would be a
+              // confusing UX. When activeChannelId is unknown (legacy/no
+              // detection), keep the old behaviour: any non-empty pick
+              // posts.
+              disabled: !channelId || (!!activeChannelId && channelId !== activeChannelId),
+            })}
             {btn("Cancel", () => { setPhase("idle"); setMsg(""); }, { ghost: true })}
           </div>
           <div style={{ marginTop: 10, fontFamily: "'Jost', sans-serif", fontSize: 10.5, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>

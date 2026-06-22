@@ -427,23 +427,23 @@ async function handler(req, res, depsOverride) {
       }
     }
 
-    // ── 5b. LinkedIn: set the active channel BEFORE creating the post. ─────
-    // bundle.social's /post/ resolves a per-channel target from the currently
-    // active channel on the social-account, not from a per-post field. For IG
-    // and FB this step does not run.
-    if (isLinkedIn) {
-      try {
-        await (depsOverride?.setChannel || bundleSetChannel)({
-          teamId,
-          channelId: linkedInChannelId,
-          type: "LINKEDIN",
-        });
-      } catch (e) {
-        console.error("[social-post] bundle set-channel (linkedin) failed:", e?.status, e?.message);
-        await markFailed(`could not select LinkedIn target channel`);
-        return res.status(502).json({ error: `could not select LinkedIn target channel`, details: e?.message });
-      }
-    }
+    // ── 5b. LinkedIn channel binding note ──────────────────────────────
+    // We do NOT call /social-account/set-channel here. bundle.social's
+    // set-channel is a one-shot BIND used at the OAuth-portal step;
+    // calling it on an already-bound LinkedIn account returns:
+    //   400 "This team already has a Linkedin account connected. Please
+    //        disconnect it first."
+    // (Observed verbatim from bundle on the preview deploy, 2026-06-22.)
+    // Bundle pairs it with /social-account/unset-channel for switching,
+    // but unset is disconnect-shaped — it would force the agent through
+    // a reconnect on every target change. Until we verify a runtime
+    // switch path, the post goes to whatever channel is CURRENTLY
+    // ACTIVE on the agent's bundle connection (chosen at connect time).
+    // The UI surfaces which channel is active and offers a "reconnect
+    // to switch" affordance for the others. The chosen
+    // `linkedInChannelId` is still validated above and persisted below
+    // as the sticky preference so the picker remembers it across visits.
+    void linkedInChannelId; // referenced for clarity; not sent to bundle here
 
     // ── 6. Create the post (immediate or scheduled) ──
     let post;
