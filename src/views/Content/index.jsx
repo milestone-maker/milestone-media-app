@@ -24,9 +24,10 @@ import PhotosPanel from "./PhotosPanel";
 import CarouselView from "./CarouselView";
 import FacebookAlbumEditor from "./FacebookAlbumEditor";
 import PostToLinkedInButton from "./PostToLinkedInButton";
+import LinkedInGalleryEditor from "./LinkedInGalleryEditor";
 import UpcomingPosts from "./UpcomingPosts";
 import { includable } from "../../../api/_content/selectCarouselPhotos.js";
-import { INSTAGRAM_MAX_CAROUSEL_IMAGES } from "../../../shared/carouselPosting.js";
+import { INSTAGRAM_MAX_CAROUSEL_IMAGES, LINKEDIN_MAX_GALLERY_IMAGES } from "../../../shared/carouselPosting.js";
 
 // Friendly label → exact framework_name slug the endpoint expects, keyed by
 // platform. Instagram keeps its 7 listing frameworks; Facebook (Stage 2) adds
@@ -58,14 +59,16 @@ const FRAMEWORKS_BY_PLATFORM = {
     { label: "Win Share",           slug: "win_share" },
     { label: "Resource Drop",       slug: "resource_drop" },
   ],
-  // LinkedIn STOPGAP: no LinkedIn-native prompts yet. The server aliases
-  // platform=linkedin to the Facebook prompt set (single-caption + microsite
-  // token), so a LinkedIn generation uses the same frameworks as Facebook
-  // under the hood. We surface ONE option here so the picker is clean and
-  // unambiguous; the real LinkedIn frameworks land later under
-  // api/_content/prompts/linkedin/ and replace this list.
+  // LinkedIn stopgaps until LinkedIn-native prompts ship at
+  // api/_content/prompts/linkedin/:
+  //   • "Standard post" → FB-aliased single-caption prompt (text + optional
+  //     single image). The original LinkedIn flow, proven live on prod.
+  //   • "Multi-photo gallery" → IG-walkthrough-aliased prompt that emits a
+  //     per-photo slides[] array. Drives the LinkedIn gallery editor
+  //     (combined photo+caption tiles, capped at 9 per LinkedIn's limit).
   linkedin: [
-    { label: "Standard post (stopgap)", slug: "property_showcase" },
+    { label: "Standard post (stopgap)",       slug: "property_showcase" },
+    { label: "Multi-photo gallery (stopgap)", slug: "walkthrough_carousel" },
   ],
 };
 
@@ -430,10 +433,18 @@ function ContentView({ onOpenSubscriptions } = {}) {
   // by id. Returns null when no store matches.
   const locateSlides = (rowId) => {
     if ((rowId && result?.saved_id === rowId) || (!rowId && result)) {
-      return { target: "result", baseSlides: Array.isArray(result.slides) ? result.slides : [] };
+      return {
+        target: "result",
+        baseSlides: Array.isArray(result.slides) ? result.slides : [],
+        platform:   result.platform || "instagram",
+      };
     }
     const h = history.find((x) => x.id === rowId);
-    if (h) return { target: "history", baseSlides: Array.isArray(h.slides) ? h.slides : [] };
+    if (h) return {
+      target: "history",
+      baseSlides: Array.isArray(h.slides) ? h.slides : [],
+      platform:   h.platform || "instagram",
+    };
     return null;
   };
   const writeSlides = (target, rowId, nextSlides) => {
@@ -569,14 +580,17 @@ function ContentView({ onOpenSubscriptions } = {}) {
 
   // Add a NEW interior slide using the picked photo, then regenerate its
   // caption via the same path swap uses. Insertion point = right before the
-  // final/CTA slide (so the new slide is always interior). Enforces the IG
-  // 10-image cap defensively; the picker UI itself also gates this.
+  // final/CTA slide (so the new slide is always interior). Per-platform cap
+  // enforced defensively (the picker UI also gates this): Instagram = 10,
+  // LinkedIn = 9, anything else (incl. future platforms with slides) defaults
+  // to the IG cap.
   const addSlide = async (rowId, candidate) => {
     setSaveError("");
     const loc = locateSlides(rowId);
     if (!loc) return { ok: false };
-    if (loc.baseSlides.length >= INSTAGRAM_MAX_CAROUSEL_IMAGES) {
-      return { ok: false, reason: "atCap", count: loc.baseSlides.length, cap: INSTAGRAM_MAX_CAROUSEL_IMAGES };
+    const cap = loc.platform === "linkedin" ? LINKEDIN_MAX_GALLERY_IMAGES : INSTAGRAM_MAX_CAROUSEL_IMAGES;
+    if (loc.baseSlides.length >= cap) {
+      return { ok: false, reason: "atCap", count: loc.baseSlides.length, cap };
     }
     if (!candidate || !candidate.photo_url) return { ok: false };
 
@@ -1098,8 +1112,11 @@ function ContentView({ onOpenSubscriptions } = {}) {
             )
           )}
 
-          {/* Carousel — Style B sequence + download (walkthrough_carousel only) */}
-          {Array.isArray(result.slides) && result.slides.length > 0 && (
+          {/* Carousel — Instagram walkthrough only. LinkedIn slides[] are
+              handled by LinkedInGalleryEditor below; never feed them
+              through CarouselView (its IG-specific chrome — Post-to-IG
+              button, IG cap, download zip — doesn't apply to LinkedIn). */}
+          {Array.isArray(result.slides) && result.slides.length > 0 && (result.platform || platform) === "instagram" && (
             <div style={{ marginBottom: 18 }}>
               <CarouselView
                 slides={result.slides}
@@ -1178,7 +1195,40 @@ function ContentView({ onOpenSubscriptions } = {}) {
               "Post as" picker shows the personal profile + admined pages. */}
           {result.platform === "linkedin" && result.saved_id && (
             <div style={{ marginTop: 18, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-              <PostToLinkedInButton contentId={result.saved_id} photos={photoPool} />
+              {Array.isArray(result.slides) && result.slides.length > 0 && (
+                <LinkedInGalleryEditor
+                  slides={result.slides}
+                  rowId={result.saved_id}
+                  stats={carouselStats}
+                  footer={carouselFooter(result.license_number)}
+                  brandTokens={{
+                    bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
+                    mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
+                    fontHeadline: profile?.brand_font_headline, fontBody: profile?.brand_font_body,
+                    logoUrl: profile?.agency_logo_url || undefined,
+                  }}
+                  photoPool={photoPool}
+                  onUpdateStatement={updateSlideStatement}
+                  onSwapPhoto={swapSlidePhoto}
+                  onRetryStatement={retrySlideStatement}
+                  onDeleteSlide={deleteSlide}
+                  onAddSlide={addSlide}
+                />
+              )}
+              <PostToLinkedInButton
+                contentId={result.saved_id}
+                photos={photoPool}
+                slides={Array.isArray(result.slides) && result.slides.length > 0 ? result.slides : null}
+                stats={carouselStats}
+                footer={carouselFooter(result.license_number)}
+                address={selectedListing?.address}
+                brandTokens={{
+                  bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
+                  mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
+                  fontHeadline: profile?.brand_font_headline, fontBody: profile?.brand_font_body,
+                  logoUrl: profile?.agency_logo_url || undefined,
+                }}
+              />
             </div>
           )}
         </div>
@@ -1253,8 +1303,9 @@ function ContentView({ onOpenSubscriptions } = {}) {
                           ))}
                         </div>
                       )}
-                      {/* Saved carousel — same renderer as the Result panel (persistence fix) */}
-                      {Array.isArray(h.slides) && h.slides.length > 0 && (
+                      {/* Saved carousel — Instagram only. LinkedIn slides[]
+                          are handled by LinkedInGalleryEditor below. */}
+                      {Array.isArray(h.slides) && h.slides.length > 0 && (h.platform || "instagram") === "instagram" && (
                         <div style={{ marginTop: 14 }}>
                           <CarouselView
                             slides={h.slides}
@@ -1291,7 +1342,40 @@ function ContentView({ onOpenSubscriptions } = {}) {
                       {/* LinkedIn post button + target picker for LinkedIn history rows. */}
                       {h.platform === "linkedin" && (
                         <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                          <PostToLinkedInButton contentId={h.id} photos={photoPool} />
+                          {Array.isArray(h.slides) && h.slides.length > 0 && (
+                            <LinkedInGalleryEditor
+                              slides={h.slides}
+                              rowId={h.id}
+                              stats={carouselStats}
+                              footer={carouselFooter(h.license_number)}
+                              brandTokens={{
+                                bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
+                                mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
+                                fontHeadline: profile?.brand_font_headline, fontBody: profile?.brand_font_body,
+                                logoUrl: profile?.agency_logo_url || undefined,
+                              }}
+                              photoPool={photoPool}
+                              onUpdateStatement={updateSlideStatement}
+                              onSwapPhoto={swapSlidePhoto}
+                              onRetryStatement={retrySlideStatement}
+                              onDeleteSlide={deleteSlide}
+                              onAddSlide={addSlide}
+                            />
+                          )}
+                          <PostToLinkedInButton
+                            contentId={h.id}
+                            photos={photoPool}
+                            slides={Array.isArray(h.slides) && h.slides.length > 0 ? h.slides : null}
+                            stats={carouselStats}
+                            footer={carouselFooter(h.license_number)}
+                            address={selectedListing?.address}
+                            brandTokens={{
+                              bgColor: profile?.brand_bg_color, textColor: profile?.brand_text_color,
+                              mutedColor: profile?.brand_muted_color, accentColor: profile?.brand_accent_color,
+                              fontHeadline: profile?.brand_font_headline, fontBody: profile?.brand_font_body,
+                              logoUrl: profile?.agency_logo_url || undefined,
+                            }}
+                          />
                         </div>
                       )}
                     </div>

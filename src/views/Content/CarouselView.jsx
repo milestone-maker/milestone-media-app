@@ -51,7 +51,7 @@ function MiniCopy({ text, label }) {
 // Strip thumbnail for a combined photo+caption slide: photo top, caption band
 // bottom. Same aspect (4:5) shrunk to 120×150 — visually previews what the
 // posted slide will look like.
-function CombinedTile({ item, bt }) {
+export function CombinedTile({ item, bt }) {
   const photoH = Math.round(150 * 0.72); // 108
   return (
     <div style={{
@@ -125,7 +125,7 @@ function CardTile({ item, bt }) {
 const STATEMENT_MAX = 200;   // hard cap to prevent pathological overflow
 const STATEMENT_WARN = 140;  // soft warning — past this, lines may shrink/overflow
 
-function SlidePreviewModal({ seq, index, bt, slides, photoPool, onClose, onPrev, onNext, onUpdateStatement, onSwapPhoto, onRetryStatement, onDeleteSlide, canPersist }) {
+export function SlidePreviewModal({ seq, index, bt, slides, photoPool, onClose, onPrev, onNext, onUpdateStatement, onSwapPhoto, onRetryStatement, onDeleteSlide, canPersist }) {
   const containerRef = useRef(null);
   const logoRef  = useRef({ loaded: false, img: null }); // logo loaded once, cached
   const fontsRef = useRef(false);                         // ensureFonts run once

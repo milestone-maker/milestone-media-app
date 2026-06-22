@@ -19,6 +19,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../../supabaseClient";
 import { centralWallClockToUtcIso, formatCentral, SCHEDULE_BUFFER_MS } from "../../lib/postScheduling";
 import { scheduleState } from "../../lib/scheduledPosts";
+import { composeAndUploadCarousel } from "./carouselUpload";
 
 const GOLD = "#c9a84c";
 const LI_BLUE = "#0a66c2"; // LinkedIn brand blue
@@ -36,7 +37,22 @@ function channelLabel(c) {
   return c.name || c.username || c.id || "(no name)";
 }
 
-function PostToLinkedInButton({ contentId, photos = [] }) {
+/**
+ * PostToLinkedInButton supports two modes:
+ *   • Single-image / text-only (default): the agent picks 0 or 1 photo from
+ *     the listing's analyzed pool inside the confirm modal, and the POST
+ *     sends imageUrls=[url] or omits it.
+ *   • Multi-photo gallery: when a non-empty `slides` prop is passed, the
+ *     button composes the slides through the SAME carousel compositor
+ *     Instagram uses (combined photo+caption tiles), uploads them all,
+ *     and sends the N image URLs as imageUrls. The in-modal single-image
+ *     picker is hidden in this mode because the photos are owned by the
+ *     LinkedInGalleryEditor above. `stats`, `footer`, `brandTokens`,
+ *     `address` are forwarded to composeCarousel; same shape the
+ *     IG flow uses, so callers can pass exactly what they already have.
+ */
+function PostToLinkedInButton({ contentId, photos = [], slides = null, stats, footer, brandTokens, address }) {
+  const galleryMode = Array.isArray(slides) && slides.length > 0;
   const [connection, setConnection] = useState("checking"); // checking|connected|none|error
   const [channels, setChannels] = useState([]);             // bundle channels[]
   const [channelId, setChannelId] = useState("");           // user's selected target
@@ -122,10 +138,30 @@ function PostToLinkedInButton({ contentId, photos = [] }) {
     try {
       const { token } = await getSession();
       if (!token) throw new Error("Your session expired. Please sign in again.");
+      const { data: sess } = await supabase.auth.getSession();
+      const agentId = sess?.session?.user?.id || null;
+
+      // Multi-photo gallery mode: compose the slides into combined
+      // photo+caption tiles using the SAME compositor IG uses, upload them
+      // to public Storage, and send N image URLs. Server validates ≤ 9.
+      // Single-image / text-only mode: send 0 or 1 imageUrls from the
+      // in-modal picker.
+      let imageUrls = null;
+      if (galleryMode) {
+        if (!agentId) throw new Error("Your session expired. Please sign in again.");
+        if (!contentId) throw new Error("This post is still saving — try again in a moment.");
+        imageUrls = await composeAndUploadCarousel({
+          slides, stats, footer, brandTokens, agentId, contentId,
+          platform: "linkedin",
+        });
+      } else if (photoUrl) {
+        imageUrls = [photoUrl];
+      }
+
       const body = { contentId, platform: "linkedin", channelId };
       if (postDate) body.postDate = postDate;
-      // LinkedIn MVP: 0 or 1 image. The server validates this — never send more.
-      if (photoUrl) body.imageUrls = [photoUrl];
+      if (Array.isArray(imageUrls) && imageUrls.length > 0) body.imageUrls = imageUrls;
+
       const res = await fetch("/api/social-post", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -296,10 +332,11 @@ function PostToLinkedInButton({ contentId, photos = [] }) {
             )}
           </div>
 
-          {/* Optional single image. LinkedIn MVP supports text-only OR one
-              image (no carousel). The agent picks from this listing's
-              analyzed photo pool, or skips for text-only. Photo count cap is
-              enforced server-side (LinkedIn rejects >1). */}
+          {/* Optional single image — single-image / text-only mode ONLY.
+              In gallery mode the photos are owned by LinkedInGalleryEditor
+              above this button; the post sends those composed tile URLs
+              directly, so this in-modal picker is hidden. */}
+          {!galleryMode && (
           <div style={{ marginBottom: 14 }}>
             <div style={{
               fontFamily: "'Jost', sans-serif", fontSize: 10.5, letterSpacing: "0.1em",
@@ -354,6 +391,18 @@ function PostToLinkedInButton({ contentId, photos = [] }) {
               </div>
             )}
           </div>
+          )}
+
+          {galleryMode && (
+            <div style={{
+              marginBottom: 14, fontFamily: "'Jost', sans-serif", fontSize: 11,
+              color: "#cfe1f4",
+              background: "rgba(10,102,194,0.08)", border: `1px solid ${LI_BLUE}55`,
+              borderRadius: 8, padding: "8px 12px", lineHeight: 1.5,
+            }}>
+              Posting {slides.length} composed tile{slides.length === 1 ? "" : "s"} from the gallery above — edit tiles there before posting. The post body is your hook + the live microsite link + hashtags.
+            </div>
+          )}
 
           <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
             {[["now", "Post now"], ["schedule", "Pick a time"]].map(([m, label]) => (
@@ -394,9 +443,11 @@ function PostToLinkedInButton({ contentId, photos = [] }) {
             {btn("Cancel", () => { setPhase("idle"); setMsg(""); }, { ghost: true })}
           </div>
           <div style={{ marginTop: 10, fontFamily: "'Jost', sans-serif", fontSize: 10.5, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>
-            {photoUrl
-              ? "We'll post this image with the caption and insert the live microsite link automatically."
-              : "We'll post the caption as a text-only update and insert the live microsite link automatically."}
+            {galleryMode
+              ? `We'll compose and post all ${slides.length} gallery tile${slides.length === 1 ? "" : "s"}; the post body is your hook + the live microsite link + hashtags.`
+              : photoUrl
+                ? "We'll post this image with the caption and insert the live microsite link automatically."
+                : "We'll post the caption as a text-only update and insert the live microsite link automatically."}
           </div>
         </div>
       )}

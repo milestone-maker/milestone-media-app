@@ -296,14 +296,22 @@ async function handler(req, res, depsOverride) {
     if (!framework_name)   return res.status(400).json({ error: "framework_name is required" });
 
     // ── 3. Look up prompt module ──
-    // LinkedIn STOPGAP (no LinkedIn-native prompts shipped yet): we route the
-    // prompt lookup to the Facebook prompt set, because FB frameworks already
-    // produce the exact shape LinkedIn needs (single-caption text + microsite
-    // token + hashtags, no slides). The persisted generated_content row still
-    // stores platform='linkedin' so the post path, scheduling, and analytics
-    // treat it as LinkedIn. Real LinkedIn-native frameworks will live at
-    // api/_content/prompts/linkedin/ and drop this alias.
-    const promptPlatform = platform === "linkedin" ? "facebook" : platform;
+    // LinkedIn STOPGAP (no LinkedIn-native prompts shipped yet): we route
+    // the prompt lookup based on the requested framework:
+    //   • framework=walkthrough_carousel → use the IG walkthrough prompt,
+    //     which emits per-photo slides[] with their own captions. This
+    //     drives the LinkedIn multi-photo gallery flow.
+    //   • everything else                → use the Facebook prompt set
+    //     (single-caption text + microsite token + hashtags, no slides) —
+    //     the original single-image / text-only LinkedIn stopgap.
+    // The persisted generated_content row stores platform='linkedin' in
+    // both cases so the post path, scheduling, and analytics treat it as
+    // LinkedIn. Real LinkedIn-native prompts will live at
+    // api/_content/prompts/linkedin/ and drop these aliases.
+    let promptPlatform = platform;
+    if (platform === "linkedin") {
+      promptPlatform = framework_name === CAROUSEL_FRAMEWORK ? "instagram" : "facebook";
+    }
     const promptMod = findPrompt(promptPlatform, content_type, framework_name);
     if (!promptMod) {
       return res.status(400).json({
@@ -391,9 +399,12 @@ async function handler(req, res, depsOverride) {
     //        AFTER its HOOK ORIGINALITY / BANNED OPENERS rules, so the new hook
     //        diverges from what this agent has already used. Never for Instagram;
     //        no-ops when the agent has no FB history yet.
-    // FB + LinkedIn (stopgap) share the same prompt path → same anti-repetition
-    // signal applies. Skipped for IG.
-    if (platform === "facebook" || platform === "linkedin") {
+    // FB + LinkedIn-on-FB-aliased prompts share the same anti-repetition
+    // signal. LinkedIn-on-the-IG-walkthrough prompt (multi-photo gallery)
+    // uses IG's prompt instead, which has no HOOK ORIGINALITY block to
+    // extend — appending the avoidance text there would dangle, so skip.
+    const useFbHookAvoidance = platform === "facebook" || (platform === "linkedin" && framework_name !== CAROUSEL_FRAMEWORK);
+    if (useFbHookAvoidance) {
       const recentHooks = await resolveRecentHooks(supabase, authUser.id);
       built.systemPrompt = appendHookAvoidanceBlock(built.systemPrompt, recentHooks);
     }
@@ -445,11 +456,20 @@ async function handler(req, res, depsOverride) {
     //        Never applied to Instagram. We still resolve the current URL only to
     //        return microsite_url in the response (UI "is there a microsite yet?").
     let micrositeUrl = null;
-    // LinkedIn (stopgap) reuses the FB caption pattern → same microsite-token
-    // insertion. The token is resolved to the live URL at post time, same as FB.
-    if (platform === "facebook" || platform === "linkedin") {
+    // FB + LinkedIn-on-FB-aliased prompts use the microsite-token-in-caption
+    // pattern. The IG walkthrough path (LinkedIn multi-photo gallery) has no
+    // microsite token in its caption — social-post.js assembles a short
+    // LinkedIn body (hook + live url + hashtags) from the stored fields at
+    // post time, so the IG-shaped caption never needs the token. We still
+    // resolve the current URL so the response surfaces microsite_url for
+    // the UI's "is there a microsite yet?" indicator.
+    const useFbCaptionToken = platform === "facebook" || (platform === "linkedin" && framework_name !== CAROUSEL_FRAMEWORK);
+    if (useFbCaptionToken) {
       micrositeUrl = await resolveMicrositeUrl(supabase, listing_id);
       parsed = { ...parsed, caption: appendMicrositeToken(parsed.caption) };
+    } else if (platform === "linkedin" && framework_name === CAROUSEL_FRAMEWORK) {
+      // Resolve only — don't mutate the caption.
+      micrositeUrl = await resolveMicrositeUrl(supabase, listing_id);
     }
 
     // Canonicalize hashtags so the caption-body block and the structured
