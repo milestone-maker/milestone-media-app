@@ -377,22 +377,15 @@ async function handler(req, res, depsOverride) {
     // ── 4c. Resolve the post caption ──
     // FB + LinkedIn (every variant — text-only, single-image, AND multi-photo
     // gallery): substitute the microsite token in the FULL stored caption
-    // with the LIVE url (or drop the token's line), then for LinkedIn
-    // multi-photo append the hashtags so the LinkedIn post body matches
-    // what the Result panel shows. On LinkedIn the written caption IS the
-    // post; the gallery tiles carry their per-tile baked captions in
-    // addition. IG keeps its caption verbatim (no token in IG captions).
+    // with the LIVE url (or drop the token's line). Hashtags are ALREADY at
+    // the tail of the stored caption (canonicalizeHashtags at generate time
+    // mirrors generated_content.hashtags[] into the caption's trailing
+    // paragraph), so we do NOT append them again — appending would duplicate
+    // the tag block. IG keeps its caption verbatim (no token in IG captions).
     let text = typeof content.caption === "string" ? content.caption : "";
-    const isLinkedInMultiPhoto = isLinkedIn && Array.isArray(content.slides) && content.slides.length > 0;
     if (isFacebook || isLinkedIn) {
       const liveUrl = await resolveMicrositeUrl(supabase, content.listing_id);
       text = substituteMicrositeToken(text, liveUrl);
-      if (isLinkedInMultiPhoto) {
-        const tags = Array.isArray(content.hashtags)
-          ? content.hashtags.filter((t) => typeof t === "string" && t.trim())
-          : [];
-        if (tags.length) text = `${text}\n\n${tags.join(" ")}`;
-      }
     }
 
     // ── 4d. Open a tracking row (pending) for this attempt ──

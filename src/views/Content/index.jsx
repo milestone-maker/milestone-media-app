@@ -171,6 +171,130 @@ function CopyButton({ text, label = "Copy" }) {
   );
 }
 
+// Editable caption block. Display mode shows the resolved caption (microsite
+// token substituted to the live URL) with Copy + Edit affordances. Edit mode
+// opens a textarea pre-filled with the RAW stored caption (token visible) so
+// the agent can keep/replace/remove the token, with Save/Cancel. Save calls
+// onSave(rawText) which the parent persists to generated_content.caption.
+// canPersist=false (an unsaved fresh generation with no saved_id) keeps the
+// textarea functional locally but disables the Save button — same shape as
+// the per-slide editor's behavior.
+function EditableCaption({
+  caption,
+  micrositeUrl,
+  onSave,
+  canPersist,
+  size = "result", // "result" | "history"
+}) {
+  const raw = typeof caption === "string" ? caption : "";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(raw);
+  const [saving, setSaving] = useState(false);
+
+  // Re-seed the draft when the upstream caption changes (e.g. a fresh
+  // generation lands while not in edit mode).
+  useEffect(() => { if (!editing) setDraft(raw); }, [raw, editing]);
+
+  const displayText = resolveCaptionForDisplay(raw, micrositeUrl);
+  const ghostBtnSm = {
+    padding: "6px 12px", borderRadius: 8, cursor: "pointer", fontSize: 10,
+    fontFamily: "'Jost', sans-serif", fontWeight: 600, letterSpacing: "0.06em",
+    background: "rgba(201,168,76,0.08)", border: "1px solid rgba(201,168,76,0.25)", color: "#c9a84c",
+  };
+  const headerWrap = size === "result"
+    ? { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }
+    : { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, marginBottom: 8 };
+  const bodyStyle = size === "result"
+    ? {
+        whiteSpace: "pre-wrap", fontFamily: "'Jost', sans-serif", fontSize: 13.5, color: "#ECE7DC",
+        lineHeight: 1.7, background: "rgba(0,0,0,0.2)", borderRadius: 10, padding: "16px 18px",
+        border: "1px solid rgba(255,255,255,0.06)",
+      }
+    : { whiteSpace: "pre-wrap", fontFamily: "'Jost', sans-serif", fontSize: 12.5, color: "#ECE7DC", lineHeight: 1.7 };
+  const taStyle = {
+    width: "100%", boxSizing: "border-box",
+    fontFamily: "'Jost', sans-serif", fontSize: size === "result" ? 13.5 : 12.5, color: "#ECE7DC",
+    lineHeight: 1.7, background: "rgba(0,0,0,0.3)", borderRadius: 10, padding: "14px 16px",
+    border: "1px solid rgba(201,168,76,0.4)", outline: "none", resize: "vertical",
+    minHeight: size === "result" ? 240 : 180,
+  };
+
+  const onClickSave = async () => {
+    if (typeof onSave !== "function") { setEditing(false); return; }
+    setSaving(true);
+    try { await onSave(draft); }
+    finally { setSaving(false); setEditing(false); }
+  };
+
+  return (
+    <>
+      <div style={headerWrap}>
+        {size === "result" && <label style={{ ...labelSt, marginBottom: 0 }}>Caption</label>}
+        {/* Copy still works regardless of edit mode; reflects the resolved-display text. */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <CopyButton text={displayText} label="Copy caption" />
+          {!editing && typeof onSave === "function" && (
+            <button
+              onClick={() => { setDraft(raw); setEditing(true); }}
+              style={ghostBtnSm}
+              title="Edit the post caption"
+            >✎ Edit</button>
+          )}
+        </div>
+      </div>
+      {!editing ? (
+        <div style={bodyStyle}>{displayText}</div>
+      ) : (
+        <div>
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            style={taStyle}
+            autoFocus
+          />
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            gap: 10, marginTop: 8, flexWrap: "wrap",
+          }}>
+            <div style={{ fontFamily: "'Jost', sans-serif", fontSize: 10.5, color: "rgba(255,255,255,0.4)" }}>
+              {draft.length} chars
+              {!canPersist && " · edit not saved (no saved row yet)"}
+              {draft.includes(MICROSITE_TOKEN) && (
+                <> · contains microsite link token (live URL substitutes at post time)</>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => { setDraft(raw); setEditing(false); }}
+                style={{
+                  padding: "7px 14px", borderRadius: 8, cursor: "pointer",
+                  background: "transparent", border: "1px solid rgba(255,255,255,0.18)",
+                  color: "rgba(255,255,255,0.7)",
+                  fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 600, letterSpacing: "0.04em",
+                }}
+              >Cancel</button>
+              <button
+                onClick={onClickSave}
+                disabled={saving || !canPersist}
+                style={{
+                  padding: "7px 16px", borderRadius: 8,
+                  cursor: (saving || !canPersist) ? "default" : "pointer",
+                  background: (saving || !canPersist)
+                    ? "rgba(201,168,76,0.25)"
+                    : "linear-gradient(135deg, #C9A84C 0%, #e8c97a 100%)",
+                  color: (saving || !canPersist) ? "rgba(26,18,6,0.55)" : "#0a1628",
+                  border: "none", fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 700,
+                  letterSpacing: "0.04em",
+                }}
+              >{saving ? "Saving…" : "Save"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function ContentView({ onOpenSubscriptions } = {}) {
   const { user, profile } = useAuth();
   // Admins always pass; otherwise an active subscription is required.
@@ -377,6 +501,59 @@ function ContentView({ onOpenSubscriptions } = {}) {
   // statement (regenerated OR hand-edited) clears it. JSON.stringify drops the
   // dropped key on persist, so the DB row also loses the flag.
   const clearStale = (s) => { const { _needsCaption, ...rest } = s; return rest; };
+
+  // ── Edit the post caption (the post body the agent ships) ──
+  // Persists generated_content.caption for an owned row (RLS scopes by
+  // agent_id = auth.uid()). Mirrors updateSlideStatement's optimistic-
+  // update-then-persist-then-revert-on-error shape, but operates on the
+  // top-level caption field, not slides[]. The microsite token, if the
+  // agent leaves it in, still gets substituted to the live URL at post
+  // time by api/social-post.js. If they remove it, the post goes
+  // without a link.
+  const updateCaption = async (rowId, nextCaption) => {
+    setSaveError("");
+    const safe = typeof nextCaption === "string" ? nextCaption : "";
+
+    // Fresh result (matched by saved_id, or rowId absent → the result is
+    // the only candidate since every History row has an id).
+    if ((rowId && result?.saved_id === rowId) || (!rowId && result)) {
+      const prev = result;
+      setResult({ ...result, caption: safe });
+      if (!rowId) return; // local-only — nothing to persist
+      const { error } = await supabase
+        .from("generated_content")
+        .update({ caption: safe })
+        .eq("id", rowId);
+      if (error) {
+        console.error("[Content] caption edit save failed:", error);
+        setResult(prev); // revert
+        setSaveError("Couldn't save that edit. Please try again.");
+      }
+      return;
+    }
+
+    // History entry.
+    if (rowId) {
+      const prev = history;
+      let touched = false;
+      const nextHistory = history.map((h) => {
+        if (h.id !== rowId) return h;
+        touched = true;
+        return { ...h, caption: safe };
+      });
+      if (!touched) return;
+      setHistory(nextHistory);
+      const { error } = await supabase
+        .from("generated_content")
+        .update({ caption: safe })
+        .eq("id", rowId);
+      if (error) {
+        console.error("[Content] caption edit save failed:", error);
+        setHistory(prev); // revert
+        setSaveError("Couldn't save that edit. Please try again.");
+      }
+    }
+  };
 
   const updateSlideStatement = async (rowId, sourceIndex, text) => {
     setSaveError("");
@@ -1075,24 +1252,30 @@ function ContentView({ onOpenSubscriptions } = {}) {
             </div>
           </div>
 
-          {/* Caption */}
+          {/* Caption (editable). The textarea opens with the RAW stored
+              caption (microsite token visible) so the agent can keep,
+              replace, or remove the link slot. Display mode shows the
+              resolved caption (token → live URL). Save persists to
+              generated_content.caption via Supabase RLS. */}
           <div style={{ marginBottom: 18 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <label style={{ ...labelSt, marginBottom: 0 }}>Caption</label>
-              <CopyButton text={resolveCaptionForDisplay(result.caption, micrositeUrlForListing)} label="Copy caption" />
-            </div>
-            <div style={{
-              whiteSpace: "pre-wrap", fontFamily: "'Jost', sans-serif", fontSize: 13.5, color: "#ECE7DC",
-              lineHeight: 1.7, background: "rgba(0,0,0,0.2)", borderRadius: 10, padding: "16px 18px",
-              border: "1px solid rgba(255,255,255,0.06)",
-            }}>{resolveCaptionForDisplay(result.caption, micrositeUrlForListing)}</div>
+            <EditableCaption
+              caption={result.caption}
+              micrositeUrl={micrositeUrlForListing}
+              onSave={(next) => updateCaption(result.saved_id || null, next)}
+              canPersist={!!result.saved_id}
+              size="result"
+            />
           </div>
 
-          {/* Facebook microsite-link status. The caption carries a placeholder
-              token; we substitute the listing's LIVE microsite URL for display +
-              copy here, and authoritatively again at post time. When none exists
-              yet, the CTA stands alone and the link inserts once a microsite is published. */}
-          {(result.platform === "facebook" || result.platform === "linkedin") && (
+          {/* Microsite-link status. Only meaningful when the caption actually
+              carries the placeholder token. If the agent edited the caption
+              and removed the token, hide the banner entirely (their choice
+              stands — we never re-inject it). If the token is present and a
+              microsite is published, show green with the live URL. If the
+              token is present but no microsite is published yet, show
+              yellow ("publish to fill the link spot"). */}
+          {(result.platform === "facebook" || result.platform === "linkedin") &&
+            typeof result.caption === "string" && result.caption.includes(MICROSITE_TOKEN) && (
             micrositeUrlForListing ? (
               <div style={{
                 marginBottom: 18, fontFamily: "'Jost', sans-serif", fontSize: 11.5, color: "#9fe3b0",
@@ -1107,7 +1290,7 @@ function ContentView({ onOpenSubscriptions } = {}) {
                 background: "rgba(201,168,76,0.07)", border: "1px solid rgba(201,168,76,0.22)",
                 borderRadius: 8, padding: "9px 12px", lineHeight: 1.5,
               }}>
-                No published microsite for this listing yet — the CTA stands alone for now. Publish a microsite and the link will be inserted automatically when this posts.
+                No published microsite for this listing yet — the link spot in the caption stands alone for now. Publish a microsite and the link will be inserted automatically when this posts.
               </div>
             )
           )}
@@ -1287,12 +1470,13 @@ function ContentView({ onOpenSubscriptions } = {}) {
                   </div>
                   {open && (
                     <div style={{ padding: "0 14px 14px" }}>
-                      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
-                        <CopyButton text={resolveCaptionForDisplay(h.caption, micrositeUrlForListing)} label="Copy caption" />
-                      </div>
-                      <div style={{ whiteSpace: "pre-wrap", fontFamily: "'Jost', sans-serif", fontSize: 12.5, color: "#ECE7DC", lineHeight: 1.7 }}>
-                        {resolveCaptionForDisplay(h.caption, micrositeUrlForListing)}
-                      </div>
+                      <EditableCaption
+                        caption={h.caption}
+                        micrositeUrl={micrositeUrlForListing}
+                        onSave={(next) => updateCaption(h.id, next)}
+                        canPersist={!!h.id}
+                        size="history"
+                      />
                       {Array.isArray(h.hashtags) && h.hashtags.length > 0 && (
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
                           {h.hashtags.map((tag, i) => (
