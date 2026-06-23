@@ -113,21 +113,23 @@ export const DEFAULT_MAX_TOKENS = 2048;
 export const RECENT_HOOK_MEMORY = 12;
 
 /**
- * Resolve an agent's recent Facebook opening hooks for the anti-repetition
- * memory (Facebook Stage 2). Scoped by agent_id (the server-resolved caller —
- * the same id persisted on generated_content.agent_id) AND platform='facebook'.
- * Returns the most recent DISTINCT non-empty hook_lines, newest first, capped at
- * RECENT_HOOK_MEMORY. New agent / no FB history → []. Never run for Instagram.
+ * Resolve an agent's recent opening hooks for the anti-repetition memory.
+ * Scoped by agent_id (the server-resolved caller — the same id persisted on
+ * generated_content.agent_id) AND platform. Returns the most recent DISTINCT
+ * non-empty hook_lines for that platform, newest first, capped at
+ * RECENT_HOOK_MEMORY. New agent / no history on that platform → []. Defaults
+ * to platform='facebook' for backwards compatibility with the original
+ * Stage 2 callers.
  *
- * History accumulates as the agent generates: each FB generation persists its
+ * History accumulates as the agent generates: each generation persists its
  * hook_line, so the pool the next generation must avoid grows over time.
  */
-async function defaultResolveRecentHooks(supabase, agentId) {
+async function defaultResolveRecentHooks(supabase, agentId, platform = "facebook") {
   const { data, error } = await supabase
     .from("generated_content")
     .select("hook_line")
     .eq("agent_id", agentId)
-    .eq("platform", "facebook")
+    .eq("platform", platform)
     .order("created_at", { ascending: false })
     .limit(RECENT_HOOK_MEMORY);
   if (error) {
@@ -296,21 +298,18 @@ async function handler(req, res, depsOverride) {
     if (!framework_name)   return res.status(400).json({ error: "framework_name is required" });
 
     // ── 3. Look up prompt module ──
-    // LinkedIn STOPGAP (no LinkedIn-native prompts shipped yet): we route
-    // the prompt lookup based on the requested framework:
-    //   • framework=walkthrough_carousel → use the IG walkthrough prompt,
-    //     which emits per-photo slides[] with their own captions. This
-    //     drives the LinkedIn multi-photo gallery flow.
-    //   • everything else                → use the Facebook prompt set
-    //     (single-caption text + microsite token + hashtags, no slides) —
-    //     the original single-image / text-only LinkedIn stopgap.
-    // The persisted generated_content row stores platform='linkedin' in
-    // both cases so the post path, scheduling, and analytics treat it as
-    // LinkedIn. Real LinkedIn-native prompts will live at
-    // api/_content/prompts/linkedin/ and drop these aliases.
+    // LinkedIn now has its own native prompt set under
+    // api/_content/prompts/linkedin/listing/ (seven text-first frameworks).
+    // The ONLY remaining LinkedIn alias is for the multi-photo gallery
+    // option, which still reuses the Instagram walkthrough_carousel
+    // prompt — that prompt emits per-photo slides[], which is exactly
+    // what the LinkedIn gallery editor expects. Every other LinkedIn
+    // framework resolves natively. The persisted generated_content row
+    // stores platform='linkedin' regardless of the alias, so the post
+    // path, scheduling, and analytics treat it as LinkedIn.
     let promptPlatform = platform;
-    if (platform === "linkedin") {
-      promptPlatform = framework_name === CAROUSEL_FRAMEWORK ? "instagram" : "facebook";
+    if (platform === "linkedin" && framework_name === CAROUSEL_FRAMEWORK) {
+      promptPlatform = "instagram";
     }
     const promptMod = findPrompt(promptPlatform, content_type, framework_name);
     if (!promptMod) {
@@ -399,13 +398,17 @@ async function handler(req, res, depsOverride) {
     //        AFTER its HOOK ORIGINALITY / BANNED OPENERS rules, so the new hook
     //        diverges from what this agent has already used. Never for Instagram;
     //        no-ops when the agent has no FB history yet.
-    // FB + LinkedIn-on-FB-aliased prompts share the same anti-repetition
-    // signal. LinkedIn-on-the-IG-walkthrough prompt (multi-photo gallery)
-    // uses IG's prompt instead, which has no HOOK ORIGINALITY block to
-    // extend — appending the avoidance text there would dangle, so skip.
-    const useFbHookAvoidance = platform === "facebook" || (platform === "linkedin" && framework_name !== CAROUSEL_FRAMEWORK);
-    if (useFbHookAvoidance) {
-      const recentHooks = await resolveRecentHooks(supabase, authUser.id);
+    // FB + native LinkedIn frameworks both have a HOOK ORIGINALITY rule in
+    // their system prompts and benefit from the same anti-repetition signal
+    // (appended AFTER the original rules). LinkedIn gallery (the IG-aliased
+    // walkthrough_carousel) uses IG's prompt, which has no HOOK ORIGINALITY
+    // block to extend — appending the avoidance text there would dangle,
+    // so skip. Hook history is scoped to the same platform the agent is
+    // generating on, so FB history avoids FB repeats and LinkedIn history
+    // avoids LinkedIn repeats independently.
+    const useHookAvoidance = platform === "facebook" || (platform === "linkedin" && framework_name !== CAROUSEL_FRAMEWORK);
+    if (useHookAvoidance) {
+      const recentHooks = await resolveRecentHooks(supabase, authUser.id, platform);
       built.systemPrompt = appendHookAvoidanceBlock(built.systemPrompt, recentHooks);
     }
 

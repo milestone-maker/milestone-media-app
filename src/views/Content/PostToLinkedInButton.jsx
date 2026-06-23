@@ -51,8 +51,18 @@ function channelLabel(c) {
  *     `address` are forwarded to composeCarousel; same shape the
  *     IG flow uses, so callers can pass exactly what they already have.
  */
-function PostToLinkedInButton({ contentId, photos = [], slides = null, stats, footer, brandTokens, address }) {
+function PostToLinkedInButton({ contentId, photos = [], slides = null, selectedImageUrl, stats, footer, brandTokens, address }) {
   const galleryMode = Array.isArray(slides) && slides.length > 0;
+  // Controlled-image mode: parent owns the single-image / text-only choice
+  // (the inline LinkedInImagePicker on the Result/History panels persists it
+  // to generated_content.single_image_url). When the parent explicitly sets
+  // selectedImageUrl (string OR null), this button hides its in-modal picker
+  // and uses the parent's value directly. `undefined` = legacy mode (modal
+  // picker still works). Gallery mode always wins over this.
+  const controlledImage = !galleryMode && typeof selectedImageUrl !== "undefined";
+  const controlledUrl = controlledImage && typeof selectedImageUrl === "string" && selectedImageUrl.trim()
+    ? selectedImageUrl
+    : null;
   const [connection, setConnection] = useState("checking"); // checking|connected|none|error
   const [channels, setChannels] = useState([]);             // bundle channels[]
   const [channelId, setChannelId] = useState("");           // user's selected target
@@ -154,6 +164,8 @@ function PostToLinkedInButton({ contentId, photos = [], slides = null, stats, fo
           slides, stats, footer, brandTokens, agentId, contentId,
           platform: "linkedin",
         });
+      } else if (controlledImage) {
+        if (controlledUrl) imageUrls = [controlledUrl];
       } else if (photoUrl) {
         imageUrls = [photoUrl];
       }
@@ -336,7 +348,7 @@ function PostToLinkedInButton({ contentId, photos = [], slides = null, stats, fo
               In gallery mode the photos are owned by LinkedInGalleryEditor
               above this button; the post sends those composed tile URLs
               directly, so this in-modal picker is hidden. */}
-          {!galleryMode && (
+          {!galleryMode && !controlledImage && (
           <div style={{ marginBottom: 14 }}>
             <div style={{
               fontFamily: "'Jost', sans-serif", fontSize: 10.5, letterSpacing: "0.1em",
@@ -445,9 +457,13 @@ function PostToLinkedInButton({ contentId, photos = [], slides = null, stats, fo
           <div style={{ marginTop: 10, fontFamily: "'Jost', sans-serif", fontSize: 10.5, color: "rgba(255,255,255,0.35)", lineHeight: 1.5 }}>
             {galleryMode
               ? `We'll compose and post all ${slides.length} gallery tile${slides.length === 1 ? "" : "s"}; the post body is your full caption with the live microsite link substituted in, plus hashtags.`
-              : photoUrl
-                ? "We'll post this image with the caption and insert the live microsite link automatically."
-                : "We'll post the caption as a text-only update and insert the live microsite link automatically."}
+              : controlledImage
+                ? (controlledUrl
+                    ? "We'll post this image with the caption and insert the live microsite link automatically."
+                    : "We'll post the caption as text-only and insert the live microsite link automatically.")
+                : photoUrl
+                  ? "We'll post this image with the caption and insert the live microsite link automatically."
+                  : "We'll post the caption as a text-only update and insert the live microsite link automatically."}
           </div>
         </div>
       )}
