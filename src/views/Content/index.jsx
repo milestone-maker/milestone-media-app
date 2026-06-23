@@ -301,6 +301,96 @@ function EditableCaption({
   );
 }
 
+// Inline image picker for the seven LinkedIn text-first frameworks. Renders
+// a "Text only" tile + one thumbnail per analyzed listing photo. Default =
+// text-only (value === null). Single-select; picking a different photo
+// replaces the prior choice. Switching back to "Text only" clears the
+// choice. Reuses the same photoPool the carousel Replace-photo / Add-photo
+// pickers consume — same allowlist, same filtering. Caller persists by
+// calling onChange(nextUrl), where nextUrl is either null (text-only) or
+// a public Supabase Storage URL string.
+function LinkedInImagePicker({ value, photos, onChange }) {
+  const LI_BLUE = "#0a66c2";
+  const list = (Array.isArray(photos) ? photos : []).filter((p) => p && p.photo_url);
+  const selectedUrl = typeof value === "string" && value.trim() ? value : null;
+  const labelSt = {
+    fontFamily: "'Jost', sans-serif", fontSize: 10, color: "rgba(255,255,255,0.4)",
+    letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 8, display: "block",
+  };
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <label style={labelSt}>
+        Image <span style={{ textTransform: "none", letterSpacing: 0, color: "rgba(255,255,255,0.3)" }}>· optional, one photo (text-first post)</span>
+      </label>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {/* Text-only tile — the default. */}
+        <button
+          type="button"
+          onClick={() => onChange(null)}
+          title="Post text only — no image attached"
+          style={{
+            width: 92, height: 92, borderRadius: 8,
+            border: selectedUrl === null ? `2px solid ${LI_BLUE}` : "1px solid rgba(255,255,255,0.14)",
+            background: selectedUrl === null ? "rgba(10,102,194,0.16)" : "rgba(255,255,255,0.03)",
+            color: selectedUrl === null ? "#cfe1f4" : "rgba(255,255,255,0.55)",
+            cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontFamily: "'Jost', sans-serif", fontSize: 11, fontWeight: 600, letterSpacing: "0.04em",
+            textAlign: "center", padding: 6,
+          }}
+        >Text only</button>
+        {list.map((p) => {
+          const selected = selectedUrl === p.photo_url;
+          return (
+            <button
+              key={p.photo_url}
+              type="button"
+              onClick={() => onChange(p.photo_url)}
+              title={p.category || "photo"}
+              style={{
+                width: 92, height: 92, padding: 0, overflow: "hidden", borderRadius: 8,
+                border: selected ? `2px solid ${LI_BLUE}` : "1px solid rgba(255,255,255,0.14)",
+                background: "rgba(255,255,255,0.04)", cursor: "pointer", position: "relative",
+              }}
+            >
+              <img
+                src={p.photo_url}
+                alt=""
+                loading="lazy"
+                crossOrigin="anonymous"
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+              />
+              {selected && (
+                <span style={{
+                  position: "absolute", top: 4, right: 4, background: LI_BLUE, color: "#fff",
+                  borderRadius: 4, padding: "1px 5px",
+                  fontFamily: "'Jost', sans-serif", fontSize: 9, fontWeight: 700,
+                }}>✓</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      {list.length === 0 && (
+        <div style={{
+          marginTop: 6, fontFamily: "'Jost', sans-serif", fontSize: 10.5,
+          color: "rgba(255,255,255,0.35)", lineHeight: 1.5,
+        }}>
+          No analyzed photos for this listing — posting as text only. Run photo analysis on the listing to attach an image.
+        </div>
+      )}
+      {selectedUrl && (
+        <div style={{
+          marginTop: 8, fontFamily: "'Jost', sans-serif", fontSize: 10.5,
+          color: "rgba(255,255,255,0.45)", lineHeight: 1.5,
+        }}>
+          Posting text + this one photo. Click "Text only" to remove the image.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ContentView({ onOpenSubscriptions } = {}) {
   const { user, profile } = useAuth();
   // Admins always pass; otherwise an active subscription is required.
@@ -557,6 +647,57 @@ function ContentView({ onOpenSubscriptions } = {}) {
         console.error("[Content] caption edit save failed:", error);
         setHistory(prev); // revert
         setSaveError("Couldn't save that edit. Please try again.");
+      }
+    }
+  };
+
+  // ── Edit the single optional image for a text-first LinkedIn post ──
+  // Persists generated_content.single_image_url for an owned row (RLS
+  // scopes by agent_id = auth.uid()). Mirrors updateCaption's optimistic
+  // shape. Pass null to clear (text-only); pass a public Supabase Storage
+  // URL to attach a single image. The server validates the URL host at
+  // post time via the same allowlist already used for slides imageUrls.
+  const updateSingleImage = async (rowId, nextUrl) => {
+    setSaveError("");
+    const safe = typeof nextUrl === "string" && nextUrl.trim() ? nextUrl.trim() : null;
+
+    // Fresh result panel (matched by saved_id, or rowId absent → result
+    // is the only candidate).
+    if ((rowId && result?.saved_id === rowId) || (!rowId && result)) {
+      const prev = result;
+      setResult({ ...result, single_image_url: safe });
+      if (!rowId) return; // local-only — nothing to persist
+      const { error } = await supabase
+        .from("generated_content")
+        .update({ single_image_url: safe })
+        .eq("id", rowId);
+      if (error) {
+        console.error("[Content] single-image save failed:", error);
+        setResult(prev); // revert
+        setSaveError("Couldn't save that image choice. Please try again.");
+      }
+      return;
+    }
+
+    // History entry.
+    if (rowId) {
+      const prev = history;
+      let touched = false;
+      const nextHistory = history.map((h) => {
+        if (h.id !== rowId) return h;
+        touched = true;
+        return { ...h, single_image_url: safe };
+      });
+      if (!touched) return;
+      setHistory(nextHistory);
+      const { error } = await supabase
+        .from("generated_content")
+        .update({ single_image_url: safe })
+        .eq("id", rowId);
+      if (error) {
+        console.error("[Content] single-image save failed:", error);
+        setHistory(prev); // revert
+        setSaveError("Couldn't save that image choice. Please try again.");
       }
     }
   };
@@ -1404,10 +1545,22 @@ function ContentView({ onOpenSubscriptions } = {}) {
                   onAddSlide={addSlide}
                 />
               )}
+              {!(Array.isArray(result.slides) && result.slides.length > 0) && (
+                <LinkedInImagePicker
+                  value={result.single_image_url}
+                  photos={photoPool}
+                  onChange={(url) => updateSingleImage(result.saved_id, url)}
+                />
+              )}
               <PostToLinkedInButton
                 contentId={result.saved_id}
                 photos={photoPool}
                 slides={Array.isArray(result.slides) && result.slides.length > 0 ? result.slides : null}
+                selectedImageUrl={
+                  Array.isArray(result.slides) && result.slides.length > 0
+                    ? undefined
+                    : (result.single_image_url ?? null)
+                }
                 stats={carouselStats}
                 footer={carouselFooter(result.license_number)}
                 address={selectedListing?.address}
@@ -1552,10 +1705,22 @@ function ContentView({ onOpenSubscriptions } = {}) {
                               onAddSlide={addSlide}
                             />
                           )}
+                          {!(Array.isArray(h.slides) && h.slides.length > 0) && (
+                            <LinkedInImagePicker
+                              value={h.single_image_url}
+                              photos={photoPool}
+                              onChange={(url) => updateSingleImage(h.id, url)}
+                            />
+                          )}
                           <PostToLinkedInButton
                             contentId={h.id}
                             photos={photoPool}
                             slides={Array.isArray(h.slides) && h.slides.length > 0 ? h.slides : null}
+                            selectedImageUrl={
+                              Array.isArray(h.slides) && h.slides.length > 0
+                                ? undefined
+                                : (h.single_image_url ?? null)
+                            }
                             stats={carouselStats}
                             footer={carouselFooter(h.license_number)}
                             address={selectedListing?.address}
