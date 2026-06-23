@@ -26,6 +26,15 @@ import fbMarketPlainTalk       from "./prompts/facebook/listing/market-plain-tal
 import fbWinShare              from "./prompts/facebook/listing/win-share.js";
 import fbResourceDrop          from "./prompts/facebook/listing/resource-drop.js";
 
+// LinkedIn-native frameworks (text-first single posts).
+import liLocalMarketInsight    from "./prompts/linkedin/listing/local-market-insight.js";
+import liClientWinStory        from "./prompts/linkedin/listing/client-win-story.js";
+import liJustSoldCaseStudy     from "./prompts/linkedin/listing/just-sold-case-study.js";
+import liProcessEducator       from "./prompts/linkedin/listing/process-educator.js";
+import liNeighborhoodExpertise from "./prompts/linkedin/listing/neighborhood-expertise.js";
+import liTrendingTopicTake     from "./prompts/linkedin/listing/trending-topic-take.js";
+import liQuestionPoll          from "./prompts/linkedin/listing/question-poll.js";
+
 const PROMPTS = [
   storyDrivenListing,
   youHookListing,
@@ -42,6 +51,14 @@ const PROMPTS = [
   fbMarketPlainTalk,
   fbWinShare,
   fbResourceDrop,
+  // linkedin/listing
+  liLocalMarketInsight,
+  liClientWinStory,
+  liJustSoldCaseStudy,
+  liProcessEducator,
+  liNeighborhoodExpertise,
+  liTrendingTopicTake,
+  liQuestionPoll,
 ];
 
 const registry = Object.create(null);

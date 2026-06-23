@@ -59,16 +59,22 @@ const FRAMEWORKS_BY_PLATFORM = {
     { label: "Win Share",           slug: "win_share" },
     { label: "Resource Drop",       slug: "resource_drop" },
   ],
-  // LinkedIn stopgaps until LinkedIn-native prompts ship at
-  // api/_content/prompts/linkedin/:
-  //   • "Standard post" → FB-aliased single-caption prompt (text + optional
-  //     single image). The original LinkedIn flow, proven live on prod.
-  //   • "Multi-photo gallery" → IG-walkthrough-aliased prompt that emits a
-  //     per-photo slides[] array. Drives the LinkedIn gallery editor
-  //     (combined photo+caption tiles, capped at 9 per LinkedIn's limit).
+  // LinkedIn — native frameworks under api/_content/prompts/linkedin/listing/.
+  // All seven are text-first single posts (the WRITTEN copy is the content;
+  // any image is supporting). The Multi-photo gallery option is kept as a
+  // SECONDARY entry — it still routes server-side to the Instagram
+  // walkthrough_carousel prompt (the gallery editor needs slides[]). The
+  // seven text-first frameworks are the default surface; the gallery is the
+  // last entry, clearly labeled so agents reach for it intentionally.
   linkedin: [
-    { label: "Standard post (stopgap)",       slug: "property_showcase" },
-    { label: "Multi-photo gallery (stopgap)", slug: "walkthrough_carousel" },
+    { label: "Local Market Insight",     slug: "local_market_insight" },
+    { label: "Client Win Story",         slug: "client_win_story" },
+    { label: "Just-Sold Case Study",     slug: "just_sold_case_study" },
+    { label: "Process Educator",         slug: "process_educator" },
+    { label: "Neighborhood Expertise",   slug: "neighborhood_expertise" },
+    { label: "Trending-Topic Take",      slug: "trending_topic_take" },
+    { label: "Question / Poll",          slug: "question_poll" },
+    { label: "Multi-photo gallery",      slug: "walkthrough_carousel" },
   ],
 };
 
