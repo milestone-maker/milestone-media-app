@@ -13,8 +13,14 @@
 //
 // Stage 0 records incidents but does NOT act on them. Later stages will read
 // this table from a two-way Slack app and dispatch per-kind executors.
+//
+// Stage 1 addition: after a genuinely NEW row lands (not a dedupe), fire a
+// Slack Block Kit card with Approve / Dismiss buttons via slackNotifier.js.
+// The notifier is fire-and-forget and internally try/catch-guarded — a Slack
+// outage never affects the DB write or the caller's response.
 
 import { createClient } from "@supabase/supabase-js";
+import { notifyIncident } from "./slackNotifier.js";
 
 let _supabase = null;
 function getClient() {
@@ -80,12 +86,29 @@ export async function logIncident({
       error_message: safeErrorMessage(errorMessage),
     };
 
-    const { error } = await client
+    // Idempotent by (kind, dedupe_key). With ignoreDuplicates:true, PostgREST
+    // sends Prefer: resolution=ignore-duplicates → ON CONFLICT DO NOTHING.
+    // .select() returns the inserted row array for a NEW insert and an EMPTY
+    // array for a conflicting insert — that's how we distinguish "genuinely
+    // new" (fire the notifier) from "already tracked" (do nothing).
+    const { data: inserted, error } = await client
       .from("incidents")
-      .upsert(row, { onConflict: "kind,dedupe_key", ignoreDuplicates: true });
+      .upsert(row, { onConflict: "kind,dedupe_key", ignoreDuplicates: true })
+      .select("id, kind, severity, subject_type, subject_id, agent_id, error_message, created_at");
 
     if (error) {
       console.warn("[incidents] insert failed (non-fatal):", error.message);
+      return;
+    }
+
+    if (Array.isArray(inserted) && inserted.length === 1) {
+      // Fire-and-forget Slack notifier. The notifier is itself try/catch-
+      // guarded and returns a resolved promise even on error, so the .catch
+      // here is belt-and-suspenders — it must never let a Slack failure
+      // reach the caller.
+      try {
+        notifyIncident(inserted[0]).catch(() => { /* logged inside */ });
+      } catch { /* noop */ }
     }
   } catch (err) {
     try {
