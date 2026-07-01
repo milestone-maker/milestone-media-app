@@ -17,6 +17,7 @@
   },
   "crons": [
     { "path": "/api/refresh-mortgage-rates", "schedule": "0 20 * * *" },
-    { "path": "/api/beta-reminders",         "schedule": "0 14 * * *" }
+    { "path": "/api/beta-reminders",         "schedule": "0 14 * * *" },
+    { "path": "/api/executor-tick",          "schedule": "* * * * *" }
   ]
 }
