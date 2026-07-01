@@ -9,7 +9,14 @@
 // What this executor does (per incident, per file):
 //   1. Read {file_path, file_type, slug} from row.payload; bookingId from
 //      row.subject_id; agentId from row.agent_id.
-//   2. Verify the booking is owned by that agent (defense in depth).
+//   2. Verify the booking exists (sanity check for a clean error message).
+//      NOTE: we deliberately do NOT check booking.agent_id === agentId here.
+//      Bookings can be staff-created with agent_id NULL until the client
+//      signs up (see migration 050 booking_ownership_claim); the publish
+//      handler itself doesn't gate on booking.agent_id either. The
+//      authoritative ownership gate for a re-publish operation is step 7's
+//      microsite lookup, which scopes on BOTH agent_id AND
+//      property_data->>booking_id — stricter than any booking-level check.
 //   3. Look up the specific booking_media row by (booking_id, file_path).
 //   4. Download from `booking-media/${file_path}`.
 //   5. Upload to `published-media/${slug}/${filename}` with upsert:true —
@@ -71,10 +78,17 @@ export async function publishMicrositeRerun({ row, supabase } = {}) {
       };
     }
 
-    // ── 2. Verify booking ownership ──
+    // ── 2. Verify booking exists ──
+    //   Sanity check only — a clean error message when the incident points
+    //   at a booking that no longer exists. NO ownership check here: the
+    //   authoritative gate is the microsite lookup below (step 4), which
+    //   requires the agent to own a microsite that references this booking.
+    //   Bookings can legitimately be staff-created with agent_id=NULL
+    //   (migration 050 booking_ownership_claim), so checking
+    //   booking.agent_id === agentId would falsely reject valid re-runs.
     const { data: booking, error: bkErr } = await client
       .from("bookings")
-      .select("id, agent_id")
+      .select("id")
       .eq("id", bookingId)
       .maybeSingle();
     if (bkErr) {
@@ -82,9 +96,6 @@ export async function publishMicrositeRerun({ row, supabase } = {}) {
     }
     if (!booking) {
       return { outcome: "failed", notes: `publish-rerun: booking ${bookingId} not found`, errorMessage: "booking not found" };
-    }
-    if (booking.agent_id !== agentId) {
-      return { outcome: "failed", notes: `publish-rerun: booking ${bookingId} is not owned by agent ${agentId}`, errorMessage: "ownership mismatch" };
     }
 
     // ── 3. Look up the specific booking_media row ──
