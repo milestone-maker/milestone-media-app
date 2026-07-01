@@ -3,27 +3,24 @@
 //   Headers: Authorization: Bearer <supabase access token>
 //   Body:    { listing_id, force? }
 //
-// Flow mirrors api/content-generate.js:
+// Flow:
 //   1. CORS + method guard
 //   2. Bearer auth → supabase.auth.getUser
 //   3. agents-row load → subscription gate (402 for unsubscribed non-admins;
 //      admins bypass)
 //   4. Service-role load of the listing; ownership check (admin → any
 //      listing; otherwise listing.agent_id must equal the caller)
-//   5. Resolve the linked microsite (microsites.listing_id = listing_id);
-//      build the ordered, deduped photo list = [hero_img, ...gallery_photos]
-//   6. Selection preserving agent corrections:
-//        • never classify a photo whose label is agent_corrected
-//        • force=false → only photos with NO existing label (incremental)
-//        • force=true  → all non-agent_corrected photos (refresh)
-//      Empty to-classify set → skip the model entirely, return existing labels.
-//   7. Classify in chunks (~10 photos) with bounded concurrency, via
-//      @milestone-maker/content-engine classifyImages() + forced tool use
-//      (engine stays domain-agnostic; the nine-category tool lives here)
-//   8. Upsert labels (conflict target listing_id,photo_url; agent_corrected
-//      rows are never in the classify set, so never overwritten)
-//   9. Re-read all labels for the listing (existing + new) ordered by
-//      sort_order and return them
+//   5. Delegate the actual work (microsite resolution, photo list, selection
+//      preserving agent corrections, chunked classify, upsert, re-read) to
+//      classifyForListing() in api/_lib/classifyPhotosCore.js. HTTP contract
+//      is byte-identical to the pre-refactor handler: same response body
+//      shape, same status codes, same warnings-only-when-present behavior.
+//
+// Stage 2b addition: when at least one classify chunk failed (either partial
+// with some succeeding, or all-failed → 502), emit a
+// 'classify_photos_partial_failure' incident so the auto-remediation
+// executor can re-run the listing (force=false; agent_corrected rows are
+// safe, already-labeled photos are skipped).
 //
 // Required env vars:
 //   SUPABASE_URL
@@ -33,18 +30,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { hasFeatureAccess } from "./_lib/subscription.js";
 import { withSentry } from "./_lib/sentry.js";
-
-// Engine is CommonJS; lazy-imported on first use so test runs that inject a
-// mock classifier (via depsOverride.classifyImages) don't require the package
-// to be installed. Mirrors api/content-generate.js's shim exactly.
-let _classifyImages = null;
-async function getClassifyImages() {
-  if (!_classifyImages) {
-    const engine = (await import("@milestone-maker/content-engine")).default;
-    _classifyImages = engine.classifyImages;
-  }
-  return _classifyImages;
-}
+import { classifyForListing } from "./_lib/classifyPhotosCore.js";
+import { logIncident } from "./_lib/incidents.js";
 
 // ── module-load deps (overridable via depsOverride for tests) ────────
 const SUPABASE_URL              = process.env.SUPABASE_URL;
@@ -57,92 +44,6 @@ function defaultSupabase() {
   }
   return _supabaseSingleton;
 }
-
-// Vision classifier defaults. Haiku is the right tier for 9-way bucketing +
-// short feature lists; cheap and fast across ~40 photos. maxTokens covers a
-// chunk of ~10 classification objects with room to spare.
-const DEFAULT_MODEL      = "claude-haiku-4-5-20251001";
-const DEFAULT_MAX_TOKENS = 2048;
-
-// Batching: ~10 photos per model call, at most 3 calls in flight. Keeps each
-// call's image list small enough for reliable per-image classification while
-// staying well under the function's maxDuration and Anthropic rate limits.
-const CHUNK_SIZE  = 10;
-const CONCURRENCY = 3;
-
-// The fixed nine-category set — MUST match migration 029's CHECK constraint.
-const CATEGORIES = [
-  "front_facade",
-  "backyard",
-  "drone",
-  "living",
-  "dining",
-  "kitchen",
-  "primary_bedroom",
-  "primary_bathroom",
-  "other",
-];
-
-// The classification tool — domain lives HERE (Milestone-side); the engine
-// stays generic. The category enum is the migration's nine values exactly.
-const CLASSIFY_TOOL = {
-  name: "classify_photos",
-  description:
-    "Record the category, notable features, and confidence for each listing photo. Reference each photo by the 0-based index it was given in the message.",
-  input_schema: {
-    type: "object",
-    properties: {
-      classifications: {
-        type: "array",
-        description: "One entry per image in the message.",
-        items: {
-          type: "object",
-          properties: {
-            index: {
-              type: "integer",
-              description: "The 0-based index of the image as labeled in the message (Image 0, Image 1, …).",
-            },
-            category: {
-              type: "string",
-              enum: CATEGORIES,
-              description: "The single best-fit category for this photo.",
-            },
-            features: {
-              type: "array",
-              items: { type: "string" },
-              description: "Short notable features visible in the photo (e.g. 'marble island', 'pool', 'vaulted ceiling').",
-            },
-            confidence: {
-              type: "number",
-              description: "Confidence in the category, 0 to 1.",
-            },
-          },
-          required: ["index", "category", "features", "confidence"],
-        },
-      },
-    },
-    required: ["classifications"],
-  },
-};
-
-const SYSTEM_PROMPT = `You are a real-estate photo classifier for a luxury listing media company. You will be shown a set of listing photos, each labeled with a 0-based index (Image 0, Image 1, …). Classify EVERY image into exactly one of these nine categories, and call the classify_photos tool with one entry per image, referencing each by its index.
-
-Categories:
-- front_facade: the FRONT exterior of the home, shot from the ground. Driveway, entry, front yard, street-facing elevation.
-- backyard: the REAR exterior of the home, shot from the ground — including pool, spa, water features, patio, and rear yard.
-- drone: any AERIAL shot (taken from above), whether of the front, rear, or surrounding context/neighborhood.
-- living: the living room / great room / main interior gathering space.
-- dining: the dining room / dedicated eating area.
-- kitchen: the kitchen.
-- primary_bedroom: the primary (master) bedroom specifically.
-- primary_bathroom: the primary (master) bathroom specifically.
-- other: anything outside the eight above — secondary bedrooms, non-primary bathrooms, hallways, garage, closets, laundry, office/bonus rooms, and tight detail/decor shots.
-
-Rules:
-- Classify every image; do not skip any.
-- Reference each image by its given index.
-- When a photo does not clearly fit one of the eight specific buckets, choose 'other' rather than guessing.
-- features: list a few short, concrete things visible in the photo. confidence: your certainty 0–1.`;
 
 // ── helpers ──────────────────────────────────────────────────────────
 
@@ -160,48 +61,6 @@ function bearerFrom(req) {
   return m ? m[1].trim() : null;
 }
 
-// Dedupe an ordered list of photo URLs, dropping falsy values and keeping
-// first occurrence. Each surviving photo's index becomes its sort_order
-// (hero/first = 0). We carry that global sort_order on the descriptor so it
-// stays correct regardless of how the to-classify subset is later chunked.
-function buildPhotoList(propertyData) {
-  const pd = propertyData || {};
-  const raw = [pd.hero_img, ...(Array.isArray(pd.gallery_photos) ? pd.gallery_photos : [])];
-  const seen = new Set();
-  const out = [];
-  for (const url of raw) {
-    if (!url || typeof url !== "string") continue;
-    if (seen.has(url)) continue;
-    seen.add(url);
-    out.push({ url, sortOrder: out.length });
-  }
-  return out;
-}
-
-// Split an array into fixed-size chunks.
-function chunk(arr, size) {
-  const out = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
-// Run `worker` over `items` with at most `limit` concurrent invocations,
-// preserving result order. Workers never throw here — each returns a result
-// object; failures are captured by the worker itself.
-async function runPool(items, limit, worker) {
-  const results = new Array(items.length);
-  let next = 0;
-  const runner = async () => {
-    while (next < items.length) {
-      const idx = next++;
-      results[idx] = await worker(items[idx], idx);
-    }
-  };
-  const n = Math.min(limit, items.length) || 0;
-  await Promise.all(Array.from({ length: n }, runner));
-  return results;
-}
-
 // ── main handler ─────────────────────────────────────────────────────
 
 async function handler(req, res, depsOverride) {
@@ -215,11 +74,7 @@ async function handler(req, res, depsOverride) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const supabase      = depsOverride?.supabase      || defaultSupabase();
-  const model         = depsOverride?.model         || DEFAULT_MODEL;
-  const maxTokens     = depsOverride?.maxTokens     || DEFAULT_MAX_TOKENS;
-  // classifyImages is resolved lazily from the engine unless injected.
-  const classifyImages = depsOverride?.classifyImages || (await getClassifyImages());
+  const supabase = depsOverride?.supabase || defaultSupabase();
 
   try {
     // ── 1. Auth ──
@@ -271,159 +126,41 @@ async function handler(req, res, depsOverride) {
       return res.status(403).json({ error: "listing does not belong to caller" });
     }
 
-    // ── 4. Resolve the linked microsite (prefer published, then newest) ──
-    const { data: micrositeRows, error: msErr } = await supabase
-      .from("microsites")
-      .select("id, property_data, published, created_at")
-      .eq("listing_id", listing_id)
-      .order("published", { ascending: false })
-      .order("created_at", { ascending: false });
-    if (msErr) {
-      console.error("[classify-photos] microsite fetch error:", msErr);
-      return res.status(500).json({ error: "microsite fetch failed", details: msErr.message });
-    }
-    const microsite = Array.isArray(micrositeRows) ? micrositeRows[0] : micrositeRows;
-    if (!microsite) {
-      return res.status(404).json({ error: "no microsite for listing" });
-    }
-    const micrositeId = microsite.id;
-
-    // ── 5. Build the ordered, deduped photo list ──
-    const photos = buildPhotoList(microsite.property_data);
-    if (photos.length === 0) {
-      return res.status(200).json({
-        listing_id,
-        microsite_id: micrositeId,
-        labels: [],
-        classified_count: 0,
-        skipped_agent_corrected_count: 0,
-      });
-    }
-
-    // ── 6. Load existing labels + decide what to classify ──
-    const { data: existingRows, error: exErr } = await supabase
-      .from("photo_labels")
-      .select("*")
-      .eq("listing_id", listing_id);
-    if (exErr) {
-      console.error("[classify-photos] existing labels fetch error:", exErr);
-      return res.status(500).json({ error: "labels fetch failed", details: exErr.message });
-    }
-    const existingByUrl = new Map((existingRows || []).map((r) => [r.photo_url, r]));
-
-    let skippedAgentCorrected = 0;
-    const toClassify = photos.filter((p) => {
-      const existing = existingByUrl.get(p.url);
-      if (existing?.agent_corrected) { skippedAgentCorrected++; return false; } // never touch corrections
-      if (force) return true;          // refresh all non-corrected
-      return !existing;                // incremental: only unlabeled
-    });
-
-    // Helper to re-read all current labels for the listing, ordered.
-    const readAllLabels = async () => {
-      const { data, error } = await supabase
-        .from("photo_labels")
-        .select("*")
-        .eq("listing_id", listing_id)
-        .order("sort_order", { ascending: true });
-      if (error) {
-        console.error("[classify-photos] final labels read error:", error);
-        return [];
-      }
-      return data || [];
-    };
-
-    // ── 6b. Nothing to classify → return existing labels, no model call ──
-    if (toClassify.length === 0) {
-      const labels = await readAllLabels();
-      return res.status(200).json({
-        listing_id,
-        microsite_id: micrositeId,
-        labels,
-        classified_count: 0,
-        skipped_agent_corrected_count: skippedAgentCorrected,
-      });
-    }
-
-    // ── 7. Classify in chunks with bounded concurrency ──
-    const chunks = chunk(toClassify, CHUNK_SIZE);
-    const warnings = [];
-
-    const chunkResults = await runPool(chunks, CONCURRENCY, async (photoChunk, chunkIdx) => {
-      try {
-        const result = await classifyImages({
-          imageUrls:    photoChunk.map((p) => p.url),
-          systemPrompt: SYSTEM_PROMPT,
-          tool:         CLASSIFY_TOOL,
-          model,
-          maxTokens,
-        });
-
-        const classifications = Array.isArray(result?.classifications) ? result.classifications : [];
-        const rows = [];
-        for (const c of classifications) {
-          // Map back OUR way: never trust the model for absolute position.
-          // The returned index is relative to THIS chunk; resolve it to the
-          // photo (which carries its true global sort_order).
-          const photo = photoChunk[c?.index];
-          if (!photo) continue; // index out of range — drop defensively
-          if (!CATEGORIES.includes(c?.category)) {
-            warnings.push(`chunk ${chunkIdx}: dropped photo ${photo.url} — invalid category "${c?.category}"`);
-            continue;
-          }
-          rows.push({
-            listing_id,
-            microsite_id:    micrositeId,
-            photo_url:       photo.url,
-            category:        c.category,
-            features:        Array.isArray(c.features) ? c.features : [],
-            confidence:      typeof c.confidence === "number" ? c.confidence : null,
-            sort_order:      photo.sortOrder,
-            agent_corrected: false,
-            updated_at:      new Date().toISOString(),
-          });
-        }
-        return { ok: true, rows };
-      } catch (err) {
-        console.error(`[classify-photos] chunk ${chunkIdx} classify failed:`, err?.message);
-        warnings.push(`chunk ${chunkIdx} classification failed: ${err?.message || "unknown error"}`);
-        return { ok: false, rows: [] };
-      }
-    });
-
-    const succeeded = chunkResults.filter((r) => r?.ok);
-    const rowsToUpsert = succeeded.flatMap((r) => r.rows);
-
-    // All chunks failed → 502.
-    if (succeeded.length === 0) {
-      return res.status(502).json({
-        error:   "classification failed",
-        details: warnings,
-      });
-    }
-
-    // ── 8. Upsert labels (conflict target listing_id,photo_url) ──
-    if (rowsToUpsert.length > 0) {
-      const { error: upErr } = await supabase
-        .from("photo_labels")
-        .upsert(rowsToUpsert, { onConflict: "listing_id,photo_url" });
-      if (upErr) {
-        console.error("[classify-photos] upsert error:", upErr);
-        return res.status(500).json({ error: "labels upsert failed", details: upErr.message });
-      }
-    }
-
-    // ── 9. Re-read all labels (existing preserved + newly written) ──
-    const labels = await readAllLabels();
-    const payload = {
+    // ── 4. Delegate the work to the shared core ──
+    const result = await classifyForListing({
+      supabase,
       listing_id,
-      microsite_id: micrositeId,
-      labels,
-      classified_count: rowsToUpsert.length,
-      skipped_agent_corrected_count: skippedAgentCorrected,
-    };
-    if (warnings.length) payload.warnings = warnings;
-    return res.status(200).json(payload);
+      force,
+      model:          depsOverride?.model,
+      maxTokens:      depsOverride?.maxTokens,
+      classifyImages: depsOverride?.classifyImages,
+    });
+
+    // ── 5. Stage 2b: emit a partial-failure incident when at least one
+    //       chunk failed. Fires on partial (some chunks OK) AND all-failed
+    //       (502 → the whole classification failed). Never fires when all
+    //       chunks succeeded, even if there were dropped-category warnings
+    //       (those are normal validation events, not a retryable failure).
+    if (result.chunks_failed > 0) {
+      await logIncident({
+        source: "handler",
+        kind: "classify_photos_partial_failure",
+        severity: "medium",
+        subjectType: "listing",
+        subjectId: listing_id,
+        dedupeKey: `listing:${listing_id}:${Math.floor(Date.now() / 3600000)}`,
+        agentId: authUser.id,
+        payload: {
+          chunks_total: result.chunks_total,
+          chunks_failed: result.chunks_failed,
+          warnings_sample: result.warnings.slice(0, 5),
+          force,
+        },
+        errorMessage: result.warnings.slice(0, 3).join(" | "),
+      });
+    }
+
+    return res.status(result.statusCode).json(result.body);
   } catch (err) {
     console.error("[classify-photos] fatal:", err);
     return res.status(500).json({ error: err.message || "internal error" });
