@@ -29,7 +29,8 @@
 import Stripe from "stripe";
 import { createClient } from "@supabase/supabase-js";
 import { grantCreditsFromInvoice, handleTierChange } from "./_lib/credits.js";
-import { withSentry } from "./_lib/sentry.js";
+import { withSentry, setIncidentContext } from "./_lib/sentry.js";
+import { logIncident } from "./_lib/incidents.js";
 
 // Must disable Vercel's body parser so we can verify the raw Stripe signature
 export const config = {
@@ -280,7 +281,23 @@ async function handler(req, res) {
     return res.status(400).json({ error: "Webhook signature verification failed: " + err.message });
   }
 
+  // Stage 0 enrichment — surfaces the event on any downstream Sentry report.
+  setIncidentContext(req, { stripe_event_id: event.id, kind: event.type });
+
   const supabase = getSupabase();
+
+  // Stage 0 observation write — records every verified event so a later stage
+  // can replay/dedupe from this table. NOT a gate today: the switch below
+  // still runs unconditionally. Fail-soft — the webhook must still respond
+  // even if this observation write fails.
+  try {
+    await supabase
+      .from("webhook_events")
+      .upsert(
+        { event_id: event.id, source: "stripe", event_type: event.type },
+        { onConflict: "event_id", ignoreDuplicates: true }
+      );
+  } catch (_) { /* observation only — never break the webhook */ }
 
   try {
     switch (event.type) {
@@ -346,8 +363,33 @@ async function handler(req, res) {
     }
   } catch (err) {
     console.error("Webhook handler error:", err);
+    await logIncident({
+      source: "webhook",
+      kind: "stripe_webhook_handler_error",
+      severity: "high",
+      subjectType: "stripe_event",
+      subjectId: event.id,
+      dedupeKey: `stripe_event:${event.id}`,
+      payload: { event_type: event.type },
+      errorMessage: err?.message || String(err),
+    });
     return res.status(500).json({ error: "Webhook handler error: " + err.message });
   }
+
+  // ── Stage 0: THE ONE deliberate success-path write in Stage 0. ──
+  // Marks the event fully processed. Reached only if the switch above
+  // completed without throwing — any error would have exited via the
+  // catch and returned 500 before this point. The UPDATE is bounded
+  // by a single service-role round-trip to our own Supabase project
+  // (same latency profile as everything else the handler just did),
+  // its result is swallowed on failure, and it cannot change the 200
+  // response body. Response shape and user-visible timing are unaltered.
+  try {
+    await supabase
+      .from("webhook_events")
+      .update({ processed_at: new Date().toISOString() })
+      .eq("event_id", event.id);
+  } catch (_) { /* observation only — success response is authoritative */ }
 
   return res.status(200).json({ received: true });
 }
