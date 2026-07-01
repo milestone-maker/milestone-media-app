@@ -20,7 +20,9 @@
 //   7. Look up the existing microsite row (owner-scoped) and patch its
 //      property_data: append the URL to gallery_photos if missing, or set
 //      video_url if this is a video and it's not already set. If nothing
-//      changed, still bump updated_at as evidence of the run.
+//      changed, skip the UPDATE entirely — public.microsites has no
+//      updated_at column to bump, and the incident's own resolved_at +
+//      notes are the audit trail.
 //   8. Return { outcome, notes }.
 //
 // Never throws — a caught error becomes { outcome:'failed', ... }.
@@ -189,17 +191,20 @@ export async function publishMicrositeRerun({ row, supabase } = {}) {
       }
     }
 
-    // Always bump updated_at as evidence of the run, even if the property_data
-    // didn't need changing (storage upload still verified the byte-level
-    // presence at the destination).
-    const patch = {
-      updated_at: new Date().toISOString(),
-    };
-    if (changed) patch.property_data = pd;
+    // If property_data actually changed, patch it. Otherwise skip the UPDATE
+    // entirely — public.microsites has no updated_at column to bump, and the
+    // incident's own resolved_at + notes + the Slack follow-up are the audit
+    // trail for the run. No row mutation is needed as evidence.
+    if (!changed) {
+      return {
+        outcome: "fixed",
+        notes: `publish-rerun: file_path=${filePath} → published-media/${destPath}; ${notesParts.join("; ")}; row unchanged (no property_data delta)`,
+      };
+    }
 
     const { error: patchErr } = await client
       .from("microsites")
-      .update(patch)
+      .update({ property_data: pd })
       .eq("id", microsite.id)
       .eq("agent_id", agentId); // defense in depth
     if (patchErr) {
