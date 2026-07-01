@@ -11,11 +11,15 @@
 //     dispatcher just forwards their return value on the happy path.
 
 import { cronRerun } from "./executors/cronRerun.js";
+import { publishMicrositeRerun } from "./executors/publishMicrositeRerun.js";
+import { classifyPhotosRerun } from "./executors/classifyPhotosRerun.js";
 
 // Kind -> executor function. Adding a new executor is one line here.
-// Stage 2 slice-1 map — DO NOT expand without an authorized slice bump.
+// Stage 2 slices 1 + 2b — DO NOT expand without an authorized slice bump.
 const KIND_TO_EXECUTOR = Object.freeze({
-  cron_missed_run: cronRerun,
+  cron_missed_run:                       cronRerun,
+  publish_microsite_storage_move_failed: publishMicrositeRerun,
+  classify_photos_partial_failure:       classifyPhotosRerun,
 });
 
 /**
