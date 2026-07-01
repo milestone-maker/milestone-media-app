@@ -50,7 +50,8 @@ import {
 import { INSTAGRAM_MAX_CAROUSEL_IMAGES, LINKEDIN_MAX_GALLERY_IMAGES } from "../shared/carouselPosting.js";
 import { facebookAlbumUrls } from "./_content/selectCarouselPhotos.js";
 import { resolvePublishedMicrositeUrl, substituteMicrositeToken } from "./_lib/microsite.js";
-import { withSentry } from "./_lib/sentry.js";
+import { withSentry, setIncidentContext } from "./_lib/sentry.js";
+import { logIncident } from "./_lib/incidents.js";
 
 const SUPABASE_URL              = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -174,6 +175,7 @@ async function handler(req, res, depsOverride) {
       return res.status(401).json({ error: "invalid or expired session" });
     }
     const authUser = authData.user;
+    setIncidentContext(req, { agent_id: authUser.id });
 
     // ── 1b. Subscription gate (admins exempt) ──
     const { data: agentRow, error: agentErr } = await supabase
@@ -206,6 +208,7 @@ async function handler(req, res, depsOverride) {
     if (!ALLOWED_PLATFORMS.includes(platform)) {
       return res.status(400).json({ error: `platform must be one of: ${ALLOWED_PLATFORMS.join(", ")}` });
     }
+    setIncidentContext(req, { content_id: contentId, platform });
     const isFacebook = platform === "facebook";
     const isLinkedIn = platform === "linkedin";
 
@@ -327,6 +330,7 @@ async function handler(req, res, depsOverride) {
     if (content.agent_id !== authUser.id) {
       return res.status(403).json({ error: "content does not belong to caller" });
     }
+    setIncidentContext(req, { listing_id: content.listing_id });
 
     // ── 4b. Resolve the album (IG: client carousel; FB: server-built from raw photos) ──
     let imageUrls = clientImageUrls;
@@ -406,6 +410,7 @@ async function handler(req, res, depsOverride) {
       if (insErr) console.error("[social-post] tracking insert error:", insErr);
       else trackingId = tracked?.id ?? null;
     }
+    if (trackingId) setIncidentContext(req, { tracking_id: trackingId });
 
     const markFailed = async (message) => {
       if (!trackingId) return;
@@ -433,6 +438,17 @@ async function handler(req, res, depsOverride) {
       } catch (e) {
         console.error("[social-post] bundle upload failed:", e?.status, e?.message);
         await markFailed(`could not upload images to ${platformDisplay(platform)} provider`);
+        await logIncident({
+          source: "handler",
+          kind: "social_post_bundle_upload_failed",
+          severity: "medium",
+          subjectType: "social_post",
+          subjectId: trackingId,
+          dedupeKey: `social_post_upload:${trackingId || `${contentId}:${platform}`}`,
+          agentId: authUser.id,
+          payload: { contentId, platform, teamId, imageUrls },
+          errorMessage: e?.message,
+        });
         return res.status(502).json({ error: `could not upload images to ${platformDisplay(platform)} provider`, details: e?.message });
       }
     }
@@ -470,6 +486,17 @@ async function handler(req, res, depsOverride) {
     } catch (e) {
       console.error("[social-post] bundle create-post failed:", e?.status, e?.message);
       await markFailed(`could not create ${platformDisplay(platform)} post`);
+      await logIncident({
+        source: "handler",
+        kind: "social_post_bundle_create_failed",
+        severity: "medium",
+        subjectType: "social_post",
+        subjectId: trackingId,
+        dedupeKey: `social_post_create:${trackingId || `${contentId}:${platform}`}`,
+        agentId: authUser.id,
+        payload: { contentId, platform, teamId },
+        errorMessage: e?.message,
+      });
       return res.status(502).json({ error: `could not create ${platformDisplay(platform)} post`, details: e?.message });
     }
 
@@ -503,6 +530,21 @@ async function handler(req, res, depsOverride) {
     });
   } catch (err) {
     console.error("[social-post] fatal:", err);
+    const ictx = req?.incidentContext || {};
+    await logIncident({
+      source: "handler",
+      kind: "social_post_handler_error",
+      severity: "high",
+      subjectType: ictx.tracking_id ? "social_post" : "content",
+      subjectId: ictx.tracking_id || ictx.content_id || null,
+      dedupeKey: `social_post_fatal:${ictx.tracking_id || ictx.content_id || "unknown"}:${Math.floor(Date.now() / 3600000)}`,
+      agentId: ictx.agent_id || null,
+      payload: {
+        content_id: ictx.content_id || null,
+        platform: ictx.platform || null,
+      },
+      errorMessage: err?.message || String(err),
+    });
     return res.status(500).json({ error: err.message || "internal error" });
   }
 }

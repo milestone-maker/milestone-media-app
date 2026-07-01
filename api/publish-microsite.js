@@ -34,7 +34,8 @@ import { listingPayloadFromMicrosite } from "./_lib/listingFromMicrosite.js";
 import { geocodeAddress, getNearbySchoolsFromGeo } from "./_lib/schools.js";
 import { withinMicrositeCap, micrositeCapForTier } from "../shared/micrositeAccess.js";
 import { PUBLIC_APP_BASE } from "./_lib/microsite.js";
-import { withSentry } from "./_lib/sentry.js";
+import { withSentry, setIncidentContext } from "./_lib/sentry.js";
+import { logIncident } from "./_lib/incidents.js";
 
 // Best-effort, strictly non-blocking bake of schools + coordinates. Geocodes
 // ONCE, then derives both from that geo. Races the whole thing against a
@@ -130,6 +131,7 @@ async function handler(req, res, depsOverride) {
       return res.status(401).json({ error: "no agent profile for this user" });
     }
     const user = { id: profile.id, role: profile.role };
+    setIncidentContext(req, { agent_id: user.id });
     const subscription = {
       tier: profile.subscription_tier || null,
       status: profile.subscription_status || null,
@@ -154,6 +156,7 @@ async function handler(req, res, depsOverride) {
         error: "bookingId, theme, slug, and propertyData are required",
       });
     }
+    setIncidentContext(req, { booking_id: bookingId, slug });
 
     // ── 4. Fetch the booking ──
     const { data: booking, error: bookingErr } = await supabase
@@ -256,6 +259,22 @@ async function handler(req, res, depsOverride) {
         .download(item.file_path);
       if (dlErr || !blob) {
         console.error("download error for", item.file_path, dlErr);
+        await logIncident({
+          source: "handler",
+          kind: "publish_microsite_storage_move_failed",
+          severity: "medium",
+          subjectType: "booking",
+          subjectId: bookingId,
+          dedupeKey: `booking:${bookingId}:${item.file_path}`,
+          agentId: user.id,
+          payload: {
+            phase: "download",
+            file_path: item.file_path,
+            file_type: item.file_type,
+            slug,
+          },
+          errorMessage: dlErr?.message || "download blob missing",
+        });
         continue;
       }
 
@@ -267,6 +286,22 @@ async function handler(req, res, depsOverride) {
         .upload(destPath, blob, { upsert: true, contentType: blob.type });
       if (upErr) {
         console.error("upload to published-media error:", upErr);
+        await logIncident({
+          source: "handler",
+          kind: "publish_microsite_storage_move_failed",
+          severity: "medium",
+          subjectType: "booking",
+          subjectId: bookingId,
+          dedupeKey: `booking:${bookingId}:${item.file_path}`,
+          agentId: user.id,
+          payload: {
+            phase: "upload",
+            file_path: item.file_path,
+            file_type: item.file_type,
+            slug,
+          },
+          errorMessage: upErr?.message,
+        });
         continue;
       }
 
@@ -433,6 +468,17 @@ async function handler(req, res, depsOverride) {
 
     if (writeErr) {
       console.error("microsite write error:", writeErr);
+      await logIncident({
+        source: "handler",
+        kind: "publish_microsite_write_failed",
+        severity: "high",
+        subjectType: "booking",
+        subjectId: bookingId,
+        dedupeKey: `booking:${bookingId}:${Math.floor(Date.now() / 3600000)}`,
+        agentId: user.id,
+        payload: { slug, theme, error_code: writeErr?.code || null },
+        errorMessage: writeErr?.message,
+      });
       return res.status(500).json({ error: "failed to save microsite: " + writeErr.message });
     }
 
@@ -511,6 +557,18 @@ async function handler(req, res, depsOverride) {
     });
   } catch (err) {
     console.error("publish-microsite error:", err);
+    const ictx = req?.incidentContext || {};
+    await logIncident({
+      source: "handler",
+      kind: "publish_microsite_handler_error",
+      severity: "high",
+      subjectType: ictx.booking_id ? "booking" : null,
+      subjectId: ictx.booking_id || null,
+      dedupeKey: `publish_microsite_fatal:${ictx.booking_id || "unknown"}:${Math.floor(Date.now() / 3600000)}`,
+      agentId: ictx.agent_id || null,
+      payload: { slug: ictx.slug || null },
+      errorMessage: err?.message || String(err),
+    });
     return res.status(500).json({ error: err.message || "internal error" });
   }
 }
